@@ -1,5 +1,7 @@
 # Cloud continuation checkpoint
 
+Cloud continuation after `79f7dd70`: read `CLOUD_VALIDATION.md` first for fresh cloud evidence, changes and remaining blockers. The original checkpoint record below is historical.
+
 The user requested moving ongoing development to a managed cloud environment with Tailscale, following their existing NMLO cloud workflow. Continue this fork in its own checkout; do not edit NMLO.
 
 ## Product goal

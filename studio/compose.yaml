@@ -7,6 +7,7 @@ services:
       dockerfile: tools/build/docker/Dockerfile
     environment:
       LRR_API_KEY: ${LRR_API_KEY:?Set LRR_API_KEY in .env}
+      LRR_WORKER_CONCURRENCY: ${LRR_WORKER_CONCURRENCY:-1}
       LRR_AUTOFIX_PERMISSIONS: "0"
       LRR_UID: "9001"
       LRR_GID: "9001"

@@ -124,6 +124,11 @@ sub start_minion {
 
     if (IS_UNIX) {
         my $numcpus = MCE::Util::get_ncpu();
+        if (defined $ENV{LRR_WORKER_CONCURRENCY}) {
+            die "LRR_WORKER_CONCURRENCY must be an integer from 1 to 32\n"
+                unless $ENV{LRR_WORKER_CONCURRENCY} =~ /\A(?:[1-9]|[12][0-9]|3[0-2])\z/;
+            $numcpus = int($ENV{LRR_WORKER_CONCURRENCY});
+        }
         $logger->info("Starting new Minion worker in subprocess with $numcpus parallel jobs.");
 
         my $worker = $mojo->app->minion->worker;

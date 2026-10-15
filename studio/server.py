@@ -14,6 +14,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from connectors import fetch_comments
 from sources import parse_source
 from store import Store
 
@@ -51,7 +52,8 @@ class Studio:
             ids=self.lrr.json('/api/archives')
             if not isinstance(ids,list):raise ValueError('LANraragi 목록 형식 오류')
             if len(ids)>100000:raise ValueError('이번 동기화 한도를 초과했습니다.')
-            valid=[x for x in ids if isinstance(x,str) and re.fullmatch('[0-9a-f]{40}',x)]
+            archive_ids=[x.get('arcid') if isinstance(x,dict) else x for x in ids]
+            valid=[x for x in archive_ids if isinstance(x,str) and re.fullmatch('[0-9a-f]{40}',x)]
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 metadata=list(pool.map(lambda i:self.lrr.json('/api/archives/'+i+'/metadata'),valid))
             return {'synced':self.store.sync_lrr(metadata)}
@@ -63,7 +65,8 @@ class Studio:
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
         if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
         plugins=self.lrr.json('/api/plugins/metadata')
-        candidates=[x for x in plugins if source['provider'].replace('ehentai','e-hentai') in x.get('name','').lower()]
+        namespace={'ehentai':'ehplugin','hitomi':'hitomiplugin','nhentai':'nhplugin'}[source['provider']]
+        candidates=[x for x in plugins if x.get('namespace')==namespace]
         if not candidates:raise ValueError('해당 사이트의 메타데이터 플러그인이 설치되어 있지 않습니다.')
         response=self.lrr.json('/api/plugins/use','POST',{
             'id':work['lrr_id'],'plugin':candidates[0]['namespace'],'arg':source['url']})
@@ -71,6 +74,16 @@ class Studio:
         tags=data.get('new_tags',data.get('tags',''))
         # Fetching tags must never erase previously imported comments or local title edits.
         return self.store.upsert_source(work_id,{'url':source['url'],'tags':tags,'status':'fetched'})
+
+    def fetch_comments(self, work_id, source_id):
+        work=self.store.get_work(work_id)
+        source=next((s for s in work['sources'] if s['id']==source_id),None)
+        if not source:raise KeyError('출처를 찾을 수 없습니다.')
+        if source['comments_fetched'] and time.time()-source['comments_fetched']<60:
+            raise ValueError('댓글 갱신은 출처별 60초 간격으로 가능합니다.')
+        result=fetch_comments(source['url'])
+        self.store.apply_comments(work_id,source_id,result)
+        return {'status':result['status'],'message':result['message']}
 
     def nas_loop(self):
         while not self.stop.wait(2):
@@ -82,8 +95,10 @@ class Studio:
                     self.store.report(job['id'],job['lease'],'blocked',
                                       '이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 엔진 작업자를 연결하세요.')
                     continue
+                self.store.report(job['id'],job['lease'],'running','원격 다운로드 제출 중',{'submission':'pending'})
                 response=self.lrr.json('/api/download_url','POST',{'url':job['url']})
                 remote_id=str(response['job'])
+                self.store.report(job['id'],job['lease'],'running','서버 작업 등록 완료',{'remote_job':remote_id})
                 while not self.stop.wait(2):
                     status=self.lrr.json('/api/minion/'+remote_id+'/detail')
                     state=status.get('state')
@@ -103,7 +118,7 @@ class Studio:
 
 def public_error(error):
     if isinstance(error,urllib.error.HTTPError):
-        return f'LANraragi 연결 오류 (HTTP {error.code})'
+        return f'외부 서버 연결 오류 (HTTP {error.code})'
     if isinstance(error,(urllib.error.URLError,TimeoutError,OSError)):
         return '서버에 연결할 수 없습니다. 연결 설정과 실행 상태를 확인하세요.'
     if isinstance(error,(ValueError,KeyError)):
@@ -124,7 +139,11 @@ class Handler(BaseHTTPRequestHandler):
     def authorized(self):
         auth=self.headers.get('Authorization','')
         token=os.environ.get('STUDIO_WORKER_TOKEN','')
-        if token and hmac.compare_digest(auth,'Bearer '+token):return True
+        if token and hmac.compare_digest(auth,'Bearer '+token):
+            if self.command=='POST' and re.fullmatch(r'/api/worker/(claim|[0-9a-f]{32}/report)', urllib.parse.urlsplit(self.path).path):
+                return True
+            self.respond({'error':'Worker token is restricted to worker endpoints'},403)
+            return False
         password=os.environ.get('STUDIO_PASSWORD','')
         if password:
             expected='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
@@ -164,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:info={};connected=False
             return self.respond(dict(status='ok',lanraragi_connected=connected,
                                      version=info.get('version'),targets=['nas','pc'],
-                                     comment_fetch='import-only',metadata_fetch='installed-plugins',
+                                     comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'unsupported','hitomi':'unsupported'},metadata_fetch='installed-plugins',
                                      command_workers='operator-configured'))
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
@@ -173,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.get_work(match[1]))
         if path=='/api/jobs':
             # Worker leases are credentials, never expose them in the browser list.
-            return self.respond([{k:v for k,v in j.items() if k not in ('lease','lease_until')} for j in store.jobs()])
+            return self.respond([store.public_job(j) for j in store.jobs()])
         if path=='/api/export':
             return self.respond(store.export())
         match=re.fullmatch(r'/api/media/([0-9a-f]{40})/(thumbnail|download|files|page)',path)
@@ -229,13 +248,23 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.upsert_source(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)
         if match:return self.respond(self.app.fetch_metadata(match[1],match[2]))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/comments/fetch',path)
+        if match:return self.respond(self.app.fetch_comments(match[1],match[2]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/progress',path)
         if match:
             store.progress(match[1],data.get('page'));return self.respond({'success':True})
         if path=='/api/jobs':
-            return self.respond(store.queue(data.get('url'),data.get('target'),data.get('engine'),data.get('work_id')),201)
+            return self.respond(store.public_job(store.queue(data.get('url'),data.get('target'),data.get('engine'),data.get('work_id'))),201)
         match=re.fullmatch('/api/jobs/([0-9a-f]{32})/retry',path)
-        if match:store.retry(match[1]);return self.respond({'success':True})
+        if match:
+            store.expire_jobs()
+            job=store.job(match[1]);remote=json.loads(job['result']).get('remote_job')
+            if job['engine']=='lanraragi' and remote:
+                if not re.fullmatch(r'[0-9]+',str(remote)):raise ValueError('잘못된 원격 작업 ID입니다.')
+                status=self.app.lrr.json('/api/minion/'+str(remote)+'/detail')
+                store.reconcile_remote(job['id'],remote,status.get('state'))
+                if status.get('state')=='finished':return self.respond({'success':True,'reconciled':True})
+            store.retry(match[1]);return self.respond({'success':True})
         if path.startswith('/api/worker/'):
             token=os.environ.get('STUDIO_WORKER_TOKEN','')
             if not token or not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+token):

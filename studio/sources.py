@@ -23,7 +23,7 @@ def parse_source(url):
             match = re.fullmatch(r'/(?:manga|doujinshi|artistcg|gamecg|imageset)/[^/]+-(\d+)\.html', value.path)
         if match:
             return dict(provider='hitomi', external_id=match[1],
-                        url=f'https://hitomi.la/galleries/{match[1]}.html')
+                        url='https://hitomi.la'+value.path)
     if host == 'nhentai.net':
         match = re.fullmatch(r'/g/(\d+)/?', value.path)
         if match:
@@ -50,5 +50,5 @@ def comments_list(value):
         if not isinstance(item, dict) or not isinstance(item.get('text'), str):
             raise ValueError('댓글에는 text 필드가 필요합니다.')
         result.append({k: str(item.get(k, ''))[:20000 if k == 'text' else 500]
-                       for k in ('id', 'author', 'text', 'posted_at')})
+                       for k in ('id', 'author', 'text', 'posted_at', 'source_url', 'collector', 'fetched_at')})
     return result

@@ -21,3 +21,5 @@ studio/.env
 studio/__pycache__/
 studio/tests/__pycache__/
 studio/test-results/
+
+/work/

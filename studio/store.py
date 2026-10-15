@@ -45,6 +45,10 @@ class Store:
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
             ''')
 
+            columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
+            for name,definition in [('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
+                if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
+
     @contextlib.contextmanager
     def db(self):
         db = sqlite3.connect(self.path, timeout=20)
@@ -178,6 +182,20 @@ class Store:
                         fetched,data.get('status','manual')))
         return self.get_work(work_id)
 
+    def apply_comments(self, work_id, source_id, result):
+        if result['status']=='unsupported':return
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM sources WHERE id=? AND work_id=?',(source_id,work_id)).fetchone()
+            if not row:raise KeyError('출처를 찾을 수 없습니다.')
+            existing=json.loads(row['comments'])
+            # Stable IDs are scoped to this source; omitted/deleted comments stay archived.
+            updates={item['id']:item for item in result['comments']}
+            merged=[updates.pop(item['id'],item) if item.get('id') else item for item in existing]
+            merged.extend(updates.values())
+            db.execute('UPDATE sources SET comments=?,comments_fetched=?,comments_status=? WHERE id=?',
+                       (json.dumps(comments_list(merged),ensure_ascii=False),result['fetched_at'],result['status'],source_id))
+
     def sync_lrr(self, archives):
         count = 0
         for item in archives:
@@ -191,14 +209,14 @@ class Store:
             if row:
                 with self.db() as db:
                     db.execute('UPDATE works SET pages=?,bytes=? WHERE id=?',
-                               (int(item.get('pagecount') or 0),int(item.get('arcsize') or 0),row['id']))
+                               (int(item.get('pagecount') or 0),int(item.get('arcsize') or item.get('size') or 0),row['id']))
                     if not row['title_locked']:
                         db.execute('UPDATE works SET title=?,artist=?,tags=? WHERE id=?',
                                    (item.get('title') or lrr_id,artist,json.dumps(tags,ensure_ascii=False),row['id']))
                 work = self.get_work(row['id'])
             else:
                 work = self.create_work(item.get('title') or lrr_id,artist,lrr_id,
-                                        item.get('pagecount') or 0,item.get('arcsize') or 0,tags)
+                                        item.get('pagecount') or 0,item.get('arcsize') or item.get('size') or 0,tags)
             for tag in tags:
                 if tag.startswith('source:'):
                     value = tag.split(':',1)[1].strip()
@@ -237,7 +255,17 @@ class Store:
             if not row:raise KeyError('작업을 찾을 수 없습니다.')
             return dict(row)
 
+    @staticmethod
+    def public_job(job):
+        return {k:v for k,v in job.items() if k not in ('lease','lease_until')}
+
+    def expire_jobs(self):
+        now=time.time()
+        with self.db() as db:
+            db.execute("UPDATE jobs SET state='blocked',lease=NULL,lease_until=NULL,message='임대 만료: 출력 폴더와 원격 작업을 확인한 뒤 다시 시도하세요.',updated=? WHERE state='running' AND lease_until<?",(now,now))
+
     def jobs(self):
+        self.expire_jobs()
         with self.db() as db:
             return [dict(x) for x in db.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 200')]
 
@@ -248,7 +276,7 @@ class Store:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             # Expired command tasks need explicit retry: a crashed engine might still be writing.
-            db.execute("UPDATE jobs SET state='blocked',message='Worker lease expired; inspect output before retry',updated=? WHERE state='running' AND lease_until<?",(now,now))
+            db.execute("UPDATE jobs SET state='blocked',lease=NULL,lease_until=NULL,message='임대 만료: 출력 폴더와 원격 작업을 확인한 뒤 다시 시도하세요.',updated=? WHERE state='running' AND lease_until<?",(now,now))
             row=db.execute("SELECT * FROM jobs WHERE target=? AND engine=? AND state='queued' ORDER BY created LIMIT 1",(target,engine)).fetchone()
             if not row:return None
             lease=secrets.token_urlsafe(32)
@@ -266,14 +294,37 @@ class Store:
                 raise ValueError('만료되었거나 잘못된 작업 임대입니다.')
             if row['lease_until'] < time.time():
                 raise ValueError('작업 임대가 만료됐습니다.')
+            if result is not None and (not isinstance(result,dict) or len(json.dumps(result))>32768):
+                raise ValueError('작업 결과는 32KiB 이내 JSON 객체여야 합니다.')
+            if row['engine']=='command' and state=='complete':
+                if not isinstance(result,dict) or type(result.get('files')) is not int or result['files']<1 or type(result.get('bytes')) is not int or result['bytes']<1 or not re.fullmatch(job_id+r'-[0-9a-f]{16}',str(result.get('directory',''))):
+                    raise ValueError('완료 보고에 파일 수, 크기와 시도별 출력 폴더가 필요합니다.')
             db.execute('UPDATE jobs SET state=?,message=?,result=?,updated=?,lease_until=? WHERE id=?',
-                       (state,str(message)[:2000],json.dumps(result or {},ensure_ascii=False),time.time(),time.time()+120,job_id))
+                       (state,str(message)[:2000],json.dumps(result if result is not None else json.loads(row['result']),ensure_ascii=False),time.time(),time.time()+120,job_id))
+
+    def reconcile_remote(self, job_id, remote_id, state):
+        """Resolve an expired upstream job without submitting another download."""
+        if state not in ('finished','failed'):
+            raise ValueError('원격 작업이 진행 중이거나 상태를 확인할 수 없습니다. 다시 제출하지 않았습니다.')
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
+            if not row or row['state'] not in ('blocked','failed') or json.loads(row['result']).get('remote_job')!=remote_id:
+                raise ValueError('원격 작업 상태가 변경됐습니다. 새로 고침하세요.')
+            result=json.loads(row['result'])
+            if state=='failed':result['previous_remote_job']=result.pop('remote_job')
+            db.execute('UPDATE jobs SET state=?,result=?,message=?,updated=? WHERE id=?',
+                       ('complete' if state=='finished' else 'failed',json.dumps(result),
+                        '원격 작업 확인: '+state,time.time(),job_id))
 
     def retry(self, job_id):
         with self.db() as db:
-            row=db.execute('SELECT state FROM jobs WHERE id=?',(job_id,)).fetchone()
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             if not row or row['state'] not in ('failed','blocked'):
                 raise ValueError('실패하거나 중단된 작업만 다시 시도할 수 있습니다.')
+            if row['engine']=='lanraragi' and (json.loads(row['result']).get('remote_job') or json.loads(row['result']).get('submission')=='pending'):
+                raise ValueError('원격 작업이 남아 있습니다. 상태를 확인한 뒤 중복 다운로드 없이 처리해야 합니다.')
             db.execute("UPDATE jobs SET state='queued',lease=NULL,remote_id=NULL,message='',updated=? WHERE id=?",(time.time(),job_id))
 
     def export(self):

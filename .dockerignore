@@ -2,3 +2,9 @@ tools/_screenshots
 tools/Documentation
 tools/build/windows
 tools/build/homebrew
+.git
+studio/.env
+studio/data
+studio/test-results
+**/__pycache__
+work

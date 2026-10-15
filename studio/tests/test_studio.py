@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from connectors import fetch_comments
 from sources import parse_source
 from store import Store
 from server import Studio, make_server
@@ -31,6 +32,40 @@ class CatalogTests(unittest.TestCase):
         self.temp=temporary_directory();self.addCleanup(self.temp.cleanup)
         self.store=Store(Path(self.temp.name)/'catalog.db')
         self.work=self.store.create_work('A quiet library','Example Artist')
+
+    def test_hitomi_identity_preserves_full_original_url(self):
+        url='https://hitomi.la/doujinshi/synthetic-work-123.html'
+        self.assertEqual(parse_source(url),{'provider':'hitomi','external_id':'123','url':url})
+
+    def test_comment_connector_limits_and_preserves_source_provenance(self):
+        url='https://nhentai.net/g/123/'
+        payload=[{'id':n,'poster':{'username':'Fixture'},'body':'Synthetic comment','post_date':1700000000} for n in range(101)]
+        result=fetch_comments(url,lambda endpoint:payload)
+        self.assertEqual(result['status'],'limited')
+        self.assertEqual(len(result['comments']),100)
+        self.assertEqual(result['comments'][0]['source_url'],url)
+        source=self.store.upsert_source(self.work['id'],{'url':url,'comments':[{'id':'archived','text':'preserve'}]})['sources'][0]
+        self.store.apply_comments(self.work['id'],source['id'],result)
+        payload[0]['body']='Updated fixture'
+        refreshed=fetch_comments(url,lambda endpoint:payload[:1])
+        self.store.apply_comments(self.work['id'],source['id'],refreshed)
+        comments=self.store.get_work(self.work['id'])['sources'][0]['comments']
+        self.assertEqual(len(comments),101)
+        self.assertEqual(next(c for c in comments if c['id']=='0')['text'],'Updated fixture')
+        self.assertEqual(comments[0]['id'],'archived')
+
+    def test_unsupported_comments_make_no_network_request(self):
+        def forbidden(endpoint):raise AssertionError('Unexpected network call')
+        for url in ['https://hitomi.la/galleries/123.html','https://e-hentai.org/g/123/abc/']:
+            self.assertEqual(fetch_comments(url,forbidden)['status'],'unsupported')
+
+    def test_invalid_comment_response_preserves_saved_comments(self):
+        url='https://nhentai.net/g/123/'
+        source=self.store.upsert_source(self.work['id'],{'url':url,'comments':[{'id':'1','text':'keep'}]})['sources'][0]
+        with self.assertRaises(ValueError):
+            result=fetch_comments(url,lambda endpoint:{'challenge':'login required'})
+            self.store.apply_comments(self.work['id'],source['id'],result)
+        self.assertEqual(self.store.get_work(self.work['id'])['sources'][0]['comments'][0]['text'],'keep')
 
     def test_source_numbers_are_namespaced(self):
         self.store.upsert_source(self.work['id'],{'url':'https://e-hentai.org/g/123/abc/'})
@@ -68,13 +103,26 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.list_works(sort='title;DROP TABLE works')
         with self.assertRaises(ValueError):self.store.list_works(limit=100000)
 
+    def test_complete_report_requires_a_nonempty_output_manifest_summary(self):
+        job=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
+        claim=self.store.claim('pc','command')
+        with self.assertRaises(ValueError):self.store.report(job['id'],claim['lease'],'complete',result={'files':0})
+        self.assertEqual(self.store.job(job['id'])['state'],'running')
+
+    def test_ambiguous_upstream_submission_is_never_blindly_retried(self):
+        job=self.store.queue('https://hitomi.la/galleries/123.html','nas','lanraragi')
+        claim=self.store.claim('nas','lanraragi')
+        self.store.report(job['id'],claim['lease'],'running',result={'submission':'pending'})
+        self.store.report(job['id'],claim['lease'],'failed','Synthetic connection lost after POST')
+        with self.assertRaises(ValueError):self.store.retry(job['id'])
+
     def test_worker_claim_is_exclusive_and_targeted(self):
         job=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
         self.assertIsNone(self.store.claim('nas','command'))
         claim=self.store.claim('pc','command');self.assertEqual(claim['id'],job['id'])
         self.assertIsNone(self.store.claim('pc','command'))
         with self.assertRaises(ValueError):self.store.report(job['id'],'wrong','complete')
-        self.store.report(job['id'],claim['lease'],'complete','checked',{'files':2})
+        self.store.report(job['id'],claim['lease'],'complete','checked',{'files':2,'bytes':2,'directory':job['id']+'-'+'a'*16})
         with self.assertRaises(ValueError):self.store.report(job['id'],claim['lease'],'failed')
 
     def test_queue_is_idempotent_for_active_jobs(self):
@@ -116,7 +164,59 @@ class CatalogTests(unittest.TestCase):
         run_job({'id':'c'*32,'url':'https://hitomi.la/galleries/1.html'},command,Path(self.temp.name)/'downloads',lambda *a:events.append(a))
         self.assertEqual(events[-1][0],'complete')
         self.assertEqual(events[-1][2]['files'],1)
-        self.assertTrue((Path(self.temp.name)/'downloads'/('c'*32)/'studio-manifest.json').exists())
+        self.assertTrue((Path(self.temp.name)/'downloads'/events[-1][2]['directory']/'studio-manifest.json').exists())
+
+
+    def test_engine_heartbeat_failure_stops_engine_without_completion(self):
+        events=[]
+        def report(*event):
+            events.append(event)
+            if len(events)>1:raise OSError('synthetic heartbeat outage')
+        command=[sys.executable,'-c','import time;time.sleep(30)','{url}','{output}']
+        started=time.monotonic()
+        with self.assertRaises(RuntimeError):
+            run_job({'id':'e'*32,'url':'https://hitomi.la/galleries/1.html'},command,Path(self.temp.name)/'downloads',report,heartbeat_interval=0.01)
+        self.assertLess(time.monotonic()-started,5)
+        self.assertFalse(any(e[0]=='complete' for e in events))
+
+    def test_remote_reconciliation_completes_without_new_submission(self):
+        job=self.store.queue('https://hitomi.la/galleries/123.html','nas','lanraragi')
+        claim=self.store.claim('nas','lanraragi')
+        self.store.report(job['id'],claim['lease'],'blocked',result={'remote_job':'42'})
+        with self.assertRaises(ValueError):self.store.reconcile_remote(job['id'],'42','active')
+        self.store.reconcile_remote(job['id'],'42','finished')
+        self.assertEqual(self.store.job(job['id'])['state'],'complete')
+        self.assertIsNone(self.store.claim('nas','lanraragi'))
+
+    def test_upstream_retry_cannot_duplicate_existing_remote_job(self):
+        job=self.store.queue('https://hitomi.la/galleries/123.html','nas','lanraragi')
+        claim=self.store.claim('nas','lanraragi')
+        self.store.report(job['id'],claim['lease'],'failed',result={'remote_job':'42'})
+        with self.assertRaises(ValueError):self.store.retry(job['id'])
+
+    def test_retry_uses_new_directory_and_preserves_previous_files(self):
+        events=[]
+        job={'id':'d'*32,'url':'https://hitomi.la/galleries/1.html'}
+        command=[sys.executable,'-c',"from pathlib import Path;import sys;Path(sys.argv[2],'01.jpg').write_bytes(b'fixture')",'{url}','{output}']
+        root=Path(self.temp.name)/'downloads'
+        run_job(job,command,root,lambda *a:events.append(a))
+        first=events[-1][2]['directory']
+        run_job(job,command,root,lambda *a:events.append(a))
+        self.assertNotEqual(first,events[-1][2]['directory'])
+        self.assertEqual((root/first/'01.jpg').read_bytes(),b'fixture')
+
+    def test_expired_upstream_result_survives_heartbeat_and_restart(self):
+        job=self.store.queue('https://hitomi.la/galleries/123.html','nas','lanraragi')
+        claim=self.store.claim('nas','lanraragi')
+        self.store.report(job['id'],claim['lease'],'running',result={'remote_job':'42'})
+        self.store.report(job['id'],claim['lease'],'running')
+        with self.store.db() as db:db.execute('UPDATE jobs SET lease_until=?',(time.time()-1,))
+        restarted=Store(self.store.path)
+        public=restarted.public_job(restarted.jobs()[0])
+        self.assertEqual(public['state'],'blocked')
+        self.assertEqual(json.loads(public['result']),{'remote_job':'42'})
+        self.assertNotIn('lease',public)
+        with self.assertRaises(ValueError):restarted.report(job['id'],claim['lease'],'complete')
 
 
 class HTTPTests(unittest.TestCase):
@@ -127,7 +227,7 @@ class HTTPTests(unittest.TestCase):
         class FakeLRR:
             def json(self,path,*args):
                 if path=='/api/info':return {'version':'test'}
-                if path=='/api/archives':return ['a'*40]
+                if path=='/api/archives':return [{'arcid':'a'*40}]
                 if path.endswith('/metadata'):return {'arcid':'a'*40,'title':'Fixture book','pagecount':4,'tags':'artist:example'}
                 raise ValueError('Unknown fake endpoint')
         self.app=Studio(Store(Path(self.temp.name)/'http.db'),FakeLRR())
@@ -161,6 +261,44 @@ class HTTPTests(unittest.TestCase):
     def test_worker_endpoints_require_worker_token(self):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/worker/claim',{'target':'pc'})
         self.assertEqual(error.exception.code,403)
+
+
+    def test_worker_http_claim_engine_and_reports_complete_end_to_end(self):
+        with self.request('/api/jobs',{'url':'https://hitomi.la/galleries/123.html','target':'pc','engine':'command'}) as response:
+            queued=json.load(response)
+        def worker_request(path,body):
+            request=urllib.request.Request(self.url+path,data=json.dumps(body).encode(),headers={
+                'Authorization':'Bearer worker-test-token','Content-Type':'application/json'})
+            with urllib.request.urlopen(request,timeout=5) as response:return json.load(response)
+        claim=worker_request('/api/worker/claim',{'target':'pc'})
+        def report(state,message='',result=None):
+            return worker_request('/api/worker/'+claim['id']+'/report',{'lease':claim['lease'],'state':state,'message':message,'result':result})
+        command=[sys.executable,'-c',"from pathlib import Path;import sys;Path(sys.argv[2],'01.png').write_bytes(b'synthetic')",'{url}','{output}']
+        run_job(claim,command,Path(self.temp.name)/'downloads',report)
+        job=self.app.store.job(queued['id'])
+        self.assertEqual(job['state'],'complete')
+        result=json.loads(job['result'])
+        manifest=json.loads((Path(self.temp.name)/'downloads'/result['directory']/'studio-manifest.json').read_text())
+        self.assertEqual(manifest[0]['bytes'],9)
+        self.assertEqual(result['files'],1)
+
+    def test_worker_token_cannot_read_or_mutate_library(self):
+        for path,body in [('/',None),('/api/export',None),('/api/works',{'title':'Unauthorized'}),('/api/sync',{})]:
+            headers={'Authorization':'Bearer worker-test-token','Content-Type':'application/json'}
+            req=urllib.request.Request(self.url+path,data=None if body is None else json.dumps(body).encode(),headers=headers)
+            with self.subTest(path=path),self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(req,timeout=5)
+            self.assertEqual(error.exception.code,403)
+
+    def test_duplicate_queue_response_never_exposes_running_lease(self):
+        data={'url':'https://hitomi.la/galleries/123.html','target':'pc','engine':'command'}
+        with self.request('/api/jobs',data):pass
+        claim=self.app.store.claim('pc','command')
+        with self.request('/api/jobs',data) as response:
+            value=json.load(response)
+        self.assertEqual(value['id'],claim['id'])
+        self.assertNotIn('lease',value)
+        self.assertNotIn('lease_until',value)
 
     def test_nonloopback_development_is_rejected(self):
         with self.assertRaises(ValueError):make_server('0.0.0.0',0,self.app,dev=True)
