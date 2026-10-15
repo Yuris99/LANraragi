@@ -4,6 +4,12 @@ For the current deployment candidate, site-support matrix and operational proced
 
 A personal web library built on this LANraragi fork, with a separate small Python/SQLite service for cross-site identities, source-specific metadata and download routing. This is an initial implementation, not a finished release.
 
+## Image display defaults
+
+The normal `/` screen pixelates thumbnails, detail covers and reader pages by default. Open `/unsen` explicitly for the original display; returning to `/` restores pixelation. Both routes require the same authentication. The display mode is determined by the route, not a saved browser toggle. This is a viewing preference: original media, authenticated media endpoints and archive downloads are unchanged.
+
+The default HTML starts masked before JavaScript initializes. Images remain hidden while their low-resolution canvas is prepared, and a canvas failure keeps the mask. `python -B studio/tests/mosaic_smoke.py` checks these behaviors with synthetic images, including desktop/mobile layouts.
+
 ## Current implementation
 
 - Korean thumbnail/list interface, title/artist/tag/source-ID search, pagination, eight sort modes, cover sizes and reading direction.

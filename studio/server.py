@@ -235,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
                 while block:=response.read(256*1024):self.wfile.write(block)
             return
         if path.startswith('/api/'):return self.respond({'error':'찾을 수 없습니다.'},404)
-        assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        assets={'/':'index.html','/unsen':'index.html','/unsen/':'index.html','/app.js':'app.js','/style.css':'style.css'}
         filename=assets.get(path)
         if not filename:return self.respond({'error':'찾을 수 없습니다.'},404)
         raw=(HERE/'web'/filename).read_bytes()

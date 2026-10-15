@@ -286,7 +286,7 @@ class HTTPTests(unittest.TestCase):
         return urllib.request.urlopen(req,timeout=5)
 
     def test_authentication_covers_static_and_catalog(self):
-        for path in ['/','/api/works','/api/export','/app.js']:
+        for path in ['/','/unsen','/unsen/','/api/works','/api/export','/app.js']:
             with self.subTest(path=path),self.assertRaises(urllib.error.HTTPError) as error:self.request(path,auth=False)
             self.assertEqual(error.exception.code,401)
 
