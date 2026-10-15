@@ -1,0 +1,20 @@
+# Managed-cloud validation only. Preserve proxy defaults and mount CA read-only.
+services:
+  lanraragi:
+    environment:
+      MOJO_CA_FILE: /run/studio-cloud-ca.pem
+      SSL_CERT_FILE: /run/studio-cloud-ca.pem
+      PERL_LWP_SSL_CA_FILE: /run/studio-cloud-ca.pem
+    volumes:
+      - type: bind
+        source: ${STUDIO_CLOUD_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}
+        target: /run/studio-cloud-ca.pem
+        read_only: true
+  studio:
+    environment:
+      SSL_CERT_FILE: /run/studio-cloud-ca.pem
+    volumes:
+      - type: bind
+        source: ${STUDIO_CLOUD_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}
+        target: /run/studio-cloud-ca.pem
+        read_only: true

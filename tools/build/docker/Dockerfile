@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # DOCKER-VERSION 0.3.4
 FROM  alpine:3.24 AS base
 LABEL git="https://github.com/Difegue/LANraragi"
@@ -43,7 +44,9 @@ fi
 WORKDIR /home/koyomi/lanraragi
 
 # Install base packages
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache \
     tzdata \
     valkey \
     valkey-cli \
@@ -66,7 +69,9 @@ RUN chown koyomi:koyomi .
 FROM base AS build
 
 # Install build packages
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache \
     g++ \
     make \
     pkgconf \
@@ -89,14 +94,20 @@ COPY --chown=koyomi:koyomi /tools/cpanfile /tools/install.pl /tools/build/docker
 USER koyomi
 
 # Install perl dependencies
-RUN ./tools/install-perl-deps.sh
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then \
+      export SSL_CERT_FILE=/run/secrets/proxy_ca CURL_CA_BUNDLE=/run/secrets/proxy_ca \
+        PERL_LWP_SSL_CA_FILE=/run/secrets/proxy_ca; \
+    fi; ./tools/install-perl-deps.sh
 
 # Copy package.json
 COPY --chown=koyomi:koyomi /package.json package.json
 COPY --chown=koyomi:koyomi /package-lock.json package-lock.json
 
 # Install npm dependencies
-RUN perl ./tools/install.pl install-front && rm -rf public/js/vendor/*.map public/css/vendor/*.map
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    perl ./tools/install.pl install-front && rm -rf public/js/vendor/*.map public/css/vendor/*.map
 
 FROM base AS runtime
 
@@ -122,6 +133,10 @@ COPY --chown=koyomi:koyomi /locales locales
 COPY --chown=koyomi:koyomi /templates templates
 COPY --chown=koyomi:koyomi /public public
 COPY --chown=koyomi:koyomi /lib lib
+
+# Source checkout umasks must not prevent a reviewed non-default runtime UID
+# from reading image code. No mounted media or runtime secrets exist at build time.
+RUN chmod -R a+rX /home/koyomi/perl5 /home/koyomi/lanraragi
 
 # Persistent volumes
 VOLUME [ "/home/koyomi/lanraragi/content" ]

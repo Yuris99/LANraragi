@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import signal
 import sys
 import tempfile
 import threading
@@ -58,6 +59,13 @@ class CatalogTests(unittest.TestCase):
         def forbidden(endpoint):raise AssertionError('Unexpected network call')
         for url in ['https://hitomi.la/galleries/123.html','https://e-hentai.org/g/123/abc/']:
             self.assertEqual(fetch_comments(url,forbidden)['status'],'unsupported')
+
+    def test_failed_comment_attempt_remains_rate_limited_after_restart(self):
+        source=self.store.upsert_source(self.work['id'],{'url':'https://nhentai.net/g/123/'})['sources'][0]
+        self.store.begin_comment_fetch(self.work['id'],source['id'])
+        restarted=Store(self.store.path)
+        with self.assertRaises(ValueError):restarted.begin_comment_fetch(self.work['id'],source['id'])
+        self.assertIsNone(restarted.get_work(self.work['id'])['sources'][0]['comments_fetched'])
 
     def test_invalid_comment_response_preserves_saved_comments(self):
         url='https://nhentai.net/g/123/'
@@ -125,6 +133,20 @@ class CatalogTests(unittest.TestCase):
         self.store.report(job['id'],claim['lease'],'complete','checked',{'files':2,'bytes':2,'directory':job['id']+'-'+'a'*16})
         with self.assertRaises(ValueError):self.store.report(job['id'],claim['lease'],'failed')
 
+    def test_queue_source_identity_deduplicates_url_variants_but_not_sites(self):
+        first=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
+        variant=self.store.queue('https://hitomi.la/reader/123.html','pc','command')
+        different=self.store.queue('https://nhentai.net/g/123/','pc','command')
+        self.assertEqual(first['id'],variant['id'])
+        self.assertNotEqual(first['id'],different['id'])
+
+    def test_retry_cannot_duplicate_another_active_job_for_same_source(self):
+        first=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
+        claim=self.store.claim('pc','command')
+        self.store.report(first['id'],claim['lease'],'failed')
+        self.store.queue('https://hitomi.la/reader/123.html','pc','command')
+        with self.assertRaises(ValueError):self.store.retry(first['id'])
+
     def test_queue_is_idempotent_for_active_jobs(self):
         a=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
         b=self.store.queue('https://hitomi.la/galleries/123.html','pc','command')
@@ -166,6 +188,25 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(events[-1][2]['files'],1)
         self.assertTrue((Path(self.temp.name)/'downloads'/events[-1][2]['directory']/'studio-manifest.json').exists())
 
+
+    @unittest.skipUnless(os.name=='posix' and Path('/proc').exists(),'POSIX process-group test')
+    def test_heartbeat_failure_stops_child_that_ignores_termination(self):
+        pidfile=Path(self.temp.name)/'child.pid'
+        code="import subprocess,sys,time;from pathlib import Path;p=subprocess.Popen([sys.executable,'-c','import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(30)']);Path(sys.argv[3]).write_text(str(p.pid));time.sleep(30)"
+        command=[sys.executable,'-c',code,'{url}','{output}',str(pidfile)]
+        events=[]
+        def report(*event):
+            events.append(event)
+            if len(events)>1:
+                deadline=time.monotonic()+2
+                while not pidfile.exists() and time.monotonic()<deadline:time.sleep(0.01)
+                raise OSError('Synthetic lost lease heartbeat')
+        with self.assertRaises(RuntimeError):
+            run_job({'id':'f'*32,'url':'https://hitomi.la/galleries/1.html'},command,Path(self.temp.name)/'downloads',report,heartbeat_interval=0.2)
+        pid=int(pidfile.read_text());state=Path(f'/proc/{pid}/stat')
+        deadline=time.monotonic()+2
+        while state.exists() and state.read_text().split()[2]!='Z' and time.monotonic()<deadline:time.sleep(0.02)
+        self.assertTrue(not state.exists() or state.read_text().split()[2]=='Z')
 
     def test_engine_heartbeat_failure_stops_engine_without_completion(self):
         events=[]
@@ -281,6 +322,24 @@ class HTTPTests(unittest.TestCase):
         manifest=json.loads((Path(self.temp.name)/'downloads'/result['directory']/'studio-manifest.json').read_text())
         self.assertEqual(manifest[0]['bytes'],9)
         self.assertEqual(result['files'],1)
+
+    def test_target_scoped_token_cannot_claim_other_device_jobs(self):
+        self.app.store.queue('https://hitomi.la/galleries/123.html','nas','command')
+        with patch.dict(os.environ,{'STUDIO_PC_WORKER_TOKEN':'pc-scoped-token'}):
+            req=urllib.request.Request(self.url+'/api/worker/claim',data=b'{"target":"nas"}',headers={
+                'Authorization':'Bearer pc-scoped-token','Content-Type':'application/json'})
+            with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req,timeout=5)
+            self.assertEqual(error.exception.code,403)
+        self.assertEqual(self.app.store.jobs()[0]['state'],'queued')
+
+    def test_nas_token_cannot_report_pc_job_even_with_its_lease(self):
+        job=self.app.store.queue('https://hitomi.la/galleries/123.html','pc','command')
+        claim=self.app.store.claim('pc','command')
+        with patch.dict(os.environ,{'STUDIO_NAS_WORKER_TOKEN':'nas-scoped-token'}):
+            req=urllib.request.Request(self.url+'/api/worker/'+job['id']+'/report',data=json.dumps({'lease':claim['lease'],'state':'failed'}).encode(),headers={
+                'Authorization':'Bearer nas-scoped-token','Content-Type':'application/json'})
+            with self.assertRaises(urllib.error.HTTPError):urllib.request.urlopen(req,timeout=5)
+        self.assertEqual(self.app.store.job(job['id'])['state'],'running')
 
     def test_worker_token_cannot_read_or_mutate_library(self):
         for path,body in [('/',None),('/api/export',None),('/api/works',{'title':'Unauthorized'}),('/api/sync',{})]:

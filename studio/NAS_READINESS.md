@@ -1,0 +1,106 @@
+# DS718+ 실사용 준비와 배포 검토안
+
+2026-10-16 한국 시간. 이 문서는 배포 후보이며 실제 NAS 배포 승인을 받았다는 뜻이 아니다.
+
+## 현재 판정
+
+- 개발/합성 통합 검증: 통과. 실제 비루트 Studio 이미지 기동, 새 전용 볼륨 초기화/재기동, 읽기/다운로드/설정 보존과 SQLite 백업/복원을 확인했다.
+- 전체 LANraragi 포크 이미지: 아직 차단. 관리형 CA secret 전달을 준비했지만 Alpine 호스트가 프록시 CONNECT 403을 반환한다. 공식 0.9.81 의존성 기반 호환성 이미지로 테스트한 결과를 전체 포크 빌드 성공으로 표시하지 않는다.
+- 실제 사이트 다운로드/댓글: 미실행. 정상 접근 권한이 확인된 테스트 URL을 요청했으며 아직 받지 않았다. E-Hentai/Hitomi/nHentai 호스트도 현재 HTTP 허용 목록에 없다.
+- 실제 DS718+ 배포: 미실행. DSM/Container Manager 버전, 설치 메모리, 전용 경로, UID/GID, 접속 방식이 미확인이다. NMLO/Stash와 개인 미디어에는 접근하거나 변경하지 않았다.
+
+## 사이트별 지원 상태와 필요한 접근
+
+| 출처 | 다운로드 구현 | 댓글 구현 | 실제 사이트 결과 | 필요한 입력/조건 |
+|---|---|---|---|---|
+| E-Hentai | 상류 ehdl 설치 확인. gallery-dl 어댑터의 gallery 추출기 매칭 확인 | 미지원, JSON 가져오기만 가능 | 미실행 | 사용자가 정상 접근 가능한 적법한 테스트 URL. 필요 시 해당 계정의 정상 세션. ehdl 아카이버는 GP를 쓸 수 있으므로 비용/잔액 동의 없이 시험하지 않는다 |
+| Hitomi | 상류 다운로드 플러그인 없음. gallery-dl 1.32.16 추출기 매칭/이미지 검증/CBZ 포장 후보 | 미지원, JSON 가져오기만 가능 | 미실행 | 테스트 URL, 정상 사이트/CDN 호스트에 대한 최소 HTTP 허용. 설치 추출기는 ltn.gold-usergeneratedcontent.net 및 이미지 하위 호스트를 사용하나 실제 필요한 호스트는 정상 응답으로 확인 후 요청 |
+| nHentai | gallery-dl 추출기 매칭 확인 | 공개 JSON 커넥터, 합성 응답 검증 | 미실행 | 테스트 URL, nhentai.net 허용. 로그인/제한 응답이면 중지. API 경로/형식이 실제와 맞는지 확인 전 지원 완료로 표시하지 않음 |
+| ExHentai | 새 gallery-dl 어댑터에서 명시적 비활성화 | 미지원 | 미실행 | 엔진의 인증 부재 시 E-Hentai 자동 대체를 허용하지 않음. 같은 출처 인증/동작을 별도 검증해야 함 |
+
+성적 콘텐츠의 테스트 항목은 모든 등장인물이 성인인 적법한 자료로 한정한다. 개인 라이브러리 전체를 클라우드로 보내지 않는다. 제한·차단 시 다른 출처로 대체하거나 인증서 검증 해제/프록시 우회/브라우저 자동 쿠키 추출을 하지 않는다. 비밀번호/쿠키를 채팅·Git·이미지에 넣지 않는다.
+
+쿠키가 필요한 경우 사용자가 허용한 정상 세션만 대상 장치의 보호 파일에 준비한다. 작업자에는 `STUDIO_ENGINE_COOKIES` 경로를 전달하고, nHentai 댓글에는 `STUDIO_NHENTAI_COOKIES` 경로를 전달할 수 있다. Netscape cookie 파일의 도메인/유효기간은 표준 쿠키 저장소가 처리한다. 파일은 읽기 전용으로 마운트하고 내용을 출력하지 않는다. 쿠키 제공으로 차단 우회 성공을 약속하지 않는다.
+
+## 관리형 빌드의 최소 네트워크 변경
+
+직접 재확인한 두 호스트는 모두 CONNECT 403이다:
+
+- `dl-cdn.alpinelinux.org`: Dockerfile의 Alpine 3.24 패키지 인덱스/패키지.
+- `cpanmin.us`: 기존 Perl 의존성 설치 스크립트의 cpanminus 부트스트랩. HTTP 오류를 실행하지 않도록 curl 실패 검사를 추가했다.
+
+기존 허용 목록을 유지한 채 이 두 호스트만 먼저 추가해야 한다. 후속 실패가 나오면 실제 오류를 근거로 추가 호스트를 확인한다. 현재 정책 파일을 편집하거나 다른 미러로 돌아가 차단을 피하지 않는다.
+
+Docker 빌드는 세션 CA를 각 HTTPS 설치 단계에 임시 secret으로 전달한다:
+
+```sh
+docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt \
+  -f tools/build/docker/Dockerfile -t lanraragi-studio:lrr-candidate .
+docker build -f studio/Dockerfile -t lanraragi-studio:web-candidate .
+docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt \
+  -f studio/Dockerfile.worker -t lanraragi-studio:worker-candidate .
+```
+
+관리형 데몬을 지정할 때는 런타임 스킬의 `--host=unix:///var/run/docker.sock` 및 endpoint/context/TLS 선택자 제거 지침을 따른다. 프록시와 CA 검증은 유지한다. CA는 이미지 레이어에 복사하지 않는다. `compose.cloud-build.yaml`, `compose.cloud-runtime.yaml`, `compose.worker.cloud.yaml`은 클라우드 검증 전용이다. 내부 `lanraragi`/`studio` 이름만 대소문자 NO_PROXY에 추가하며 외부 사이트/VPN 대상은 제외하지 않는다.
+
+## NAS에 제안하는 구성
+
+- `compose.nas.yaml`: 별도 프로젝트 `library-studio-nas`, Linux amd64 이미지, LANraragi Minion 동시 실행 1, Studio/상류 분리.
+- `volume-init`: root로 새 빈 전용 Docker 볼륨 4개만 최상위 소유권을 준비한다. 기존 파일이 있는 무표식 볼륨은 거부하고, 표식과 UID/GID가 달라져도 거부한다. 재귀 chown과 기존 미디어 볼륨 채택은 하지 않는다. 상류 시작 스크립트도 권한 자동 변경 비활성화 시 DB 볼륨을 재귀 chown하지 않고 쓰기 가능 여부만 확인한다.
+- 라이브러리 bind 경로는 존재해야 한다. Compose가 오타 경로를 자동 생성하지 않는다. 새 다운로드 하위 디렉터리도 확인된 UID/GID로 미리 준비해야 한다.
+- `compose.worker.yaml`: 선택적으로 NAS 작업자 1개. 출력은 새 라이브러리 안의 전용 다운로드 폴더에 둔다. 각 시도별 폴더의 CBZ를 상류가 읽으며, 원본 다운로드 이미지는 삭제하지 않는다. CBZ에 원래 GalleryDL 정보를 별도 gallery-dl-original.json으로 보존하고, 상류 플러그인용 info.json에는 확인한 source URL을 넣는다. GalleryDL 메타데이터 플러그인 설정/수집은 배포 검증에서 확인한다.
+- 기본 바인딩은 `127.0.0.1:43120`. PC/다른 장치 접근을 위한 NAS의 사설 HTTPS 경로와 VPN 주소는 아직 미확인이다. 임의 공개/인터페이스 확장을 하지 않는다.
+- 현재 자원 상한은 상류 1GiB/1.5 CPU, Studio 256MiB/0.5 CPU, 선택 작업자 384MiB/0.5 CPU다. 설치 메모리와 DSM 여유량 확인 전 동시 기동 용량을 보장하지 않는다. 작업자 병렬 수는 1부터 시작한다.
+
+`prepare_nas.py`는 확인된 경로·UID/GID·불변 이미지 digest로 로컬 `.env.nas`를 생성한다. 새 비밀을 별도로 만들며 파일 모드는 0600이다. 기존 파일을 덮어쓰거나 NAS에 연결하지 않는다. 다운로드 경로는 새 라이브러리의 하위여야 한다.
+
+```sh
+python studio/prepare_nas.py --output studio/.env.nas \
+  --library <확인된-새-절대경로> --downloads <그-경로의-다운로드-하위경로> \
+  --uid <확인된-UID> --gid <확인된-GID> \
+  --lrr-image <검증된-불변-digest> --web-image <검증된-불변-digest> \
+  --worker-image <검증된-불변-digest>
+docker compose --env-file studio/.env.nas -f studio/compose.nas.yaml config --quiet
+```
+
+꺾쇠 항목은 미확인 값이며 실행 가능한 최종 배포 명령으로 취급하지 않는다. 전체 포크 이미지와 실제 환경 정보를 확보한 뒤 정확한 값·변경 대상·접속 방식을 넣은 최종안을 제시하고, 그때 실제 NAS 배포 승인을 요청한다.
+
+## 승인 후의 배포·업그레이드·중단 복구 순서
+
+1. 확인한 DSM/Compose에서 `name`, `service_completed_successfully`, `bind.create_host_path` 등 사용 기능을 검증한다. 미지원 버전이면 별도 초기화 명령을 포함한 호환 구성을 먼저 검토한다.
+2. 기존 서비스와 겹치지 않는 새 프로젝트/새 전용 디렉터리/포트를 확인한다. 대상 디렉터리에만 새 계정 권한을 준비한다. 기존 개인 원본을 이동/삭제/재귀 권한 변경하지 않는다.
+3. 불변 이미지와 Compose/env의 로컬 보관본을 남긴다. 새 볼륨 초기화 → LANraragi 건강 상태 → Studio 건강 상태 → 합성 한 권 읽기/다운로드 순으로 확인한다. 실제 사이트 작업자는 승인된 작은 테스트 항목 성공 후에만 사용한다.
+4. 업그레이드는 작업자 정지 → 실행/모호한 원격 작업 확인 → Studio SQLite 백업 → LANraragi 정지 후 전용 Redis/설정/플러그인 볼륨의 일관된 NAS 로컬 스냅샷 → 새 불변 이미지 적용 순서다. 비밀을 재생성하지 않는다. 프로젝트 이름을 바꾸지 않는다.
+5. 실패 시 작업자를 먼저 멈춘다. 이전 이미지와 백업을 보존한다. DB를 원래 파일에 덮어쓰지 않고 새 경로로 복원해 `STUDIO_DATABASE`를 그 경로로 바꾼다. 이전 schema와 이미지의 호환성을 확인한 뒤 기동한다.
+6. 재기동 후 만료/복원된 실행 작업은 확인 필요 상태다. 알려진 원격 ID는 상태 조회 후 완료를 반영하거나 실패가 확인된 경우만 재시도한다. 원격 ID 없는 모호한 접수는 자동 재제출하지 않는다. 작업자 출력은 시도별로 보존한다. 같은 출처/provider+ID의 활성 작업은 URL 형태가 달라도 중복 생성하지 않으며 다른 사이트의 같은 번호와 혼동하지 않는다.
+7. POSIX 작업자의 하트비트 실패·SIGTERM은 직접 엔진과 같은 프로세스 그룹을 종료한다. 새 세션으로 완전히 분리된 엔진까지 추적한다는 보장은 없으므로 지원 어댑터는 분리 실행하지 않는다. Windows는 직접 프로세스 종료 범위이며 실장치 검증이 필요하다.
+
+## SQLite 백업·복원
+
+`backup.py`는 SQLite backup API로 WAL 상태도 일관되게 복사하며 integrity/foreign-key 검사를 수행한다. 새 목적지에만 원자적으로 게시하고, 0600 권한과 SHA-256/개수를 반환한다. 원본은 수정하지 않는다. Studio DB에는 출처/댓글/읽기 기록과 작업 임대가 들어 있으므로 보호해야 한다.
+
+```sh
+python studio/backup.py backup <Studio-DB> <새-백업-DB>
+python studio/backup.py restore <백업-DB> <새-복원-DB>
+```
+
+복원은 이전 임대를 모두 무효화하고 당시 실행 중이던 작업을 확인 필요로 만든다. 운영 복원 전에 모든 작업자를 중지해야 한다. 이 도구는 LANraragi Redis·플러그인·원본 아카이브·비밀 파일을 백업하지 않는다. 이들은 NAS의 전용 볼륨/설정 백업에 별도로 포함한다. 실제 NAS 백업을 클라우드나 GitHub로 올리지 않는다.
+
+## 이번 작업의 검증 근거
+
+- 표준 라이브러리 테스트 50개: WAL 백업/복원, 복원 임대 폐기, 기존 파일 덮어쓰기 거부, 기존/UID 변경 볼륨 거부, 대상 토큰 분리, 임대/재시작/모호한 원격 접수, URL 변형 중복 방지, 하트비트 실패 시 자식 프로세스 정리, 댓글 실패 시 60초 간격 보존 포함.
+- JS 구문 및 shell 구문 검사 통과.
+- 실제 Studio 이미지: 비루트 기동, 내부 API 연결, 합성 CBZ 리더/진행률/다운로드 해시/설정 저장, 데스크톱·모바일 pageerror 0. 볼륨 초기화 4개, 재기동 초기화 0개. 실제 컨테이너에서도 별도 경로 백업/복원을 확인했다. 비기본 UID/GID 10001에서도 새 전용 볼륨, 권한 자동 변경 비활성화, 리더/다운로드/설정 검증을 통과했다. 10001은 합성 테스트 값이며 실제 NAS 계정 값이 아니다.
+- 합성 20,000 작품 + 20,000 출처: 목록 120개 중앙값 2.87ms, 출처 태그 검색 28.98ms, 제목 검색 43.03ms, 검색 8건/4스레드 약 104ms. 목록은 작품별 DB 접속 대신 출처를 한 번에 조회한다.
+- 서로 다른 합성 아카이브 48개, 썸네일 동시 요청 4개: 첫 pass 총 230.65ms/p95 53.53ms, 반복 pass 총 165.02ms/p95 32.19ms. 실제 JPEG 응답이 application/x-download인 경우 시그니처를 확인해 image/jpeg로 전달하도록 수정했다.
+- 위 성능은 관리형 클라우드와 공식 0.9.81 호환성 런타임에서의 결과다. DS718+ 실측이나 실제 2만 권의 썸네일 생성 비용을 의미하지 않는다.
+
+## 실사용 완료 기준과 현재 남은 조건
+
+- [완료] 합성 DB/읽기/썸네일/다운로드/복구/권한 테스트와 실제 Studio 이미지 기동.
+- [대기] 최소 빌드 호스트 허용 → 전체 포크 이미지 빌드·기동 및 동일 통합 테스트 재실행.
+- [대기] 사이트별 적법한 테스트 URL과 정상 접근 권한 확인 → 실제 다운로드 파일/페이지/해시/출처 메타데이터 검증. 댓글은 원문/작성자/시각/URL 비교와 재수집 보존 검증. 실패/제한은 미지원 또는 차단으로 기록.
+- [미완성] E-Hentai 댓글 커넥터. 정상 접근 가능한 응답/DOM을 확인한 뒤 구현해야 한다. Hitomi 댓글 API의 존재/지원도 단정하지 않는다.
+- [대기] DS718+ 환경 정보 확보 → 정확한 배포안 → 사용자 승인 → NAS 실측/작은 파일 테스트/백업 복원 리허설.
+
+현재 상태를 실사용 완료 또는 실제 사이트 지원 완료로 표시하면 안 된다.

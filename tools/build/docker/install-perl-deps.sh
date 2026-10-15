@@ -9,7 +9,11 @@ export MAKEFLAGS="-j$(nproc)"
 eval "$(perl -Mlocal::lib)"
 
 # Install cpanm
-curl -L https://cpanmin.us | perl - App::cpanminus
+# Fail on HTTP errors instead of executing a partial/error response.
+bootstrap="$(mktemp)"
+trap 'rm -f "$bootstrap"' EXIT
+curl --fail --show-error --silent --location https://cpanmin.us -o "$bootstrap"
+perl "$bootstrap" App::cpanminus
 
 cd ./tools
 

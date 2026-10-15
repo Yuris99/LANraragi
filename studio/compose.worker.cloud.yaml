@@ -1,0 +1,11 @@
+# Add only when using compose.worker.yaml in the managed cloud.
+services:
+  worker:
+    environment:
+      REQUESTS_CA_BUNDLE: /run/studio-cloud-ca.pem
+      SSL_CERT_FILE: /run/studio-cloud-ca.pem
+    volumes:
+      - type: bind
+        source: ${STUDIO_CLOUD_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}
+        target: /run/studio-cloud-ca.pem
+        read_only: true

@@ -1,0 +1,92 @@
+# Reviewed deployment candidate. Uses only NEW, dedicated named volumes.
+# Never attach existing LANraragi/Stash volumes to this project.
+name: library-studio-nas
+services:
+  volume-init:
+    image: ${STUDIO_WEB_IMAGE:?Set a tested immutable Studio image}
+    user: "0:0"
+    entrypoint: ["python", "/app/init_volumes.py"]
+    environment:
+      STUDIO_UID: ${STUDIO_UID:?Set verified NAS UID}
+      STUDIO_GID: ${STUDIO_GID:?Set verified NAS GID}
+    volumes:
+      - type: volume
+        source: lrr-database
+        target: /volumes/database
+        volume: {nocopy: true}
+      - type: volume
+        source: lrr-thumbnails
+        target: /volumes/thumbnails
+        volume: {nocopy: true}
+      - type: volume
+        source: lrr-plugins
+        target: /volumes/plugins
+        volume: {nocopy: true}
+      - type: volume
+        source: studio-data
+        target: /volumes/studio
+        volume: {nocopy: true}
+    restart: "no"
+  lanraragi:
+    image: ${STUDIO_LRR_IMAGE:?Set a tested immutable fork image}
+    platform: linux/amd64
+    environment:
+      LRR_API_KEY: ${LRR_API_KEY:?Required}
+      LRR_UID: ${STUDIO_UID:?Required}
+      LRR_GID: ${STUDIO_GID:?Required}
+      LRR_AUTOFIX_PERMISSIONS: "0"
+      LRR_WORKER_CONCURRENCY: "1"
+    volumes:
+      - type: bind
+        source: ${STUDIO_LIBRARY:?Set an existing NEW dedicated library directory}
+        target: /home/koyomi/lanraragi/content
+        bind: {create_host_path: false}
+      - type: volume
+        source: lrr-database
+        target: /home/koyomi/lanraragi/database
+        volume: {nocopy: true}
+      - type: volume
+        source: lrr-thumbnails
+        target: /home/koyomi/lanraragi/thumb
+        volume: {nocopy: true}
+      - type: volume
+        source: lrr-plugins
+        target: /home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed
+        volume: {nocopy: true}
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+    mem_limit: 1g
+    cpus: 1.5
+    restart: unless-stopped
+  studio:
+    image: ${STUDIO_WEB_IMAGE:?Required}
+    platform: linux/amd64
+    user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    environment:
+      STUDIO_DATABASE: ${STUDIO_DATABASE:-/data/studio.db}
+      LRR_URL: http://lanraragi:3000
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1},lanraragi"
+      no_proxy: "${no_proxy:-${NO_PROXY:-localhost,127.0.0.1}},lanraragi"
+      LRR_API_KEY: ${LRR_API_KEY:?Required}
+      STUDIO_PASSWORD: ${STUDIO_PASSWORD:?Required}
+      STUDIO_PC_WORKER_TOKEN: ${STUDIO_PC_WORKER_TOKEN:?Required}
+      STUDIO_NAS_WORKER_TOKEN: ${STUDIO_NAS_WORKER_TOKEN:?Required}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-43120}:8090"
+    volumes:
+      - type: volume
+        source: studio-data
+        target: /data
+        volume: {nocopy: true}
+    depends_on:
+      volume-init: {condition: service_completed_successfully}
+      lanraragi: {condition: service_healthy}
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+volumes:
+  lrr-database:
+  lrr-thumbnails:
+  lrr-plugins:
+  studio-data:

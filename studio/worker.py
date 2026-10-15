@@ -3,11 +3,31 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import subprocess
 import threading
 import time
 import urllib.request
+import urllib.error
 from pathlib import Path
+
+
+def stop_process(process):
+    if os.name=='posix':
+        try:os.killpg(process.pid,signal.SIGTERM)
+        except ProcessLookupError:pass
+    elif process.poll() is None:process.terminate()
+    try:process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        if os.name=='posix':
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+        else:process.kill()
+        process.wait()
+    if os.name=='posix':
+        # The direct process may have exited while a child ignored SIGTERM.
+        try:os.killpg(process.pid,signal.SIGKILL)
+        except ProcessLookupError:pass
 
 
 def run_job(job, command, root, report, heartbeat_interval=20):
@@ -37,7 +57,7 @@ def run_job(job, command, root, report, heartbeat_interval=20):
     heartbeat_thread.start()
     try:
         with (output/'engine.log').open('wb') as log:
-            process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,shell=False)
+            process=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,shell=False,start_new_session=(os.name=='posix'))
             deadline=time.monotonic()+3600
             try:
                 while process.poll() is None:
@@ -46,9 +66,7 @@ def run_job(job, command, root, report, heartbeat_interval=20):
                     time.sleep(0.1)
             finally:
                 if process.poll() is None:
-                    process.terminate()
-                    try:process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:process.kill();process.wait()
+                    stop_process(process)
         if heartbeat_errors:raise RuntimeError('Worker heartbeat failed')
         if process.returncode:
             report('failed',f'엔진 종료 코드 {process.returncode}');return
@@ -76,6 +94,8 @@ def run_job(job, command, root, report, heartbeat_interval=20):
 
 
 def main():
+    def interrupted(signum,frame):raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM,interrupted)
     base=os.environ['STUDIO_SERVER'].rstrip('/');token=os.environ['STUDIO_WORKER_TOKEN']
     target=os.environ.get('STUDIO_TARGET','pc')
     command=json.loads(os.environ['STUDIO_DOWNLOAD_COMMAND']);root=os.environ['STUDIO_OUTPUT']
@@ -85,7 +105,12 @@ def main():
             'Authorization':'Bearer '+token,'Content-Type':'application/json'})
         with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
     while True:
-        job=request('/api/worker/claim',{'target':target})
+        try:job=request('/api/worker/claim',{'target':target})
+        except urllib.error.HTTPError as error:
+            if error.code in (401,403):raise RuntimeError('Worker authorization rejected; check target token') from None
+            time.sleep(5);continue
+        except (urllib.error.URLError,TimeoutError,OSError):
+            time.sleep(5);continue
         if not job:time.sleep(5);continue
         def report(state,message='',result=None):
             return request('/api/worker/'+job['id']+'/report',{

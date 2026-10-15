@@ -18,13 +18,13 @@ if [ ! -d "/home/koyomi/lanraragi/content" ]; then
   exit 1
 fi
 
-#Ensure database is writable
-chown -R koyomi /home/koyomi/lanraragi/database
-chmod -R u+rwx /home/koyomi/lanraragi/database
-
 if [ "$FIX_PERMS" -eq 1 ]; then
   echo "Fixing permissions, hold on!"
   
+  # Legacy automatic preparation is opt-in; dedicated Studio volumes are initialized separately.
+  chown -R koyomi /home/koyomi/lanraragi/database
+  chmod -R u+rwx /home/koyomi/lanraragi/database
+
   #Ensure thumbnail folder is writable
   chown -R koyomi /home/koyomi/lanraragi/thumb
   find /home/koyomi/lanraragi/thumb -type f -exec chmod u+rw  {} \;
@@ -42,7 +42,13 @@ if [ "$FIX_PERMS" -eq 1 ]; then
   find /home/koyomi/lanraragi/content -name thumb -prune -o -type f -exec chmod u+r  {} \;
   find /home/koyomi/lanraragi/content -name thumb -prune -o -type d -exec chmod u+rx {} \;
 else
-    echo "Not touching permissions"
+    echo "Not touching mounted data permissions"
+    for directory in database thumb lib/LANraragi/Plugin/Managed; do
+      if ! s6-setuidgid koyomi test -w "/home/koyomi/lanraragi/$directory"; then
+        echo "Dedicated volume is not writable: $directory. Prepare its reviewed UID/GID before startup." >&2
+        exit 1
+      fi
+    done
 fi
 
 #Ensure log folder is writable

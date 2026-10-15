@@ -46,7 +46,7 @@ class Store:
             ''')
 
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
-            for name,definition in [('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
+            for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
 
     @contextlib.contextmanager
@@ -111,11 +111,20 @@ class Store:
         condition = ' WHERE ' + ' AND '.join(where) if where else ''
         with self.db() as db:
             total = db.execute('SELECT count(*) FROM works'+condition, args).fetchone()[0]
-            rows = db.execute('SELECT id FROM works'+condition+' ORDER BY '+order[sort]+
+            rows = db.execute('SELECT * FROM works'+condition+' ORDER BY '+order[sort]+
                               (' DESC' if descending else ' ASC')+',id LIMIT ? OFFSET ?',
                               [*args, limit, (page-1)*limit]).fetchall()
-        return dict(items=[self.get_work(row['id']) for row in rows], total=total,
-                    page=page, limit=limit)
+            sources={row['id']:[] for row in rows}
+            if rows:
+                placeholders=','.join('?' for _ in rows)
+                for source in db.execute('SELECT * FROM sources WHERE work_id IN ('+placeholders+') ORDER BY provider,external_id',list(sources)):
+                    sources[source['work_id']].append(self.source_row(source))
+            items=[]
+            for row in rows:
+                work=self.work_row(row);work['sources']=sources[row['id']]
+                work['all_tags']=list(dict.fromkeys(work['tags']+[tag for source in work['sources'] for tag in source['tags']]))
+                items.append(work)
+        return dict(items=items,total=total,page=page,limit=limit)
 
     def create_work(self, title, artist='', lrr_id=None, pages=0, size=0, tags=None):
         title = str(title).strip()
@@ -182,6 +191,16 @@ class Store:
                         fetched,data.get('status','manual')))
         return self.get_work(work_id)
 
+    def begin_comment_fetch(self, work_id, source_id):
+        now=time.time()
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM sources WHERE id=? AND work_id=?',(source_id,work_id)).fetchone()
+            if not row:raise KeyError('출처를 찾을 수 없습니다.')
+            if row['comments_attempted'] and now-row['comments_attempted']<60:
+                raise ValueError('댓글 갱신 시도는 출처별 60초 간격으로 가능합니다.')
+            db.execute('UPDATE sources SET comments_attempted=? WHERE id=?',(now,source_id))
+
     def apply_comments(self, work_id, source_id, result):
         if result['status']=='unsupported':return
         with self.db() as db:
@@ -241,9 +260,10 @@ class Store:
         if work_id:self.get_work(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            existing=db.execute("SELECT * FROM jobs WHERE url=? AND target=? AND engine=? AND state IN ('queued','running')",
-                                (source['url'],target,engine)).fetchone()
-            if existing:return dict(existing)
+            candidates=db.execute("SELECT * FROM jobs WHERE target=? AND engine=? AND state IN ('queued','running')",(target,engine)).fetchall()
+            for existing in candidates:
+                identity=parse_source(existing['url'])
+                if (identity['provider'],identity['external_id'])==(source['provider'],source['external_id']):return dict(existing)
             job_id=uid();now=time.time()
             db.execute('INSERT INTO jobs(id,work_id,url,target,engine,state,created,updated) VALUES(?,?,?,?,?,?,?,?)',
                        (job_id,work_id,source['url'],target,engine,'queued',now,now))
@@ -284,7 +304,7 @@ class Store:
             result=dict(row);result.update(state='running',lease=lease)
             return result
 
-    def report(self, job_id, lease, state, message='', result=None):
+    def report(self, job_id, lease, state, message='', result=None, worker_target=None):
         if state not in ('running','complete','failed','blocked'):
             raise ValueError('잘못된 작업 상태입니다.')
         with self.db() as db:
@@ -292,6 +312,8 @@ class Store:
             row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
             if not row or row['state']!='running' or not secrets.compare_digest(row['lease'] or '',lease or ''):
                 raise ValueError('만료되었거나 잘못된 작업 임대입니다.')
+            if worker_target and (row['engine']!='command' or worker_target not in ('*',row['target'])):
+                raise ValueError('작업자의 대상 범위가 올바르지 않습니다.')
             if row['lease_until'] < time.time():
                 raise ValueError('작업 임대가 만료됐습니다.')
             if result is not None and (not isinstance(result,dict) or len(json.dumps(result))>32768):
@@ -325,6 +347,11 @@ class Store:
                 raise ValueError('실패하거나 중단된 작업만 다시 시도할 수 있습니다.')
             if row['engine']=='lanraragi' and (json.loads(row['result']).get('remote_job') or json.loads(row['result']).get('submission')=='pending'):
                 raise ValueError('원격 작업이 남아 있습니다. 상태를 확인한 뒤 중복 다운로드 없이 처리해야 합니다.')
+            identity=parse_source(row['url'])
+            for active in db.execute("SELECT id,url FROM jobs WHERE target=? AND engine=? AND state IN ('queued','running')",(row['target'],row['engine'])):
+                other=parse_source(active['url'])
+                if (other['provider'],other['external_id'])==(identity['provider'],identity['external_id']):
+                    raise ValueError('같은 출처의 다운로드가 이미 대기 또는 실행 중입니다.')
             db.execute("UPDATE jobs SET state='queued',lease=NULL,remote_id=NULL,message='',updated=? WHERE id=?",(time.time(),job_id))
 
     def export(self):

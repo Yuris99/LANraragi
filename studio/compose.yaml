@@ -25,10 +25,15 @@ services:
       context: ..
       dockerfile: studio/Dockerfile
     environment:
+      STUDIO_DATABASE: ${STUDIO_DATABASE:-/data/studio.db}
       LRR_URL: http://lanraragi:3000
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1},lanraragi"
+      no_proxy: "${no_proxy:-${NO_PROXY:-localhost,127.0.0.1}},lanraragi"
       LRR_API_KEY: ${LRR_API_KEY:?Set LRR_API_KEY in .env}
       STUDIO_PASSWORD: ${STUDIO_PASSWORD:?Set STUDIO_PASSWORD in .env}
-      STUDIO_WORKER_TOKEN: ${STUDIO_WORKER_TOKEN:?Set STUDIO_WORKER_TOKEN in .env}
+      STUDIO_WORKER_TOKEN: ${STUDIO_WORKER_TOKEN:-}
+      STUDIO_PC_WORKER_TOKEN: ${STUDIO_PC_WORKER_TOKEN:-}
+      STUDIO_NAS_WORKER_TOKEN: ${STUDIO_NAS_WORKER_TOKEN:-}
       TZ: Asia/Seoul
     ports:
       - ${STUDIO_BIND:-127.0.0.1}:${STUDIO_PORT:-43120}:8090

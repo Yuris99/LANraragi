@@ -1,6 +1,8 @@
 """Bounded public comment connectors. No login, cookies, redirects or bypasses."""
 from datetime import datetime, timezone
 import json
+import http.cookiejar
+import os
 import time
 import urllib.request
 from sources import parse_source, comments_list
@@ -16,7 +18,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def public_json(url):
     # Default proxy/CA settings remain active. Redirects to login/challenge pages fail.
-    opener=urllib.request.build_opener(NoRedirect())
+    handlers=[NoRedirect()]
+    cookie_path=os.environ.get('STUDIO_NHENTAI_COOKIES')
+    if cookie_path:
+        # Standard domain/expiry handling; never print, modify or export the file.
+        jar=http.cookiejar.MozillaCookieJar(cookie_path)
+        jar.load(ignore_discard=True,ignore_expires=False)
+        handlers.append(urllib.request.HTTPCookieProcessor(jar))
+    opener=urllib.request.build_opener(*handlers)
     request=urllib.request.Request(url,headers={'Accept':'application/json','User-Agent':'LibraryStudio/0.1'})
     with opener.open(request,timeout=20) as response:
         if response.headers.get_content_type()!='application/json':

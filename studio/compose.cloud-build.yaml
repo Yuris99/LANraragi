@@ -1,0 +1,9 @@
+# Build-only override; the session CA is mounted only during network RUN steps.
+services:
+  lanraragi:
+    build:
+      secrets:
+        - proxy_ca
+secrets:
+  proxy_ca:
+    file: ${CODEX_PROXY_CERT:?Set CODEX_PROXY_CERT to the managed CA bundle path}

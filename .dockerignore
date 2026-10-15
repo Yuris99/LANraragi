@@ -8,3 +8,8 @@ studio/data
 studio/test-results
 **/__pycache__
 work
+
+studio/secrets
+studio/*.cookies
+
+studio/.env.*

@@ -1,5 +1,7 @@
 # Library Studio (work in progress)
 
+For the current deployment candidate, site-support matrix and operational procedures, read [NAS_READINESS.md](NAS_READINESS.md). Actual site downloads/comments and DS718+ deployment remain unverified and blocked on test URLs/access/environment details.
+
 A personal web library built on this LANraragi fork, with a separate small Python/SQLite service for cross-site identities, source-specific metadata and download routing. This is an initial implementation, not a finished release.
 
 ## Current implementation
@@ -30,7 +32,7 @@ python -B -m unittest discover -s studio/tests -v
 node --check studio/web/app.js
 ```
 
-The cloud continuation passes 32 tests and the JS syntax check. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
+The cloud continuation passes 50 tests and the JS syntax check. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
 
 ## DS718+ and cloud development
 
@@ -40,15 +42,15 @@ For NAS use, change `STUDIO_LIBRARY` to a dedicated prepared directory and bind 
 
 ## External engines
 
-Run `worker.py` on the actual destination device with `STUDIO_SERVER`, `STUDIO_WORKER_TOKEN`, `STUDIO_TARGET` (`pc` or `nas`), `STUDIO_OUTPUT`, and a `STUDIO_DOWNLOAD_COMMAND` JSON argv array containing `{url}` and `{output}`. Commands are configured by the operator, never through the web UI, and run without a shell. Output goes to a unique `<job-id>-<attempt-suffix>` folder on every attempt. Heartbeat failure stops the direct engine process; engines that detach subprocesses need operator inspection. Existing attempt files are preserved. The worker reports the output directory before execution and requires nonempty supported files for completion. No specific desktop downloader is bundled or claimed to work headlessly on Linux.
+Run `worker.py` on the actual destination device with `STUDIO_SERVER`, `STUDIO_WORKER_TOKEN` (use the server's separate PC or NAS token), `STUDIO_TARGET` (`pc` or `nas`), `STUDIO_OUTPUT`, and a `STUDIO_DOWNLOAD_COMMAND` JSON argv array containing `{url}` and `{output}`. Commands are configured by the operator, never through the web UI, and run without a shell. Output goes to a unique `<job-id>-<attempt-suffix>` folder on every attempt. Heartbeat failure stops the direct engine process; engines that detach subprocesses need operator inspection. Existing attempt files are preserved. The worker reports the output directory before execution and requires nonempty supported files for completion. A version-pinned gallery-dl worker image and conservative adapter are provided as an unverified site-integration candidate. It validates downloaded image signatures and creates a CBZ with source metadata. Actual site operation is not yet verified; ExHentai is disabled to prevent its automatic alternate-source fallback.
 
 ## Known incomplete areas
 
 - Comments support JSON import and a bounded nHentai public JSON connector tested with synthetic responses only. E-Hentai/Hitomi comment collection is explicitly unsupported. No live-site success is claimed; login, rate limits and blocks are never bypassed. Refresh merges IDs within each source and preserves comments absent from later responses; up to 100 fetched comments per request, 1 MiB response limit and 60-second refresh interval.
 - Cross-site matching is explicit/manual; no unverified title/number-only auto-merge.
 - External tag fetching uses installed upstream metadata plugins; no live site test yet.
-- Worker bearer tokens authorize only claim/report endpoints. Expired jobs are blocked, never automatically duplicated. Explicit retry checks known upstream jobs first; an ambiguous submission without a remote ID stays blocked pending operator reconciliation. No detached-engine recovery or automatic remote-job adoption is implemented.
-- SQLite export exists; a tested restore/migration workflow is still needed.
+- Worker bearer tokens authorize only claim/report endpoints. New setups use separate `STUDIO_PC_WORKER_TOKEN` and `STUDIO_NAS_WORKER_TOKEN`; NAS Compose does not enable the legacy shared token. Expired jobs are blocked, never automatically duplicated. Explicit retry checks known upstream jobs first; an ambiguous submission without a remote ID stays blocked pending operator reconciliation. No detached-engine recovery or automatic remote-job adoption is implemented.
+- SQLite backup/restore to new destinations is tested, including active WAL and lease revocation on restore. Full NAS Redis/media/secret backup and DS718+ restore rehearsal remain required.
 - No personal archive import, NAS deployment, public exposure or production data changes have occurred.
 
 The upstream MIT license in `COPYING` applies.

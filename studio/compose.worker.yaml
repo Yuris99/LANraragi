@@ -1,0 +1,23 @@
+# Optional NAS worker. Start only after site validation and approved dedicated paths.
+# Use together with compose.nas.yaml. PC worker runs on the actual PC, not the NAS.
+services:
+  worker:
+    image: ${STUDIO_WORKER_IMAGE:?Set a tested immutable worker image}
+    platform: linux/amd64
+    user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    environment:
+      STUDIO_SERVER: http://studio:8090
+      STUDIO_WORKER_TOKEN: ${STUDIO_NAS_WORKER_TOKEN:?Required}
+      STUDIO_TARGET: nas
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1},studio"
+      no_proxy: "${no_proxy:-${NO_PROXY:-localhost,127.0.0.1}},studio"
+    volumes:
+      - type: bind
+        source: ${STUDIO_DOWNLOADS:?Set an existing NEW dedicated downloads directory inside the new library}
+        target: /downloads
+        bind: {create_host_path: false}
+    depends_on:
+      studio: {condition: service_healthy}
+    mem_limit: 384m
+    cpus: 0.5
+    restart: unless-stopped

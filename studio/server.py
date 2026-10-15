@@ -79,8 +79,7 @@ class Studio:
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
-        if source['comments_fetched'] and time.time()-source['comments_fetched']<60:
-            raise ValueError('댓글 갱신은 출처별 60초 간격으로 가능합니다.')
+        if source['provider']=='nhentai':self.store.begin_comment_fetch(work_id,source_id)
         result=fetch_comments(source['url'])
         self.store.apply_comments(work_id,source_id,result)
         return {'status':result['status'],'message':result['message']}
@@ -126,6 +125,16 @@ def public_error(error):
     return '작업 처리 중 오류가 발생했습니다. 서버 로그를 확인하세요.'
 
 
+def image_content_type(data):
+    if data.startswith(b'\xff\xd8\xff'):return 'image/jpeg'
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):return 'image/png'
+    if data.startswith((b'GIF87a',b'GIF89a')):return 'image/gif'
+    if data.startswith(b'RIFF') and data[8:12]==b'WEBP':return 'image/webp'
+    if data[4:8]==b'ftyp' and (b'avif' in data[8:] or b'avis' in data[8:]):return 'image/avif'
+    if data.startswith((b'\xff\x0a',b'\x00\x00\x00\x0cJXL \r\n\x87\n')):return 'image/jxl'
+    return None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version='LibraryStudio/0.1'
 
@@ -136,10 +145,16 @@ class Handler(BaseHTTPRequestHandler):
     @property
     def app(self):return self.server.app
 
+    def worker_scope(self):
+        auth=self.headers.get('Authorization','')
+        for variable,target in [('STUDIO_PC_WORKER_TOKEN','pc'),('STUDIO_NAS_WORKER_TOKEN','nas'),('STUDIO_WORKER_TOKEN','*')]:
+            token=os.environ.get(variable,'')
+            if token and hmac.compare_digest(auth,'Bearer '+token):return target
+        return None
+
     def authorized(self):
         auth=self.headers.get('Authorization','')
-        token=os.environ.get('STUDIO_WORKER_TOKEN','')
-        if token and hmac.compare_digest(auth,'Bearer '+token):
+        if self.worker_scope():
             if self.command=='POST' and re.fullmatch(r'/api/worker/(claim|[0-9a-f]{32}/report)', urllib.parse.urlsplit(self.path).path):
                 return True
             self.respond({'error':'Worker token is restricted to worker endpoints'},403)
@@ -206,12 +221,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(value)
             with self.app.lrr.open('/api/archives/'+match[1]+'/'+match[2]+query,
                                    headers={'Range':self.headers['Range']} if self.headers.get('Range') else {}) as response:
+                prefix=response.read(32) if response.status==200 and match[2] in ('thumbnail','page') else b''
+                media_type=image_content_type(prefix)
                 self.send_response(response.status)
+                if media_type:self.send_header('Content-Type',media_type)
                 for key in ('Content-Type','Content-Length','Content-Disposition','Accept-Ranges','Content-Range'):
+                    if key=='Content-Type' and media_type:continue
                     if response.headers.get(key):self.send_header(key,response.headers[key])
                 self.send_header('X-Content-Type-Options','nosniff')
                 self.send_header('Cache-Control','private, max-age=3600' if match[2]=='thumbnail' else 'no-store')
                 self.end_headers()
+                if prefix:self.wfile.write(prefix)
                 while block:=response.read(256*1024):self.wfile.write(block)
             return
         if path.startswith('/api/'):return self.respond({'error':'찾을 수 없습니다.'},404)
@@ -266,14 +286,15 @@ class Handler(BaseHTTPRequestHandler):
                 if status.get('state')=='finished':return self.respond({'success':True,'reconciled':True})
             store.retry(match[1]);return self.respond({'success':True})
         if path.startswith('/api/worker/'):
-            token=os.environ.get('STUDIO_WORKER_TOKEN','')
-            if not token or not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+token):
+            scope=self.worker_scope()
+            if not scope:
                 return self.respond({'error':'Worker token required'},403)
             if path=='/api/worker/claim':
+                if scope!='*' and data.get('target')!=scope:return self.respond({'error':'Worker target mismatch'},403)
                 return self.respond(store.claim(data.get('target'),'command'))
             match=re.fullmatch('/api/worker/([0-9a-f]{32})/report',path)
             if match:
-                store.report(match[1],data.get('lease'),data.get('state'),data.get('message',''),data.get('result'))
+                store.report(match[1],data.get('lease'),data.get('state'),data.get('message',''),data.get('result'),worker_target=scope)
                 return self.respond({'success':True})
         return self.respond({'error':'찾을 수 없습니다.'},404)
 

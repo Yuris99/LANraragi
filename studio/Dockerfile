@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY studio/*.py ./
 COPY studio/web ./web
-RUN useradd --uid 9001 --create-home studio && mkdir /data && chown studio /data
+RUN useradd --uid 9001 --create-home studio && mkdir /data && chown studio /data && chmod -R a+rX /app
 USER studio
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 STUDIO_HOST=0.0.0.0 STUDIO_PORT=8090 STUDIO_DATABASE=/data/studio.db
 EXPOSE 8090

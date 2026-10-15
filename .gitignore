@@ -23,3 +23,7 @@ studio/tests/__pycache__/
 studio/test-results/
 
 /work/
+studio/secrets/
+studio/*.cookies
+
+studio/.env.*
