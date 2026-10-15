@@ -1,0 +1,269 @@
+"""Authenticated Library Studio frontend/API for the LANraragi fork (stdlib only)."""
+import base64
+import concurrent.futures
+import hmac
+import json
+import mimetypes
+import os
+import re
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from sources import parse_source
+from store import Store
+
+HERE=Path(__file__).parent
+
+
+class LRR:
+    def __init__(self, url, key=''):
+        self.url=url.rstrip('/')
+        self.key=key
+
+    def open(self, path, method='GET', form=None, headers=None):
+        data=None if form is None else urllib.parse.urlencode(form).encode()
+        auth={'Authorization':'Bearer '+base64.b64encode(self.key.encode()).decode()} if self.key else {}
+        request=urllib.request.Request(self.url+path,data=data,method=method,headers={**auth,**(headers or {})})
+        return urllib.request.urlopen(request,timeout=45)
+
+    def json(self, path, method='GET', form=None):
+        with self.open(path,method,form) as response:
+            value=json.load(response)
+        if isinstance(value,dict) and (value.get('error') or value.get('success')==0):
+            raise ValueError(str(value.get('error') or 'LANraragi operation failed')[:500])
+        return value
+
+
+class Studio:
+    def __init__(self, store, lrr):
+        self.store=store;self.lrr=lrr;self.stop=threading.Event()
+        self.sync_lock=threading.Lock()
+
+    def sync(self):
+        if not self.sync_lock.acquire(blocking=False):
+            raise ValueError('동기화가 이미 진행 중입니다.')
+        try:
+            ids=self.lrr.json('/api/archives')
+            if not isinstance(ids,list):raise ValueError('LANraragi 목록 형식 오류')
+            if len(ids)>100000:raise ValueError('이번 동기화 한도를 초과했습니다.')
+            valid=[x for x in ids if isinstance(x,str) and re.fullmatch('[0-9a-f]{40}',x)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                metadata=list(pool.map(lambda i:self.lrr.json('/api/archives/'+i+'/metadata'),valid))
+            return {'synced':self.store.sync_lrr(metadata)}
+        finally:self.sync_lock.release()
+
+    def fetch_metadata(self, work_id, source_id):
+        work=self.store.get_work(work_id)
+        source=next((s for s in work['sources'] if s['id']==source_id),None)
+        if not source:raise KeyError('출처를 찾을 수 없습니다.')
+        if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
+        plugins=self.lrr.json('/api/plugins/metadata')
+        candidates=[x for x in plugins if source['provider'].replace('ehentai','e-hentai') in x.get('name','').lower()]
+        if not candidates:raise ValueError('해당 사이트의 메타데이터 플러그인이 설치되어 있지 않습니다.')
+        response=self.lrr.json('/api/plugins/use','POST',{
+            'id':work['lrr_id'],'plugin':candidates[0]['namespace'],'arg':source['url']})
+        data=response.get('data',{})
+        tags=data.get('new_tags',data.get('tags',''))
+        # Fetching tags must never erase previously imported comments or local title edits.
+        return self.store.upsert_source(work_id,{'url':source['url'],'tags':tags,'status':'fetched'})
+
+    def nas_loop(self):
+        while not self.stop.wait(2):
+            job=self.store.claim('nas','lanraragi')
+            if not job:continue
+            try:
+                plugins=self.lrr.json('/api/plugins/download')
+                if not any(re.search(p.get('url_regex') or r'(?!)',job['url']) for p in plugins):
+                    self.store.report(job['id'],job['lease'],'blocked',
+                                      '이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 엔진 작업자를 연결하세요.')
+                    continue
+                response=self.lrr.json('/api/download_url','POST',{'url':job['url']})
+                remote_id=str(response['job'])
+                while not self.stop.wait(2):
+                    status=self.lrr.json('/api/minion/'+remote_id+'/detail')
+                    state=status.get('state')
+                    if state=='finished':
+                        self.store.report(job['id'],job['lease'],'complete','서버 다운로드 완료',{'remote_job':remote_id})
+                        try:self.sync()
+                        except Exception:pass  # Download success remains separate from catalog synchronization.
+                        break
+                    if state=='failed':
+                        self.store.report(job['id'],job['lease'],'failed','서버 다운로드가 실패했습니다.',{'remote_job':remote_id})
+                        break
+                    self.store.report(job['id'],job['lease'],'running','서버에서 다운로드 중',{'remote_job':remote_id})
+            except Exception as error:
+                try:self.store.report(job['id'],job['lease'],'failed',public_error(error))
+                except ValueError:pass
+
+
+def public_error(error):
+    if isinstance(error,urllib.error.HTTPError):
+        return f'LANraragi 연결 오류 (HTTP {error.code})'
+    if isinstance(error,(urllib.error.URLError,TimeoutError,OSError)):
+        return '서버에 연결할 수 없습니다. 연결 설정과 실행 상태를 확인하세요.'
+    if isinstance(error,(ValueError,KeyError)):
+        return str(error).strip("'")[:500]
+    return '작업 처리 중 오류가 발생했습니다. 서버 로그를 확인하세요.'
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version='LibraryStudio/0.1'
+
+    def log_message(self, format, *args):
+        # Do not log URLs, source titles, credentials, or user input.
+        return
+
+    @property
+    def app(self):return self.server.app
+
+    def authorized(self):
+        auth=self.headers.get('Authorization','')
+        token=os.environ.get('STUDIO_WORKER_TOKEN','')
+        if token and hmac.compare_digest(auth,'Bearer '+token):return True
+        password=os.environ.get('STUDIO_PASSWORD','')
+        if password:
+            expected='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
+            if hmac.compare_digest(auth,expected):return True
+        elif self.server.dev:
+            host=urllib.parse.urlsplit('http://'+self.headers.get('Host','')).hostname
+            if host in ('localhost','127.0.0.1','::1') and self.client_address[0] in ('127.0.0.1','::1'):
+                return True
+        self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="Library Studio", charset="UTF-8"')
+        self.send_header('Content-Length','0');self.end_headers();return False
+
+    def respond(self, value, status=200):
+        raw=json.dumps(value,ensure_ascii=False).encode()
+        self.send_response(status);self.send_header('Content-Type','application/json; charset=utf-8')
+        self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+
+    def body(self):
+        length=int(self.headers.get('Content-Length','0'))
+        if length<0 or length>4*1024*1024:raise ValueError('요청 크기 제한을 초과했습니다.')
+        value=json.loads(self.rfile.read(length))
+        if not isinstance(value,dict):raise ValueError('JSON 객체가 필요합니다.')
+        return value
+
+    def do_GET(self):
+        if not self.authorized():return
+        try:self.get()
+        except Exception as error:self.respond({'error':public_error(error)},404 if isinstance(error,KeyError) else 502 if isinstance(error,(urllib.error.URLError,OSError)) else 400)
+
+    def get(self):
+        parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
+        def q(key,default=''):return qs.get(key,[default])[0]
+        store=self.app.store
+        if path=='/api/health':
+            try:
+                info=self.app.lrr.json('/api/info');connected=True
+            except Exception:info={};connected=False
+            return self.respond(dict(status='ok',lanraragi_connected=connected,
+                                     version=info.get('version'),targets=['nas','pc'],
+                                     comment_fetch='import-only',metadata_fetch='installed-plugins',
+                                     command_workers='operator-configured'))
+        if path=='/api/works':
+            return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
+                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1'))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
+        if match:return self.respond(store.get_work(match[1]))
+        if path=='/api/jobs':
+            # Worker leases are credentials, never expose them in the browser list.
+            return self.respond([{k:v for k,v in j.items() if k not in ('lease','lease_until')} for j in store.jobs()])
+        if path=='/api/export':
+            return self.respond(store.export())
+        match=re.fullmatch(r'/api/media/([0-9a-f]{40})/(thumbnail|download|files|page)',path)
+        if match:
+            query='?'+parsed.query if parsed.query else ''
+            if match[2]=='files':
+                value=self.app.lrr.json('/api/archives/'+match[1]+'/files'+query)
+                if isinstance(value.get('pages'),list):
+                    with store.db() as db:
+                        db.execute('UPDATE works SET pages=? WHERE lrr_id=?',(len(value['pages']),match[1]))
+                return self.respond(value)
+            with self.app.lrr.open('/api/archives/'+match[1]+'/'+match[2]+query,
+                                   headers={'Range':self.headers['Range']} if self.headers.get('Range') else {}) as response:
+                self.send_response(response.status)
+                for key in ('Content-Type','Content-Length','Content-Disposition','Accept-Ranges','Content-Range'):
+                    if response.headers.get(key):self.send_header(key,response.headers[key])
+                self.send_header('X-Content-Type-Options','nosniff')
+                self.send_header('Cache-Control','private, max-age=3600' if match[2]=='thumbnail' else 'no-store')
+                self.end_headers()
+                while block:=response.read(256*1024):self.wfile.write(block)
+            return
+        if path.startswith('/api/'):return self.respond({'error':'찾을 수 없습니다.'},404)
+        assets={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        filename=assets.get(path)
+        if not filename:return self.respond({'error':'찾을 수 없습니다.'},404)
+        raw=(HERE/'web'/filename).read_bytes()
+        self.send_response(200)
+        self.send_header('Content-Type',(mimetypes.guess_type(filename)[0] or 'application/octet-stream')+'; charset=utf-8')
+        self.send_header('Content-Length',str(len(raw)));self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Referrer-Policy','no-referrer')
+        self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.end_headers();self.wfile.write(raw)
+
+    def do_POST(self):
+        if not self.authorized():return
+        origin=self.headers.get('Origin')
+        if origin:
+            parsed=urllib.parse.urlsplit(origin)
+            if parsed.netloc!=self.headers.get('Host') or parsed.scheme not in ('http','https'):
+                return self.respond({'error':'다른 사이트의 요청은 허용하지 않습니다.'},403)
+        if not self.headers.get('Content-Type','').startswith('application/json'):
+            return self.respond({'error':'application/json 요청이 필요합니다.'},415)
+        try:self.post(self.body())
+        except Exception as error:self.respond({'error':public_error(error)},404 if isinstance(error,KeyError) else 502 if isinstance(error,(urllib.error.URLError,OSError)) else 400)
+
+    def post(self, data):
+        path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/sync':return self.respond(self.app.sync())
+        if path=='/api/works':return self.respond(store.create_work(data.get('title',''),data.get('artist','')),201)
+        match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
+        if match:return self.respond(store.update_work(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
+        if match:return self.respond(store.upsert_source(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)
+        if match:return self.respond(self.app.fetch_metadata(match[1],match[2]))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/progress',path)
+        if match:
+            store.progress(match[1],data.get('page'));return self.respond({'success':True})
+        if path=='/api/jobs':
+            return self.respond(store.queue(data.get('url'),data.get('target'),data.get('engine'),data.get('work_id')),201)
+        match=re.fullmatch('/api/jobs/([0-9a-f]{32})/retry',path)
+        if match:store.retry(match[1]);return self.respond({'success':True})
+        if path.startswith('/api/worker/'):
+            token=os.environ.get('STUDIO_WORKER_TOKEN','')
+            if not token or not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+token):
+                return self.respond({'error':'Worker token required'},403)
+            if path=='/api/worker/claim':
+                return self.respond(store.claim(data.get('target'),'command'))
+            match=re.fullmatch('/api/worker/([0-9a-f]{32})/report',path)
+            if match:
+                store.report(match[1],data.get('lease'),data.get('state'),data.get('message',''),data.get('result'))
+                return self.respond({'success':True})
+        return self.respond({'error':'찾을 수 없습니다.'},404)
+
+
+def make_server(host,port,app,dev=False):
+    if dev and host not in ('127.0.0.1','::1'):
+        raise ValueError('개발용 인증 생략은 루프백에서만 가능합니다.')
+    if not dev and not os.environ.get('STUDIO_PASSWORD'):
+        raise ValueError('STUDIO_PASSWORD를 설정하세요.')
+    server=ThreadingHTTPServer((host,port),Handler);server.app=app;server.dev=dev
+    return server
+
+
+if __name__=='__main__':
+    app=Studio(Store(os.environ.get('STUDIO_DATABASE',str(HERE/'data'/'studio.db'))),
+               LRR(os.environ.get('LRR_URL','http://127.0.0.1:43121'),os.environ.get('LRR_API_KEY','')))
+    host=os.environ.get('STUDIO_HOST','127.0.0.1');port=int(os.environ.get('STUDIO_PORT','43120'))
+    server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1')
+    threading.Thread(target=app.nas_loop,daemon=True).start()
+    print(f'Library Studio: http://{host}:{port}',flush=True)
+    try:server.serve_forever()
+    finally:app.stop.set();server.server_close()

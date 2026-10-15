@@ -1,0 +1,46 @@
+name: library-studio
+services:
+  lanraragi:
+    image: lanraragi-studio:lrr
+    build:
+      context: ..
+      dockerfile: tools/build/docker/Dockerfile
+    environment:
+      LRR_API_KEY: ${LRR_API_KEY:?Set LRR_API_KEY in .env}
+      LRR_AUTOFIX_PERMISSIONS: "0"
+      LRR_UID: "9001"
+      LRR_GID: "9001"
+    volumes:
+      - ${STUDIO_LIBRARY:-./data/library}:/home/koyomi/lanraragi/content
+      - lrr-thumbnails:/home/koyomi/lanraragi/thumb
+      - lrr-database:/home/koyomi/lanraragi/database
+      - lrr-plugins:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.5
+  studio:
+    image: lanraragi-studio:web
+    build:
+      context: ..
+      dockerfile: studio/Dockerfile
+    environment:
+      LRR_URL: http://lanraragi:3000
+      LRR_API_KEY: ${LRR_API_KEY:?Set LRR_API_KEY in .env}
+      STUDIO_PASSWORD: ${STUDIO_PASSWORD:?Set STUDIO_PASSWORD in .env}
+      STUDIO_WORKER_TOKEN: ${STUDIO_WORKER_TOKEN:?Set STUDIO_WORKER_TOKEN in .env}
+      TZ: Asia/Seoul
+    ports:
+      - ${STUDIO_BIND:-127.0.0.1}:${STUDIO_PORT:-43120}:8090
+    volumes:
+      - studio-data:/data
+    depends_on:
+      lanraragi:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+volumes:
+  lrr-thumbnails:
+  lrr-database:
+  lrr-plugins:
+  studio-data:
