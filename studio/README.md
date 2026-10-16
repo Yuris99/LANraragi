@@ -63,7 +63,7 @@ python -B -m unittest discover -s studio/tests -v
 node --check studio/web/app.js
 ```
 
-The cloud continuation passes 50 tests and the JS syntax check. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
+The cloud continuation passes 69 tests and the JS syntax check. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
 
 ## DS718+ and cloud development
 
