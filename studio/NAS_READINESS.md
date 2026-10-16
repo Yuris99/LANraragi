@@ -7,7 +7,7 @@
 - 개발/합성 통합 검증: 통과. 실제 비루트 Studio 이미지 기동, 새 전용 볼륨 초기화/재기동, 읽기/다운로드/설정 보존과 SQLite 백업/복원을 확인했다.
 - 전체 LANraragi 포크 이미지: 아직 차단. 관리형 CA secret 전달을 준비했지만 Alpine 호스트가 프록시 CONNECT 403을 반환한다. 공식 0.9.81 의존성 기반 호환성 이미지로 테스트한 결과를 전체 포크 빌드 성공으로 표시하지 않는다.
 - 실제 사이트 다운로드/댓글: 미실행. 정상 접근 권한이 확인된 테스트 URL을 요청했으며 아직 받지 않았다. E-Hentai/Hitomi/nHentai 호스트도 현재 HTTP 허용 목록에 없다.
-- 실제 DS718+ 배포: 미실행. DSM/Container Manager 버전, 설치 메모리, 전용 경로, UID/GID, 접속 방식이 미확인이다. NMLO/Stash와 개인 미디어에는 접근하거나 변경하지 않았다.
+- 실제 DS718+ 시험 배포: 사용자 실행 결과로 LANraragi/Studio 모두 healthy를 확인했다(2026-10-17). CFS quota 오류는 전용 프로젝트 설정 수정으로 복구됐다. PC 브라우저 접속은 SSH 포트 전달 거부로 아직 미검증이다. NMLO/Stash와 개인 원본을 변경하지 않았다.
 
 ## 사이트별 지원 상태와 필요한 접근
 
@@ -142,3 +142,7 @@ python studio/backup.py restore <백업-DB> <새-복원-DB>
 사용자 설치 출력으로 이미지 2개 로드, NAS 내부 비밀 생성, 새 네트워크/볼륨 5개 생성을 확인했다. LANraragi 컨테이너 생성은 Docker의 `NanoCPUs can not be set` 오류로 중단됐다. 따라서 실제 NAS 서비스 기동/접속은 아직 성공으로 기록하지 않는다.
 
 NAS/선택 작업자 Compose의 `cpus`를 제거했다. 메모리 제한/작업 병렬 수 1/loopback 접속/전용 볼륨 정책은 유지한다. 기존 설치는 새 `resume-pilot.sh`로 자체 Compose만 백업·수정해 같은 프로젝트를 재개한다. 커널/cgroup/Docker socket 권한이나 기존 Stash/NMLO를 변경하지 않는다. 전체 이미지 패키지를 다시 로드하거나 `.env.nas`를 새로 만들 필요가 없다.
+
+## 실제 NAS 기동 후 PC 접속 상태 (2026-10-17)
+
+사용자가 복구 스크립트 실행 후 LANraragi healthy, Studio healthy 결과를 제공했다. 이로써 실제 시험 서비스 기동은 확인됐으나 브라우저/읽기/태그/백업의 NAS 실사용 검증은 별도다. PC SSH 로그인은 되지만 로컬 포워딩 채널이 `administratively prohibited`로 거부됐다. 이는 앱 건강 상태와 구분되는 SSH 포워딩 정책 문제다. 유효한 AllowTcpForwarding/DisableForwarding/PermitOpen 설정을 읽기 전용으로 먼저 확인한다. 기존 SSH 설정/서비스 변경이나 새 네트워크 바인딩은 구체적인 범위·복구 절차 검토 없이 자동 적용하지 않는다.
