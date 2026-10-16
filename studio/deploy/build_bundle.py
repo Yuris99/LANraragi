@@ -45,7 +45,7 @@ def build(destination,web,lrr):
     env=os.environ.copy()
     for name in ('DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH'):env.pop(name,None)
     with subprocess.Popen(['docker','--host=unix:///var/run/docker.sock','image','save',*ids],env=env,stdout=subprocess.PIPE) as process:
-        with gzip.open(temporary,'wb',compresslevel=1) as output:shutil.copyfileobj(process.stdout,output,1024*1024)
+        with gzip.open(temporary,'wb',compresslevel=9) as output:shutil.copyfileobj(process.stdout,output,1024*1024)
         if process.wait():raise RuntimeError('Docker image export failed')
     temporary.rename(destination/'images.tar.gz')
     manifest=[]
