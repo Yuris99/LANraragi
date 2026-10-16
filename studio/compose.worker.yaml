@@ -19,5 +19,4 @@ services:
     depends_on:
       studio: {condition: service_healthy}
     mem_limit: 384m
-    cpus: 0.5
     restart: unless-stopped

@@ -50,7 +50,7 @@ docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt \
 - 라이브러리 bind 경로는 존재해야 한다. Compose가 오타 경로를 자동 생성하지 않는다. 새 다운로드 하위 디렉터리도 확인된 UID/GID로 미리 준비해야 한다.
 - `compose.worker.yaml`: 선택적으로 NAS 작업자 1개. 출력은 새 라이브러리 안의 전용 다운로드 폴더에 둔다. 각 시도별 폴더의 CBZ를 상류가 읽으며, 원본 다운로드 이미지는 삭제하지 않는다. CBZ에 원래 GalleryDL 정보를 별도 gallery-dl-original.json으로 보존하고, 상류 플러그인용 info.json에는 확인한 source URL을 넣는다. GalleryDL 메타데이터 플러그인 설정/수집은 배포 검증에서 확인한다.
 - 기본 바인딩은 `127.0.0.1:43120`. PC/다른 장치 접근을 위한 NAS의 사설 HTTPS 경로와 VPN 주소는 아직 미확인이다. 임의 공개/인터페이스 확장을 하지 않는다.
-- 현재 자원 상한은 상류 1GiB/1.5 CPU, Studio 256MiB/0.5 CPU, 선택 작업자 384MiB/0.5 CPU다. 설치 메모리와 DSM 여유량 확인 전 동시 기동 용량을 보장하지 않는다. 작업자 병렬 수는 1부터 시작한다.
+- 현재 자원 상한은 상류 1GiB, Studio 256MiB, 선택 작업자 384MiB다. 설치 메모리와 DSM 여유량 확인 전 동시 기동 용량을 보장하지 않는다. 작업자 병렬 수는 1부터 시작한다. 일부 Synology 커널은 CFS quota가 없어 NAS 구성에서 `cpus` 강제 상한을 요청하지 않는다.
 
 `prepare_nas.py`는 확인된 경로·UID/GID·불변 이미지 digest로 로컬 `.env.nas`를 생성한다. 새 비밀을 별도로 만들며 파일 모드는 0600이다. 기존 파일을 덮어쓰거나 NAS에 연결하지 않는다. 다운로드 경로는 새 라이브러리의 하위여야 한다.
 
@@ -136,3 +136,9 @@ python studio/backup.py restore <백업-DB> <새-복원-DB>
 `install-pilot.sh plan`은 아무것도 변경하지 않는다. `install`은 sudo와 검토된 신규 루트/UID/GID를 요구하고, 기존 루트/프로젝트/볼륨을 거부한다. 새 경로·볼륨 5개·프로젝트만 만들며 비밀은 NAS에서 생성한다. 외부 사이트 작업자는 비활성, 접속은 loopback/SSH 터널이다. 정확한 대상 계정은 사용자 제공 진단과 클라우드의 동일 숫자 계정 시험을 바탕으로 선택하되 NAS ACL/실제 동작은 별도 확인한다. 먼저 `PILOT_GUIDE.ko.md`의 변경 대상을 검토하고 실제 설치 승인을 받는다.
 
 테스트 73개와 대상 계정 조건의 실제 브라우저 통합 검증을 통과했다. 순정 Compose 2.20.1의 공개 체크섬을 검증해 구성 호환성을 확인했다. Synology의 정확한 2.20.1 벤더 빌드와 Docker 24의 실제 기동은 아직 NAS 검증 대상이다.
+
+## 실제 NAS에서 확인된 기동 차단 (2026-10-17)
+
+사용자 설치 출력으로 이미지 2개 로드, NAS 내부 비밀 생성, 새 네트워크/볼륨 5개 생성을 확인했다. LANraragi 컨테이너 생성은 Docker의 `NanoCPUs can not be set` 오류로 중단됐다. 따라서 실제 NAS 서비스 기동/접속은 아직 성공으로 기록하지 않는다.
+
+NAS/선택 작업자 Compose의 `cpus`를 제거했다. 메모리 제한/작업 병렬 수 1/loopback 접속/전용 볼륨 정책은 유지한다. 기존 설치는 새 `resume-pilot.sh`로 자체 Compose만 백업·수정해 같은 프로젝트를 재개한다. 커널/cgroup/Docker socket 권한이나 기존 Stash/NMLO를 변경하지 않는다. 전체 이미지 패키지를 다시 로드하거나 `.env.nas`를 새로 만들 필요가 없다.

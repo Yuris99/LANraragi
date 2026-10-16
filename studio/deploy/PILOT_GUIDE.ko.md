@@ -62,3 +62,9 @@ PC 브라우저에서 `http://127.0.0.1:43120`을 연다. 아이디는 `admin`. 
 - `.env.nas`와 이미지 ID/Compose 보관본을 NAS 안에 보호한다. 업그레이드 전 Studio 쓰기와 LANraragi를 정지하고 새 전용 볼륨 5개, 라이브러리/inbox, 설정을 함께 백업한다. SQLite 백업만으로 업로드 파일이나 Redis가 보존되지 않는다.
 - DB 복원은 원본을 덮어쓰지 않고 새 파일로 복원한다. 이전 이미지와 스키마의 호환성 확인 없이 되돌리지 않는다. 파일/볼륨 복원은 NAS 로컬의 별도 신규 대상으로 먼저 검증한다.
 - 이 문서는 계획과 안전한 시험 절차다. 실제 NAS 배포/성능/복원 성공은 NAS에서 결과를 확인한 뒤에만 완료로 기록한다.
+
+## Synology NanoCPUs/CFS 오류에서 재개
+
+`NanoCPUs can not be set` 오류는 커널의 CFS quota 미지원으로 Docker가 CPU 사용률 강제 상한을 거부한 것이다. DSM/커널/cgroup 설정을 바꾸지 않는다. 최신 NAS Compose는 CPU quota를 요청하지 않으며 메모리 제한과 다운로드/색인 작업 병렬 수 1을 유지한다. 구형 패키지의 기존 설치에서는 최초 설치 스크립트를 다시 실행하지 않는다.
+
+검토된 `resume-pilot.sh apply /volume1/docker/library-studio`를 sudo로 실행하면 기존 NAS Compose를 `compose.nas.before-cfs.yaml`로 보존하고 CPU 두 줄만 제거한 뒤 같은 프로젝트를 `up -d --force-recreate`로 재개한다. 기존 `.env.nas`와 볼륨을 사용하고 비밀을 재생성하지 않는다. 변경된 디렉터리/백업/CPU 항목 수가 예상과 다르면 중지한다. 구형 Compose에서는 `cpus: 0` overlay가 기존 값을 지우지 못하므로 그 방법은 사용하지 않는다. 복구 후 `ps`에서 LANraragi와 Studio 상태를 확인하고 업로드/읽기/원본 다운로드를 재검증한다.

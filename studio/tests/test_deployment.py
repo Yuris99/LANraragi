@@ -35,4 +35,20 @@ class DeploymentTests(unittest.TestCase):
         result=self.run_installer('install','/volume987654321/docker/library-studio','1026','100')
         self.assertNotEqual(result.returncode,0)
 
+class RecoveryTests(unittest.TestCase):
+    def test_recovery_plan_does_not_require_or_mutate_a_nas(self):
+        script=INSTALLER.with_name('resume-pilot.sh')
+        result=subprocess.run(['sh',str(script),'plan','/volume1/docker/library-studio'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Plan only: no changes.',result.stdout)
+        self.assertIn('No secret regeneration, data deletion or DSM changes.',result.stdout)
+
+    def test_recovery_rejects_unrelated_paths_before_apply(self):
+        script=INSTALLER.with_name('resume-pilot.sh')
+        for root in ['/','/volume1/docker/stash','/volume1/../docker/library-studio','/volumeX/docker/library-studio']:
+            with self.subTest(root=root):
+                result=subprocess.run(['sh',str(script),'apply',root],capture_output=True,text=True)
+                self.assertNotEqual(result.returncode,0)
+                self.assertNotIn('Own Compose backed up',result.stdout)
+
 if __name__=='__main__':unittest.main()

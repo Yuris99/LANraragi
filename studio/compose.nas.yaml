@@ -65,7 +65,6 @@ services:
     depends_on:
       volume-init: {condition: service_completed_successfully}
     mem_limit: 1g
-    cpus: 1.5
     restart: unless-stopped
   studio:
     image: ${STUDIO_WEB_IMAGE:?Required}
@@ -98,7 +97,6 @@ services:
       volume-init: {condition: service_completed_successfully}
       lanraragi: {condition: service_healthy}
     mem_limit: 256m
-    cpus: 0.5
     restart: unless-stopped
 volumes:
   lrr-database:
