@@ -146,3 +146,5 @@ NAS/선택 작업자 Compose의 `cpus`를 제거했다. 메모리 제한/작업 
 ## 실제 NAS 기동 후 PC 접속 상태 (2026-10-17)
 
 사용자가 복구 스크립트 실행 후 LANraragi healthy, Studio healthy 결과를 제공했다. 이로써 실제 시험 서비스 기동은 확인됐으나 브라우저/읽기/태그/백업의 NAS 실사용 검증은 별도다. PC SSH 로그인은 되지만 로컬 포워딩 채널이 `administratively prohibited`로 거부됐다. 이는 앱 건강 상태와 구분되는 SSH 포워딩 정책 문제다. 유효한 AllowTcpForwarding/DisableForwarding/PermitOpen 설정을 읽기 전용으로 먼저 확인한다. 기존 SSH 설정/서비스 변경이나 새 네트워크 바인딩은 구체적인 범위·복구 절차 검토 없이 자동 적용하지 않는다.
+
+NAS의 유효 `AllowTcpForwarding no`가 사용자 출력으로 확인됐다. 전역 허용 대신 계정·PC 주소·Studio 목적지 하나로 제한한 [SSH 변경 검토안](deploy/SSH_TUNNEL_CHANGE.ko.md)을 준비했다. 합성 OpenSSH 검사만 통과한 제안이며 실제 NAS SSH 서비스 변경은 승인 전이다.
