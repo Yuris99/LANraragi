@@ -1,0 +1,8 @@
+# Explicit offline pilot override. Images are loaded and pinned by local SHA-256 ID.
+services:
+  volume-init:
+    pull_policy: never
+  lanraragi:
+    pull_policy: never
+  studio:
+    pull_policy: never
