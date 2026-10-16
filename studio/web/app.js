@@ -1,5 +1,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = { page: 1, view: "library", provider: "", query: "", sort: "added", direction: "desc", detail: null, reader: null };
+const selectedWorks = new Set();
+let tagTargets = [];
+const state = { page: 1, view: "library", provider: "", query: "", tag: "", sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
 settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", ...settings };
@@ -48,18 +50,21 @@ function cover(work) {
 let requestNumber = 0;
 async function load() {
     const request = ++requestNumber;
-    const query = new URLSearchParams({ q: state.query, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
+    const query = new URLSearchParams({ q: state.query, tag: state.tag, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
     const result = await api(`/api/works?${query}`);
     if (request !== requestNumber) return;
     $("#total").textContent = `${result.total.toLocaleString()} 작품`;
-    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" tabindex="0" role="button" aria-label="${esc(work.title)} 상세 보기">${cover(work)}<div><h3>${esc(work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div></div><div class="card-sources">${sources(work)}</div></article>`).join("");
+    selectedWorks.clear();
+    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" tabindex="0" role="button" aria-label="${esc(work.title)} 상세 보기"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.title)} 선택"></label>${cover(work)}<div><h3>${esc(work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div></div><div class="card-sources">${sources(work)}</div></article>`).join("");
+    updateSelection();
     $("#empty").hidden = result.items.length > 0;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
 }
 async function showDetail(id) {
     const work = await api(`/api/works/${id}`); state.detail = work;
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id ? "" : "disabled"}>▷ 읽기</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·태그 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 파일" : "메타데이터만 등록됨 · 파일을 동기화하면 읽을 수 있습니다."}</p></div></div>
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id ? "" : "disabled"}>▷ 읽기</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 파일" : "메타데이터만 등록됨 · 파일을 동기화하면 읽을 수 있습니다."}</p></div></div>
+    <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section"><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3>${work.sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><button class="quiet" data-fetch="${s.id}">태그 가져오기</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></div><small>${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`}
     <details class="detail-section"><summary>출처 연결 · 태그·댓글 가져오기</summary><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="https://…"></label><label>원본 태그<input name="tags" placeholder="쉼표로 구분 (선택)"></label><label>댓글 JSON (선택)<textarea name="comments" placeholder='[{"id":"1","author":"작성자","text":"댓글","posted_at":"2026-01-01"}]'></textarea></label><p class="muted">사이트별 정보를 따로 보존합니다. nHentai 공개 댓글 API 수집기는 실사이트 미검증입니다. E-Hentai·Hitomi 댓글은 JSON 가져오기를 사용하세요. 로그인·접근 제한은 우회하지 않습니다.</p><button class="primary">출처 저장</button></form></details></section>`;
@@ -104,6 +109,7 @@ function renderPage() {
 function turnPage(delta) { if (!state.reader) return; const n = state.reader.page + delta; if (n >= 0 && n < state.reader.pages.length) { state.reader.page = n; renderPage(); } }
 function guard(fn) { return (...args) => Promise.resolve().then(() => fn(...args)).catch((e) => toast(e.message)); }
 document.addEventListener("click", guard(async (event) => {
+    if (event.target.closest(".card-select")) return;
     const button = event.target.closest("button,a,.card"); if (!button) return;
     if (button.dataset.close !== undefined) button.closest("dialog").close();
     if (button.dataset.view) await view(button.dataset.view);
@@ -115,7 +121,10 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.fetch) { button.disabled = true; try { await api(`/api/works/${state.detail.id}/sources/${button.dataset.fetch}/fetch`, {}); await showDetail(state.detail.id); toast("출처 태그를 갱신했습니다."); } finally { button.disabled = false; } }
     if (button.dataset.comments) { button.disabled = true; try { const result = await api(`/api/works/${state.detail.id}/sources/${button.dataset.comments}/comments/fetch`, {}); await showDetail(state.detail.id); toast(result.message); } finally { button.disabled = false; } }
     if (button.dataset.retry) { await api(`/api/jobs/${button.dataset.retry}/retry`, {}); await showJobs(); }
-    if (button.dataset.tag) { state.query = button.dataset.tag; $("#search").value = state.query; $("#detail").close(); await load(); }
+    if (button.dataset.userFilter) { state.tag = button.dataset.userFilter; state.query = ""; $("#search").value = ""; $("#detail").close(); await load(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
+    if (button.dataset.removeUserTag) { await api("/api/tags/batch", {work_ids:[state.detail.id],remove:[button.dataset.removeUserTag]}); await showDetail(state.detail.id); await load(); }
+    if (button.id === "edit-user-tags") await openTagEditor([state.detail.id]);
+    if (button.dataset.tag) { state.tag = ""; state.query = button.dataset.tag; $("#search").value = state.query; $("#detail").close(); await load(); }
 }));
 $("#grid").addEventListener("keydown", guard(async (e) => { if (e.key === "Enter" && e.target.dataset.id) await showDetail(e.target.dataset.id); }));
 document.addEventListener("submit", guard(async (event) => {
@@ -129,7 +138,7 @@ $("#detail").addEventListener("click", guard(async (e) => {
     if (e.target.closest("#read-work")) await readWork();
     if (e.target.closest("#edit-work")) {
         const section = document.createElement("section"); section.className = "detail-section";
-        section.innerHTML = `<form id="work-form"><label>제목<input name="title" required value="${esc(state.detail.title)}"></label><label>작가<input name="artist" value="${esc(state.detail.artist)}"></label><label>내 태그<input name="tags" value="${esc(state.detail.tags.join(", "))}"></label><p class="muted">저장하면 제목을 잠가 다음 동기화에서 덮어쓰지 않습니다.</p><button class="primary">저장</button></form>`;
+        section.innerHTML = `<form id="work-form"><label>제목<input name="title" required value="${esc(state.detail.title)}"></label><label>작가<input name="artist" value="${esc(state.detail.artist)}"></label><p class="muted">저장하면 제목을 잠가 다음 동기화에서 덮어쓰지 않습니다.</p><button class="primary">저장</button></form>`;
         $("#detail-content").append(section); $("#edit-work").disabled = true;
     }
 }));
@@ -144,7 +153,7 @@ $("#read-direction").onchange = (e) => { settings.direction = e.target.value; sa
 $("#layout").onclick = () => { settings.layout = settings.layout === "list" ? "grid" : "list"; saveSettings(); };
 $("#direction").onclick = guard(async () => { state.direction = state.direction === "desc" ? "asc" : "desc"; $("#direction").textContent = state.direction === "desc" ? "↓" : "↑"; await load(); });
 $("#sort").onchange = guard(async (e) => { state.sort = e.target.value; state.page = 1; await load(); });
-$("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => { state.query = $("#search").value; state.page = 1; await load(); }), 250); };
+$("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => { state.tag = ""; state.query = $("#search").value; state.page = 1; await load(); }), 250); };
 $("#previous").onclick = guard(async () => { state.page -= 1; await load(); }); $("#next").onclick = guard(async () => { state.page += 1; await load(); });
 $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () => turnPage(1);
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
@@ -154,6 +163,7 @@ guard(async () => { const health = await api("/api/health"); $("#connection-dot"
 setInterval(guard(async () => { if (state.view === "jobs" && !document.hidden) await showJobs(); }), 5000);
 
 let uploadBusy = false;
+let uploadSelection = null;
 let uploadLimit = 512 * 1024 * 1024;
 async function refreshUploads(sync = false) {
     if (sync) { try { await api("/api/uploads/sync", {}); } catch { /* Saved uploads remain downloadable while indexing is unavailable. */ } }
@@ -165,7 +175,7 @@ async function refreshUploads(sync = false) {
 function uploadFile(file) {
     return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
-        request.open("POST", `/api/uploads?filename=${encodeURIComponent(file.name)}`);
+        request.open("POST", `/api/uploads?filename=${encodeURIComponent(file.name)}&tags=${encodeURIComponent(JSON.stringify(splitTags($("#upload-tags").value)))}`);
         request.setRequestHeader("Content-Type", "application/octet-stream");
         request.upload.onprogress = (event) => { if (event.lengthComputable) $("#upload-progress").value = event.loaded * 100 / event.total; };
         request.onload = () => { try { const value = JSON.parse(request.responseText); if (request.status >= 200 && request.status < 300) resolve(value); else reject(new Error(value.error || "업로드 실패")); } catch (error) { reject(error); } };
@@ -176,7 +186,7 @@ function uploadFile(file) {
 $("#upload").onclick = guard(async () => { $("#upload-dialog").showModal(); await refreshUploads(); });
 $("#upload-start").onclick = guard(async () => {
     if (uploadBusy) return;
-    const files = [...$("#upload-files").files];
+    const files = uploadSelection || [...$("#upload-files").files];
     if (!files.length || files.length > 20) throw new Error("파일을 1~20개 선택하세요.");
     if (files.some((file) => !/\.(cbz|zip|pdf)$/i.test(file.name) || file.size < 1 || file.size > uploadLimit)) throw new Error("파일 형식과 크기 한도를 확인하세요.");
     uploadBusy = true; $("#upload-start").disabled = true; $("#upload-files").disabled = true; $("#upload-progress").hidden = false;
@@ -188,8 +198,74 @@ $("#upload-start").onclick = guard(async () => {
             $("#upload-status").textContent = result.duplicate ? "이미 저장된 파일입니다." : "파일 저장 완료 · 보관함 색인 대기";
             await refreshUploads(true);
         }
-        $("#upload-files").value = ""; await load();
+        $("#upload-files").value = ""; $("#upload-folder").value = ""; uploadSelection = null; await load();
     } catch (error) { $("#upload-status").textContent = error.message; throw error; }
     finally { uploadBusy = false; $("#upload-start").disabled = false; $("#upload-files").disabled = false; await refreshUploads(); }
 });
 setInterval(guard(async () => { if ($("#upload-dialog").open && !uploadBusy && !document.hidden) { await refreshUploads(true); await load(); } }), 5000);
+
+function updateSelection() {
+    $("#selected-count").textContent = selectedWorks.size + "개 선택";
+    $("#batch-tags").disabled = !selectedWorks.size;
+    const boxes = [...document.querySelectorAll("[data-select-work]")];
+    $("#select-page").checked = !!boxes.length && boxes.every((box) => selectedWorks.has(box.dataset.selectWork));
+    $("#select-page").indeterminate = selectedWorks.size > 0 && !$("#select-page").checked;
+}
+document.addEventListener("change", (event) => {
+    const box = event.target;
+    if (box.dataset.selectWork) { if (box.checked) selectedWorks.add(box.dataset.selectWork); else selectedWorks.delete(box.dataset.selectWork); updateSelection(); }
+});
+$("#select-page").onchange = (event) => {
+    document.querySelectorAll("[data-select-work]").forEach((box) => { box.checked = event.target.checked; if (box.checked) selectedWorks.add(box.dataset.selectWork); else selectedWorks.delete(box.dataset.selectWork); }); updateSelection();
+};
+async function tagSuggestions(query = "", prefix = "") {
+    const rows = await api("/api/tags?q=" + encodeURIComponent(query));
+    $("#tag-suggestions").innerHTML = rows.map((row) => `<option value="${esc(prefix + row.tag)}"></option>`).join("");
+    return rows;
+}
+async function openTagEditor(ids) {
+    tagTargets = [...ids]; $("#tag-form").reset(); $("#tag-dialog-title").textContent = ids.length + "개 작품 태그 편집";
+    $("#tag-dialog").showModal(); await tagSuggestions();
+}
+$("#batch-tags").onclick = guard(() => openTagEditor([...selectedWorks]));
+const splitTags = (value) => value.split(",").map((tag) => tag.trim()).filter(Boolean);
+document.addEventListener("input", (event) => {
+    if (event.target.getAttribute("list") !== "tag-suggestions") return;
+    const value = event.target.value, cut = value.lastIndexOf(","), prefix = cut >= 0 ? value.slice(0, cut + 1) + " " : "";
+    clearTimeout(state.tagTimer); state.tagTimer = setTimeout(guard(() => tagSuggestions(value.slice(cut + 1).trim(), prefix)), 200);
+});
+async function renderTagCatalog() {
+    const rows = await tagSuggestions($("#tag-search").value);
+    $("#tag-catalog").innerHTML = rows.map((row) => `<button type="button" class="tag" data-manage-tag="${esc(row.tag)}">${esc(row.tag)} · ${row.count} 작품</button>`).join("") || '<p class="muted">사용자 태그가 없습니다.</p>';
+}
+$("#manage-tags").onclick = guard(async () => { $("#tag-manager").showModal(); await renderTagCatalog(); });
+$("#tag-search").oninput = () => { clearTimeout(state.catalogTimer); state.catalogTimer = setTimeout(guard(renderTagCatalog),200); };
+$("#tag-catalog").onclick = (event) => { const button = event.target.closest("[data-manage-tag]"); if (button) $("#rename-tag-form").elements.source.value = button.dataset.manageTag; };
+let renameTags;
+document.addEventListener("submit", guard(async (event) => {
+    if (event.target.id === "tag-form") {
+        const form = event.target;
+        await api("/api/tags/batch", {work_ids:tagTargets,add:splitTags(form.elements.add.value),remove:splitTags(form.elements.remove.value)});
+        $("#tag-dialog").close(); if ($("#detail").open) await showDetail(state.detail.id); await load(); toast("사용자 태그를 저장했습니다.");
+    }
+    if (event.target.id === "rename-tag-form") {
+        renameTags = Object.fromEntries(new FormData(event.target));
+        $("#rename-summary").textContent = `‘${renameTags.source}’ 태그를 모든 작품에서 ‘${renameTags.target}’로 변경합니다. 출처 원본은 유지됩니다.`;
+        $("#rename-confirm").showModal();
+    }
+}));
+$("#rename-apply").onclick = guard(async () => {
+    $("#rename-apply").disabled = true;
+    try { const result = await api("/api/tags/rename", renameTags); if (state.tag === renameTags.source) state.tag = renameTags.target; $("#rename-confirm").close(); await renderTagCatalog(); if ($("#detail").open) await showDetail(state.detail.id); await load(); toast(result.updated + "개 작품의 태그를 변경했습니다."); }
+    finally { $("#rename-apply").disabled = false; }
+});
+
+function chooseUploadFiles(files) {
+    if (uploadBusy) return;
+    uploadSelection = [...files].filter((file) => /\.(cbz|zip|pdf)$/i.test(file.name));
+    $("#upload-status").textContent = uploadSelection.length + "개 압축 파일·PDF 선택됨 · 폴더 구조는 저장하지 않습니다.";
+}
+$("#upload-files").onchange = (event) => chooseUploadFiles(event.target.files);
+$("#upload-folder").onchange = (event) => chooseUploadFiles(event.target.files);
+$("#upload-drop").ondragover = (event) => { event.preventDefault(); };
+$("#upload-drop").ondrop = (event) => { event.preventDefault(); chooseUploadFiles(event.dataTransfer.files); };

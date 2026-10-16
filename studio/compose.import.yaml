@@ -1,0 +1,11 @@
+# Optional overlay for either base Compose file. Only a NEW dedicated inbox.
+services:
+  studio:
+    environment:
+      STUDIO_IMPORT_DIR: /inbox
+    volumes:
+      - type: bind
+        source: ${STUDIO_INBOX:?Set a verified dedicated inbox directory}
+        target: /inbox
+        read_only: true
+        bind: {create_host_path: false}

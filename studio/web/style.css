@@ -12,3 +12,7 @@
 .privacy-mode{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:16px;font-size:11px;color:var(--muted)}.privacy-mode a{color:var(--accent);text-decoration:underline}
 
 .search{min-width:0}.upload-row{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);font-size:12px}.upload-row>div{flex:1;min-width:0;overflow-wrap:anywhere}.upload-row small{display:block;font-size:10px;color:var(--muted);margin-top:5px}#upload-progress{width:100%}#upload-dialog{width:640px}@media(max-width:700px){.upload-row{flex-wrap:wrap}.upload-row>div{flex-basis:100%}}
+
+.batch-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0}.batch-toolbar label{display:flex;align-items:center;gap:6px;margin:0}.batch-toolbar input,.card-select input{width:auto}.card{position:relative}.card-select{position:absolute;z-index:2;top:8px;left:8px;background:#fff;padding:6px;border-radius:6px;cursor:pointer}.tag button{background:transparent;border:0;color:inherit;cursor:pointer}#tag-catalog{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}#tag-manager{width:min(640px,94vw)}
+
+#upload-drop{border:2px dashed #8b8fa7;border-radius:12px;padding:22px;text-align:center;margin:16px 0}

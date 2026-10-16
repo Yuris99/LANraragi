@@ -46,6 +46,14 @@ class Store:
                 sha256 TEXT PRIMARY KEY, original_name TEXT NOT NULL,stored_name TEXT NOT NULL,
                 bytes INTEGER NOT NULL,created REAL NOT NULL,lrr_id TEXT,
                 state TEXT NOT NULL DEFAULT 'stored');
+              CREATE TABLE IF NOT EXISTS upload_tags (
+                sha256 TEXT NOT NULL REFERENCES uploads(sha256),tag TEXT NOT NULL,PRIMARY KEY(sha256,tag));
+              CREATE TABLE IF NOT EXISTS imports (
+                path TEXT PRIMARY KEY,bytes INTEGER NOT NULL,mtime INTEGER NOT NULL,sha256 TEXT NOT NULL);
+              CREATE TABLE IF NOT EXISTS user_tags (
+                work_id TEXT NOT NULL REFERENCES works(id),tag TEXT NOT NULL,
+                PRIMARY KEY(work_id,tag));
+              CREATE INDEX IF NOT EXISTS user_tags_name ON user_tags(tag,work_id);
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
             ''')
 
@@ -88,14 +96,15 @@ class Store:
             if not row:
                 raise KeyError('작품을 찾을 수 없습니다.')
             result = self.work_row(row)
+            result['user_tags'] = [r[0] for r in db.execute('SELECT tag FROM user_tags WHERE work_id=? ORDER BY tag',(work_id,))]
             result['sources'] = [self.source_row(s) for s in db.execute(
                 'SELECT * FROM sources WHERE work_id=? ORDER BY provider,external_id', (work_id,))]
-            result['all_tags'] = list(dict.fromkeys(result['tags'] + [
+            result['all_tags'] = list(dict.fromkeys(result['tags'] + result['user_tags'] + [
                 t for s in result['sources'] for t in s['tags']]))
             return result
 
     def list_works(self, query='', sort='added', descending=True, page=1, limit=48,
-                   provider='', favorite=False, unread=False):
+                   provider='', favorite=False, unread=False, tag=''):
         order = {'added': 'added', 'title': 'title COLLATE NOCASE', 'artist': 'artist COLLATE NOCASE',
                  'pages': 'pages', 'bytes': 'bytes', 'rating': 'rating',
                  'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()'}
@@ -106,7 +115,11 @@ class Store:
             # Parameters preserve SQL safety; LIKE wildcards are treated literally.
             term = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
             where.append("(title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND (s.external_id LIKE ? ESCAPE '\\' OR s.tags LIKE ? ESCAPE '\\'))) ")
-            args += [term] * 5
+            where[-1]="("+where[-1]+" OR EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag LIKE ? ESCAPE '\\'))"
+            args += [term] * 6
+        if tag:
+            where.append("EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)")
+            args.append(tag)
         if provider:
             where.append('EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider=?)')
             args.append(provider)
@@ -121,16 +134,75 @@ class Store:
                               (' DESC' if descending else ' ASC')+',id LIMIT ? OFFSET ?',
                               [*args, limit, (page-1)*limit]).fetchall()
             sources={row['id']:[] for row in rows}
+            user_tags={row['id']:[] for row in rows}
             if rows:
                 placeholders=','.join('?' for _ in rows)
                 for source in db.execute('SELECT * FROM sources WHERE work_id IN ('+placeholders+') ORDER BY provider,external_id',list(sources)):
                     sources[source['work_id']].append(self.source_row(source))
+                for item in db.execute('SELECT work_id,tag FROM user_tags WHERE work_id IN ('+placeholders+') ORDER BY tag',list(sources)):
+                    user_tags[item['work_id']].append(item['tag'])
             items=[]
             for row in rows:
                 work=self.work_row(row);work['sources']=sources[row['id']]
-                work['all_tags']=list(dict.fromkeys(work['tags']+[tag for source in work['sources'] for tag in source['tags']]))
+                work['user_tags']=user_tags[row['id']]
+                work['all_tags']=list(dict.fromkeys(work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']]))
                 items.append(work)
         return dict(items=items,total=total,page=page,limit=limit)
+
+    @staticmethod
+    def user_tag_values(value):
+        if not isinstance(value,list) or len(value)>100:
+            raise ValueError('태그는 최대 100개의 목록이어야 합니다.')
+        if any(not isinstance(t,str) or not t.strip() or len(t)>120 or any(ord(c)<32 for c in t) for t in value):
+            raise ValueError('태그는 1~120자의 텍스트여야 합니다.')
+        return list(dict.fromkeys(t.strip() for t in value))
+
+    def edit_user_tags(self,work_ids,add=None,remove=None):
+        if not isinstance(work_ids,list) or not 1<=len(work_ids)<=120 or any(not isinstance(i,str) for i in work_ids):
+            raise ValueError('작품을 1~120개 선택하세요.')
+        ids=list(dict.fromkeys(work_ids));add=self.user_tag_values([] if add is None else add);remove=self.user_tag_values([] if remove is None else remove)
+        with self.db() as db:
+            for work_id in ids:
+                if not db.execute('SELECT 1 FROM works WHERE id=?',(work_id,)).fetchone():raise KeyError('작품을 찾을 수 없습니다.')
+            for work_id in ids:
+                db.executemany('DELETE FROM user_tags WHERE work_id=? AND tag=?',[(work_id,t) for t in remove])
+                db.executemany('INSERT OR IGNORE INTO user_tags(work_id,tag) VALUES(?,?)',[(work_id,t) for t in add])
+                if db.execute('SELECT count(*) FROM user_tags WHERE work_id=?',(work_id,)).fetchone()[0]>100:
+                    raise ValueError('작품당 사용자 태그는 최대 100개입니다.')
+        return {'updated':len(ids)}
+
+    def tag_catalog(self,query=''):
+        if not isinstance(query,str) or len(query)>120:raise ValueError('검색어가 너무 깁니다.')
+        term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+        with self.db() as db:
+            rows=db.execute("SELECT tag,count(*) AS count FROM user_tags WHERE tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def rename_user_tag(self,source,target):
+        values=self.user_tag_values([source,target])
+        if len(values)!=2:raise ValueError('서로 다른 이름을 입력하세요.')
+        source,target=values
+        with self.db() as db:
+            count=db.execute('SELECT count(*) FROM user_tags WHERE tag=?',(source,)).fetchone()[0]
+            db.execute('INSERT OR IGNORE INTO user_tags(work_id,tag) SELECT work_id,? FROM user_tags WHERE tag=?',(target,source))
+            db.execute('DELETE FROM user_tags WHERE tag=?',(source,))
+        return {'updated':count}
+
+    def annotate_upload(self,sha,tags):
+        tags=self.user_tag_values(tags)
+        with self.db() as db:
+            db.executemany('INSERT OR IGNORE INTO upload_tags(sha256,tag) VALUES(?,?)',[(sha,t) for t in tags])
+            self.apply_upload_tags(db,sha)
+
+    @staticmethod
+    def apply_upload_tags(db,sha):
+        db.execute('INSERT OR IGNORE INTO user_tags(work_id,tag) SELECT w.id,t.tag FROM uploads u JOIN works w ON w.lrr_id=u.lrr_id JOIN upload_tags t ON t.sha256=u.sha256 WHERE u.sha256=?',(sha,))
+        if db.execute('SELECT count(*) FROM upload_tags WHERE sha256=?',(sha,)).fetchone()[0]>100:
+            raise ValueError('업로드 태그는 최대 100개입니다.')
+        row=db.execute('SELECT w.id FROM works w JOIN uploads u ON u.lrr_id=w.lrr_id WHERE u.sha256=?',(sha,)).fetchone()
+        if row and db.execute('SELECT count(*) FROM user_tags WHERE work_id=?',(row[0],)).fetchone()[0]>100:
+            raise ValueError('작품당 사용자 태그는 최대 100개입니다.')
+        if row:db.execute('DELETE FROM upload_tags WHERE sha256=?',(sha,))
 
     def create_work(self, title, artist='', lrr_id=None, pages=0, size=0, tags=None):
         title = str(title).strip()
@@ -253,7 +325,9 @@ class Store:
                     try:self.upsert_source(work['id'],{'url':value if value.startswith('https://') else 'https://'+value})
                     except ValueError:pass  # A source collision is never used to merge works.
             if upload:
-                with self.db() as db:db.execute("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",(lrr_id,upload['sha256']))
+                with self.db() as db:
+                    db.execute("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",(lrr_id,upload['sha256']))
+                    self.apply_upload_tags(db,upload['sha256'])
             count += 1
         return count
 

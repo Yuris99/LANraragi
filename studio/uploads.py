@@ -130,6 +130,12 @@ class Uploads:
         with self.store.db() as db:
             return [dict(row) for row in db.execute('SELECT u.*,w.id AS work_id FROM uploads u LEFT JOIN works w ON w.lrr_id=u.lrr_id ORDER BY u.created DESC LIMIT 100')]
 
+    def pending(self,after=''):
+        with self.store.db() as db:
+            rows=db.execute("SELECT * FROM uploads WHERE lrr_id IS NULL AND state='stored' AND sha256>? ORDER BY sha256 LIMIT 100",(after,)).fetchall()
+            if not rows and after:rows=db.execute("SELECT * FROM uploads WHERE lrr_id IS NULL AND state='stored' ORDER BY sha256 LIMIT 100").fetchall()
+        return [dict(row) for row in rows]
+
     def open(self,sha):
         row=self.get(sha)
         if self.root is None:raise KeyError('업로드 저장소가 연결되지 않았습니다.')

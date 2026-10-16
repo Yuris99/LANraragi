@@ -45,7 +45,7 @@ class LRR:
 class Studio:
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
-        self.sync_lock=threading.Lock()
+        self.sync_lock=threading.Lock();self.upload_cursor=''
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
     def sync(self):
@@ -63,10 +63,11 @@ class Studio:
         finally:self.sync_lock.release()
 
     def sync_uploads(self):
-        pending=[item for item in self.uploads.list() if not item['lrr_id'] and item['state']=='stored']
-        if not pending:return {'synced':0}
         if not self.sync_lock.acquire(blocking=False):return {'synced':0,'pending':True}
         try:
+            pending=self.uploads.pending(self.upload_cursor)
+            if not pending:return {'synced':0}
+            self.upload_cursor=pending[-1]['sha256']
             archives=self.lrr.json('/api/archives')
             if not isinstance(archives,list):raise ValueError('LANraragi 목록 형식 오류')
             indexed={item['arcid']:item for item in archives if isinstance(item,dict) and re.fullmatch('[0-9a-f]{40}',item.get('arcid',''))}
@@ -91,7 +92,9 @@ class Studio:
                 metadata.append(self.lrr.json('/api/archives/'+candidate+'/metadata'))
                 links.append((candidate,upload['sha256']))
             synced=self.store.sync_lrr(metadata)
-            with self.store.db() as db:db.executemany("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",links)
+            with self.store.db() as db:
+                db.executemany("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",links)
+                for _,sha in links:self.store.apply_upload_tags(db,sha)
             return {'synced':synced}
         finally:self.sync_lock.release()
 
@@ -240,9 +243,10 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/uploads':return self.respond({'items':self.app.uploads.list(),'enabled':self.app.uploads.root is not None,'max_bytes':self.app.uploads.max_bytes})
         match=re.fullmatch(r'/api/uploads/([0-9a-f]{64})/download',path)
         if match:return self.download_upload(match[1])
+        if path=='/api/tags':return self.respond(store.tag_catalog(q('q')))
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
-                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1'))
+                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag')))
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
         if match:return self.respond(store.get_work(match[1]))
         if path=='/api/jobs':
@@ -324,8 +328,10 @@ class Handler(BaseHTTPRequestHandler):
                 if self.headers.get_content_type()!='application/octet-stream':raise UploadError('파일 본문 형식이 올바르지 않습니다.',415)
                 values=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
                 name=values.get('filename',[''])[0]
+                tags=self.app.store.user_tag_values(json.loads(values.get('tags',['[]'])[0]))
                 self.connection.settimeout(30)
                 result=self.app.uploads.receive(self.rfile,int(self.headers.get('Content-Length','0')),name)
+                self.app.store.annotate_upload(result['sha256'],tags)
                 return self.respond(result,200 if result.get('duplicate') else 201)
             except Exception as error:
                 return self.respond({'error':public_error(error)},error.status if isinstance(error,UploadError) else 400)
@@ -336,6 +342,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/tags/batch':return self.respond(store.edit_user_tags(data.get('work_ids'),data.get('add'),data.get('remove')))
+        if path=='/api/tags/rename':return self.respond(store.rename_user_tag(data.get('source'),data.get('target')))
         if path=='/api/uploads/sync':return self.respond(self.app.sync_uploads())
         if path=='/api/sync':return self.respond(self.app.sync())
         if path=='/api/works':return self.respond(store.create_work(data.get('title',''),data.get('artist','')),201)
@@ -391,6 +399,10 @@ if __name__=='__main__':
     host=os.environ.get('STUDIO_HOST','127.0.0.1');port=int(os.environ.get('STUDIO_PORT','43120'))
     server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1')
     threading.Thread(target=app.nas_loop,daemon=True).start()
+    if os.environ.get('STUDIO_IMPORT_DIR'):
+        from importer import Importer
+        importer=Importer(app,os.environ['STUDIO_IMPORT_DIR'])
+        threading.Thread(target=importer.run,daemon=True).start()
     print(f'Library Studio: http://{host}:{port}',flush=True)
     try:server.serve_forever()
     finally:app.stop.set();server.server_close()

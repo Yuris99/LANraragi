@@ -10,6 +10,19 @@ The normal `/` screen pixelates thumbnails, detail covers and reader pages by de
 
 The default HTML starts masked before JavaScript initializes. Images remain hidden while their low-resolution canvas is prepared, and a canvas failure keeps the mask. `python -B studio/tests/mosaic_smoke.py` checks these behaviors with synthetic images, including desktop/mobile layouts.
 
+## User tags
+
+The detail screen's **내 태그 → 추가·삭제** edits a separate indexed SQLite relation. These tags survive LANraragi synchronization and never rewrite LANraragi or per-source original tags/comments. Click × to remove a user tag or its label for an exact user-tag filter. General search includes user tags; typing a new search clears that exact filter.
+
+Select cards (or **현재 페이지 선택**) and use **선택 작품 태그 편집** to add/remove tags atomically for up to 120 works. Selection resets on page/filter/reload. **태그 관리** lists the top 100 matching user tags with work counts; inputs suggest existing user tags. Name changes/merges require an in-app review before applying globally. Names are case-sensitive, whitespace trimmed, maximum 120 characters, up to 100 user tags per work. Original source-only tags cannot be deleted or renamed by these controls. User tags are included in metadata export and SQLite backup/restore.
+
+## Two import paths
+
+1. **Browser**: choose files, choose a folder, or drop files onto the upload area. Folder selection uploads contained CBZ/ZIP/PDF files individually; loose image folders are not packaged and folder structure is not preserved. Dragging directories is not supported; use the folder picker. Up to 20 archives per batch, sequentially streamed. Optional common user tags are saved with each upload and applied when indexed. Pending upload tags are consumed once so later manual deletions survive resync.
+2. **Dedicated inbox**: optionally combine either base Compose file with `-f studio/compose.import.yaml` and set `STUDIO_INBOX` to a verified **new dedicated existing directory**. It is mounted **read-only** at `/inbox`. Studio checks every ten seconds, waits at least 30 seconds since file modification, validates and copies supported archives into the upload volume, then links/indexes them automatically. A file still changing during copying is not published. Source files are never moved/deleted, links and hidden paths are skipped, successful size/mtime receipts survive restart, full-file hashes prevent duplicate storage. Keep sufficient space for source plus copied archive. Unchanged invalid files are skipped until modified or service restart; transient storage/busy errors retry. Scanning advances in batches of 1,000 directory entries. Copy to a `.part` name and rename to the final archive name only when complete. Folder names do not create library collections or tags.
+
+For plain Python use `STUDIO_IMPORT_DIR` with a separate read-only source directory and `STUDIO_UPLOAD_DIR` for output. Imports use the same upload size/validation limits. No NAS inbox is enabled by default; actual paths, permissions and deployment require a reviewed plan. Existing file selection remains available without the optional overlay.
+
 ## Browser file transfer
 
 Use **↑ 업로드** to select CBZ, image ZIP or PDF files (up to 20 per batch). Files stream sequentially; the default per-file limit is 512 MiB, configurable with `STUDIO_MAX_UPLOAD_BYTES` (maximum 2 GiB). ZIPs are CRC checked with bounded entry/directory/expanded-size limits; encrypted, split, unsafe-path archives are rejected. PDFs receive header/end-marker checks, not a full parser validation. PDF rendering depends on the LANraragi image.
