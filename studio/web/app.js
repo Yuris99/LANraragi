@@ -131,7 +131,15 @@ document.addEventListener("submit", guard(async (event) => {
     event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
     if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
     if (form.id === "source-form") { const value = { url: data.url }; if (data.tags) value.tags = data.tags; if (data.comments) value.comments = JSON.parse(data.comments); await api(`/api/works/${state.detail.id}/sources`, value); await showDetail(state.detail.id); await load(); }
-    if (form.id === "download-form") { await api("/api/jobs", data); form.closest("dialog").close(); await view("jobs"); }
+    if (form.id === "download-form") {
+        $("#download-submit").disabled = true;
+        try {
+            const result = await api("/api/downloads", data);
+            form.closest("dialog").close();
+            if (result.state === "available") { await showDetail(result.work_id); toast("이미 보관함에 있습니다. 읽기 또는 PC로 받기를 이용하세요."); }
+            else { await view("jobs"); toast("다운로드 대기열에 추가했습니다. 진행 상태를 확인하세요."); }
+        } finally { $("#download-submit").disabled = false; }
+    }
 }));
 $("#detail").addEventListener("click", guard(async (e) => {
     if (e.target.closest("#favorite-work")) { await api(`/api/works/${state.detail.id}`, { favorite: !state.detail.favorite }); await showDetail(state.detail.id); await load(); }
@@ -144,7 +152,28 @@ $("#detail").addEventListener("click", guard(async (e) => {
 }));
 document.addEventListener("submit", guard(async (e) => { if (e.target.id === "work-form") { const data = Object.fromEntries(new FormData(e.target)); await api(`/api/works/${state.detail.id}`, { ...data, title_locked: true }); await showDetail(state.detail.id); await load(); } }));
 $("#sync").onclick = guard(sync); $("#empty-sync").onclick = guard(sync);
-$("#add").onclick = () => $("#editor").showModal(); $("#queue").onclick = () => $("#download-dialog").showModal();
+$("#add").onclick = () => $("#editor").showModal();
+$("#queue").onclick = $("#download-open").onclick = () => $("#download-dialog").showModal();
+let downloadRevision = 0;
+function resetDownloadPreview() {
+    downloadRevision++; $("#download-resolution").textContent = "";
+    const provider = $("#download-form [name=provider]").value;
+    $("#download-reference-help").textContent = provider === "ehentai" ? "E-Hentai는 처음 등록할 때 전체 URL이 필요합니다. 저장된 출처는 번호만 입력해도 됩니다." : "선택한 사이트의 작품 번호 또는 전체 URL을 입력하세요.";
+}
+$("#download-form [name=reference]").oninput = resetDownloadPreview;
+$("#download-form [name=provider]").onchange = resetDownloadPreview;
+$("#download-form [name=target]").onchange = () => {
+    const pc = $("#download-form [name=target]").value === "pc";
+    $("#download-form [name=engine] option[value=lanraragi]").disabled = pc;
+    if (pc) $("#download-form [name=engine]").value = "command";
+};
+$("#download-preview").onclick = guard(async () => {
+    const revision = downloadRevision;
+    const data = Object.fromEntries(new FormData($("#download-form")));
+    const result = await api("/api/downloads/resolve", data);
+    if (revision !== downloadRevision) return;
+    $("#download-resolution").textContent = `${providerName[result.provider]} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
+});
 $("#close-detail").onclick = () => $("#detail").close(); $("#close-reader").onclick = () => $("#reader").close();
 $("#settings-button").onclick = () => $("#settings").showModal();
 $("#card-size").onchange = (e) => { settings.size = e.target.value; saveSettings(); };

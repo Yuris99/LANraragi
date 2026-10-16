@@ -20,7 +20,7 @@ def inspect_database(connection):
     if connection.execute('PRAGMA foreign_key_check').fetchone():raise ValueError('Broken foreign keys')
     tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not TABLES<=tables:raise ValueError('Not a Studio database')
-    return {table:connection.execute('SELECT count(*) FROM '+table).fetchone()[0] for table in sorted(TABLES|(tables&{'uploads','user_tags','upload_tags','imports'}))}
+    return {table:connection.execute('SELECT count(*) FROM '+table).fetchone()[0] for table in sorted(TABLES|(tables&{'uploads','user_tags','upload_tags','imports','folder_imports'}))}
 
 
 def copy_database(source,destination,restore=False):

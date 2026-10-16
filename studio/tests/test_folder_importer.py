@@ -1,0 +1,144 @@
+"""Read-only folder import: source integrity, restart/dedup and race guards."""
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+import zipfile
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from folder_importer import FolderImporter
+from make_synthetic import create_fixture
+from store import Store
+from uploads import Uploads
+from backup import copy_database
+
+
+class FolderImportTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name);self.source=self.root/'source';self.source.mkdir()
+        self.book=self.source/'manga'/'Book';self.book.mkdir(parents=True)
+        self.images=self.source/'images';self.images.mkdir()
+        fixture=create_fixture(self.root/'fixture')
+        with zipfile.ZipFile(fixture) as cbz:
+            for index,name in enumerate(['10.png','2.png','1.png'],1):
+                (self.book/name).write_bytes(cbz.read(f'{index:02d}.png'))
+        self.store=Store(self.root/'studio.db');self.uploads=Uploads(self.store,self.root/'uploads')
+
+    def importer(self,**kwargs):
+        return FolderImporter(self.source,['manga','images'],self.uploads,stable_seconds=0,**kwargs)
+
+    def contents(self):
+        return {str(p.relative_to(self.source)):(p.read_bytes(),p.stat().st_mtime_ns,p.stat().st_mode)
+                for p in self.source.rglob('*') if p.is_file() and not p.is_symlink()}
+
+    def test_plan_reads_metadata_without_database_or_target_writes(self):
+        before=self.contents();importer=FolderImporter(self.source,['manga','images'],stable_seconds=0)
+        with patch.object(self.store,'db',side_effect=AssertionError('Plan must not open a DB')):
+            result=importer.scan()
+        self.assertEqual(result['ready'],1);self.assertEqual(result['pages'],3)
+        self.assertFalse((self.root/'uploads').exists());self.assertEqual(before,self.contents())
+
+    def test_natural_order_generated_archive_and_source_bytes_are_preserved(self):
+        before=self.contents();self.assertEqual(self.importer().scan()['imported'],1)
+        row=self.uploads.list()[0]
+        with zipfile.ZipFile(self.uploads.root/row['stored_name']) as cbz:
+            self.assertEqual(json.loads(cbz.read('studio-folder.json'))['pages'],['1.png','2.png','10.png'])
+            self.assertEqual(cbz.read('000001.png'),(self.book/'1.png').read_bytes())
+            self.assertEqual(cbz.testzip(),None)
+        self.assertEqual(row['original_name'],'Book.cbz');self.assertEqual(before,self.contents())
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT tag FROM upload_tags').fetchone()[0],'folder:manga/Book')
+
+    def test_restart_skips_receipts_and_preserves_manually_deleted_tags(self):
+        self.importer().scan()
+        with self.store.db() as db:db.execute('DELETE FROM upload_tags')
+        self.assertEqual(self.importer().scan()['imported'],0)
+        self.assertEqual(len(self.uploads.list()),1)
+        with self.store.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM upload_tags').fetchone()[0],0)
+
+    def test_crash_after_publish_before_receipt_has_deterministic_duplicate_recovery(self):
+        self.importer().scan();sha=self.uploads.list()[0]['sha256']
+        with self.store.db() as db:db.execute('DELETE FROM folder_imports')
+        self.importer().scan()
+        self.assertEqual([row['sha256'] for row in self.uploads.list()],[sha])
+
+    def test_staging_never_exposes_a_partial_archive_to_the_shared_watcher(self):
+        receive=self.uploads.receive
+        def guarded(*args):
+            self.assertFalse(list((self.uploads.root/'.staging').rglob('*.cbz')))
+            return receive(*args)
+        with patch.object(self.uploads,'receive',side_effect=guarded):
+            self.assertEqual(self.importer().scan()['imported'],1)
+
+    def test_source_revision_keeps_previous_archive(self):
+        self.importer().scan();first=self.uploads.list()[0]
+        (self.book/'2.png').write_bytes((self.book/'1.png').read_bytes())
+        # Finish the saved traversal before the next full source-change scan.
+        for _ in range(3):self.importer().scan()
+        self.assertEqual(len(self.uploads.list()),2)
+        self.assertEqual(hashlib.sha256((self.uploads.root/first['stored_name']).read_bytes()).hexdigest(),first['sha256'])
+
+    def test_symlinks_hidden_and_synology_thumbnail_directories_are_skipped(self):
+        for name in ['@eaDir','.hidden','#recycle']:
+            directory=self.source/'manga'/name;directory.mkdir();(directory/'page.png').write_bytes((self.book/'1.png').read_bytes())
+        (self.book/'symlink.png').symlink_to(self.book/'1.png')
+        (self.source/'manga'/'outside').symlink_to(self.root/'fixture',target_is_directory=True)
+        result=self.importer().scan(limit=100)
+        self.assertEqual(result['imported'],1);self.assertEqual(result['pages'],3)
+
+    def test_real_synthetic_webp_is_kept_as_webp(self):
+        content=base64.b64decode('UklGRjgAAABXRUJQVlA4ICwAAADQAQCdASoEAAQAAUAmJaACdLoB+AADsAD+rhf/M0M8lHlw/8wSvyDcqAAAAA==')
+        (self.book/'11.webp').write_bytes(content)
+        self.assertEqual(self.importer().scan()['pages'],4)
+        with zipfile.ZipFile(self.uploads.root/self.uploads.list()[0]['stored_name']) as cbz:
+            self.assertEqual(cbz.read('000004.webp'),content)
+
+    def test_invalid_images_and_changing_source_are_not_published(self):
+        (self.book/'2.png').write_bytes(b'<html>not an image</html>')
+        self.assertEqual(self.importer().scan()['errors'],1);self.assertEqual(self.uploads.list(),[])
+        (self.book/'2.png').write_bytes((self.book/'1.png').read_bytes())
+        importer=self.importer();snapshot=importer.snapshot;count=0
+        def changed(fd):
+            nonlocal count
+            result=snapshot(fd);count+=1
+            if count>=3:return (*result[:3],'different',result[4])
+            return result
+        with patch.object(importer,'snapshot',side_effect=changed):self.assertEqual(importer.scan()['errors'],1)
+        self.assertEqual(self.uploads.list(),[])
+
+    def test_stability_and_space_limits_defer_without_publishing(self):
+        importer=FolderImporter(self.source,['manga','images'],self.uploads,stable_seconds=3600)
+        self.assertEqual(importer.scan()['deferred'],1)
+        with patch('folder_importer.shutil.disk_usage',return_value=type('Space',(),{'free':1})()):
+            self.assertEqual(self.importer().scan()['errors'],1)
+        self.assertEqual(self.uploads.list(),[])
+
+    def test_bounded_scans_resume_instead_of_starving_later_directories(self):
+        importer=self.importer()
+        self.assertTrue(importer.scan(max_directories=1)['bounded'])
+        self.assertEqual(self.importer().scan(max_directories=1)['imported'],1)
+        self.assertEqual(self.importer().scan(max_directories=1)['directories'],1)
+        self.assertEqual(len(self.uploads.list()),1)
+
+    def test_root_escape_overlap_and_bad_cursor_are_rejected(self):
+        for roots in [['../outside'],['/absolute'],['manga','manga/Book'],['manga//Book'],['@eaDir']]:
+            with self.subTest(roots=roots),self.assertRaises(ValueError):FolderImporter(self.source,roots)
+        importer=self.importer()
+        with self.store.db() as db:db.execute('INSERT INTO settings VALUES(?,?)',(importer.cursor_key,'["../outside"]'))
+        with self.assertRaises(ValueError):importer.scan()
+
+    def test_backup_restore_preserves_folder_receipts_and_scan_progress(self):
+        self.importer().scan()
+        result=copy_database(self.store.path,self.root/'backup.db')
+        self.assertEqual(result['counts']['folder_imports'],1)
+        restored=Store(self.root/'backup.db')
+        with restored.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM folder_imports').fetchone()[0],1)
+
+
+if __name__=='__main__':unittest.main()

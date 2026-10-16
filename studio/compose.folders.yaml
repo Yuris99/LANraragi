@@ -1,0 +1,42 @@
+# Optional, explicitly invoked NAS-local image-folder import. Not a daemon.
+# Source must be a verified user-selected root, never a Stash/NMLO data root.
+services:
+  folder-import:
+    profiles: [folder-import]
+    image: ${STUDIO_FOLDER_IMAGE:?Set the tested immutable folder worker image}
+    pull_policy: never
+    platform: linux/amd64
+    user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    entrypoint: [python, /app/folder_importer.py]
+    command: [--operation, plan]
+    environment:
+      STUDIO_DATABASE: /data/studio.db
+      STUDIO_UPLOAD_DIR: /uploads
+      STUDIO_MAX_UPLOAD_BYTES: ${STUDIO_MAX_UPLOAD_BYTES:-536870912}
+      STUDIO_FOLDER_ROOT: /nas-library
+      STUDIO_FOLDER_COLLECTIONS: ${STUDIO_FOLDER_COLLECTIONS:-["manga","images"]}
+    volumes:
+      - type: bind
+        source: ${STUDIO_FOLDER_SOURCE:?Set a verified user-selected existing NAS root}
+        target: /nas-library
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${STUDIO_FOLDER_SCRIPT:?Set the reviewed NAS-local folder_importer.py}
+        target: /app/folder_importer.py
+        read_only: true
+        bind: {create_host_path: false}
+      - type: volume
+        source: studio-data
+        target: /data
+        volume: {nocopy: true}
+      - type: volume
+        source: studio-uploads
+        target: /uploads
+        volume: {nocopy: true}
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    restart: "no"

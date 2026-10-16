@@ -342,6 +342,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
+        if path=='/api/downloads':
+            return self.respond(store.request_download(data.get('provider'),data.get('reference'),data.get('target'),data.get('engine')))
         if path=='/api/tags/batch':return self.respond(store.edit_user_tags(data.get('work_ids'),data.get('add'),data.get('remove')))
         if path=='/api/tags/rename':return self.respond(store.rename_user_tag(data.get('source'),data.get('target')))
         if path=='/api/uploads/sync':return self.respond(self.app.sync_uploads())

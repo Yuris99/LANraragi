@@ -2,6 +2,14 @@
 
 Cloud continuation after `79f7dd70`: read `CLOUD_VALIDATION.md` first for fresh cloud evidence, changes and remaining blockers. The original checkpoint record below is historical.
 
+## Latest continuation: 2026-10-17 (Korea time)
+
+- NAS pilot: user-confirmed LANraragi/Studio healthy after CFS quota recovery, Windows SSH tunnel and administrator login. Exact NAS media-flow success and backup restore are still pending; cloud has no NAS management credential/TCP grant.
+- The selected NAS content is unpacked image folders. A separate, network-disabled, UID/GID 1026:100 one-shot folder worker preserves the read-only source and creates CBZ reading copies in the dedicated upload volume. Default plan is metadata-only; first import is bounded to one book. `manga` and `images` are configurable relative collections. It has persistent receipts/cursors, natural ordering, source-change and space guards, folder tags, no original deletion and no automatic whole-library watch. Read `deploy/NAS_FOLDERS.ko.md`. The actual absolute source path and first selected small folder are not yet confirmed. Do not assume `/volume1/...` from a display name.
+- The optional worker can reuse the exact NAS-loaded Studio image with the reviewed module mounted read-only. No large image transfer or existing service recreation is needed for that path. The new UI's number/URL entry is separate source work and is not deployed to the existing NAS web image.
+- The number resolver never guesses E-Hentai gallery identifiers, never borrows another site's matching number, never silently merges works and does not claim that URL derivation proves a live download. E-Hentai/Hitomi live downloads and automated comments remain unverified/unsupported as documented.
+- Current source validation: 105 unit/HTTP/config tests, JS syntax and synthetic browser tests; detailed runtime evidence/limits in CLOUD_VALIDATION.md. Personal media, NAS DBs/passwords/cookies/keys and root paths are not transferred into the checkout.
+
 The user requested moving ongoing development to a managed cloud environment with Tailscale, following their existing NMLO cloud workflow. Continue this fork in its own checkout; do not edit NMLO.
 
 ## Product goal

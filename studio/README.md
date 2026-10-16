@@ -1,6 +1,6 @@
 # Library Studio (work in progress)
 
-For the current deployment candidate, site-support matrix and operational procedures, read [NAS_READINESS.md](NAS_READINESS.md). Actual site downloads/comments and DS718+ deployment remain unverified and blocked on test URLs/access/environment details.
+For the current deployment candidate, site-support matrix and operational procedures, read [NAS_READINESS.md](NAS_READINESS.md). The NAS pilot's healthy services, SSH tunnel and Studio login are user-confirmed. Actual NAS media flows, site downloads/comments and recovery rehearsal remain unverified.
 
 A personal web library built on this LANraragi fork, with a separate small Python/SQLite service for cross-site identities, source-specific metadata and download routing. This is an initial implementation, not a finished release.
 
@@ -25,6 +25,8 @@ For plain Python use `STUDIO_IMPORT_DIR` with a separate read-only source direct
 
 ## Browser file transfer
 
+For unpacked NAS image folders, see [NAS_FOLDERS.ko.md](deploy/NAS_FOLDERS.ko.md). The optional one-shot `folder-import` service reads only selected subdirectories through a read-only mount and creates CBZ reading copies in the dedicated upload volume. It defaults to a metadata-only plan, preserves originals, supports natural page order and persistent receipts/cursors, and has no network access. The reviewed module is mounted read-only into a tested pinned Studio image. This needs a verified user-selected source path and is not installed/enabled on the NAS yet. Existing browser/inbox archive uploads remain available.
+
 Use **↑ 업로드** to select CBZ, image ZIP or PDF files (up to 20 per batch). Files stream sequentially; the default per-file limit is 512 MiB, configurable with `STUDIO_MAX_UPLOAD_BYTES` (maximum 2 GiB). ZIPs are CRC checked with bounded entry/directory/expanded-size limits; encrypted, split, unsafe-path archives are rejected. PDFs receive header/end-marker checks, not a full parser validation. PDF rendering depends on the LANraragi image.
 
 Completed files live in a **new dedicated `studio-uploads` volume**, writable by Studio and mounted read-only under LANraragi's `content/StudioUploads`. Temporary uploads are not indexed. Existing library files are never replaced. Full-file SHA-256 deduplicates uploads; equal filenames with different bytes remain separate. Partial upstream archive IDs alone never trigger a merge: existing candidates require a matching full-file hash. Conflicting upstream IDs are shown explicitly while the separately stored upload remains downloadable.
@@ -34,6 +36,12 @@ The upload dialog lists the most recent 100 files with **↓ 받기** links. Ori
 Both Compose files connect the shared volume. For direct Python runs set `STUDIO_UPLOAD_DIR` to a dedicated directory also exposed to LANraragi. Use the same verified UID/GID for both services. Back up **the upload volume separately together with the Studio database and LANraragi data**; the SQLite backup includes upload records but not archive bytes. Stop writers before a coordinated backup/restore. Do not remove volumes during upgrades. Interrupted transfers must be reselected; completed duplicate retries are safe. A killed process can leave unindexed `.staging/*.part` files; these are not automatically deleted.
 
 `python -B studio/tests/upload_smoke.py` runs synthetic browser transfer/index/reader checks against the isolated loopback Compose service (default port 43126; override `STUDIO_SMOKE_PORT`). It reads the ignored development env file for authentication and never accesses external media.
+
+## Number or URL entry
+
+**↓ 번호·URL로 가져오기** selects a provider, accepts a number/full URL and routes to NAS/PC. **입력 확인** resolves locally without contacting the source or creating a work/job. Hitomi/nHentai numbers derive that provider's URL; first-time E-Hentai numbers require the complete URL including its gallery identifier. Previously saved qualified identities reuse their full original URL and host. A mismatched provider/URL is rejected. Existing catalog files open their detail instead of queuing another download; metadata-only entries retain their existing work link. Active jobs remain deduplicated by provider+ID, target and engine. Neither number resolution nor a queued job proves remote access/download success. The actual engine and any normal authenticated access are still required. This new UI is not deployed to the NAS pilot yet.
+
+`python -B studio/tests/download_reference_smoke.py` verifies the local resolver, missing identifiers, source separation, existing-file handling and desktop/mobile UI with synthetic metadata only.
 
 ## Current implementation
 

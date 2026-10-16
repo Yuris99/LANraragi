@@ -16,3 +16,5 @@
 .batch-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0}.batch-toolbar label{display:flex;align-items:center;gap:6px;margin:0}.batch-toolbar input,.card-select input{width:auto}.card{position:relative}.card-select{position:absolute;z-index:2;top:8px;left:8px;background:#fff;padding:6px;border-radius:6px;cursor:pointer}.tag button{background:transparent;border:0;color:inherit;cursor:pointer}#tag-catalog{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}#tag-manager{width:min(640px,94vw)}
 
 #upload-drop{border:2px dashed #8b8fa7;border-radius:12px;padding:22px;text-align:center;margin:16px 0}
+
+@media(max-width:700px){.topbar{height:auto;min-height:100px;padding:14px 0;flex-wrap:wrap}.topbar .search{flex-basis:100%}#download-open{display:inline-flex;font-size:11px;padding:10px}}

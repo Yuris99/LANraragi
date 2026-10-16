@@ -356,6 +356,40 @@ class Store:
                        (job_id,work_id,source['url'],target,engine,'queued',now,now))
         return self.job(job_id)
 
+    def resolve_reference(self,provider,reference):
+        if provider not in ('ehentai','hitomi','nhentai'):
+            raise ValueError('출처를 선택하세요.')
+        if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
+            raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
+        value=reference.strip();origin='url'
+        if re.fullmatch('[0-9]{1,20}',value):
+            number=str(int(value))
+            if number=='0':raise ValueError('올바른 작품 번호를 입력하세요.')
+            with self.db() as db:
+                saved=db.execute('SELECT url FROM sources WHERE provider=? AND external_id=?',(provider,number)).fetchone()
+            if saved:value=saved[0];origin='saved'
+            elif provider=='ehentai':
+                raise ValueError('E-Hentai의 처음 등록하는 번호에는 전체 작품 URL이 필요합니다. 번호 외 URL 식별값을 추측하지 않습니다.')
+            else:
+                value=(f'https://hitomi.la/galleries/{number}.html' if provider=='hitomi' else f'https://nhentai.net/g/{number}/')
+                origin='number'
+        source=parse_source(value)
+        if source['provider']!=provider:raise ValueError('선택한 출처와 URL의 사이트가 다릅니다.')
+        with self.db() as db:
+            work=db.execute('''SELECT w.id,w.lrr_id FROM sources s JOIN works w ON w.id=s.work_id
+                               WHERE s.provider=? AND s.external_id=?''',
+                            (provider,source['external_id'])).fetchone()
+        return {**source,'origin':origin,'work_id':work['id'] if work else None,
+                'available':bool(work and work['lrr_id'])}
+
+    def request_download(self,provider,reference,target,engine):
+        if target not in ('nas','pc') or engine not in ('lanraragi','command') or (target=='pc' and engine=='lanraragi'):
+            raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')
+        source=self.resolve_reference(provider,reference)
+        if source['available']:
+            return {'state':'available','work_id':source['work_id']}
+        return {'state':'queued','job':self.public_job(self.queue(source['url'],target,engine,source['work_id']))}
+
     def job(self, job_id):
         with self.db() as db:
             row=db.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
