@@ -1,5 +1,6 @@
 """Installer safety checks: planning/errors never invoke Docker or write a NAS."""
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -50,5 +51,45 @@ class RecoveryTests(unittest.TestCase):
                 result=subprocess.run(['sh',str(script),'apply',root],capture_output=True,text=True)
                 self.assertNotEqual(result.returncode,0)
                 self.assertNotIn('Own Compose backed up',result.stdout)
+
+
+class FolderGroupProbeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.root=Path(self.temp.name)
+        identity=self.root/'id'
+        identity.write_text('#!/bin/sh\ncase "$1" in -u) printf "%s\\n" "${STUDIO_TEST_UID:-1026}";; -g) printf "100\\n";; -G) printf "%s\\n" "${STUDIO_TEST_GROUPS:-100 101}";; *) exit 2;; esac\n')
+        identity.chmod(0o755)
+        self.script=INSTALLER.with_name('probe-folder-groups.sh')
+
+    def probe(self,*args,**values):
+        before={path.name for path in self.root.iterdir()}
+        result=subprocess.run(['sh',str(self.script),*args],capture_output=True,text=True,
+                              env={**os.environ,'PATH':str(self.root)+os.pathsep+os.environ['PATH'],**values})
+        self.assertEqual(before,{path.name for path in self.root.iterdir()})
+        return result
+
+    def test_preview_uses_only_current_account_memberships_without_nas_mutation(self):
+        result=self.probe('preview','/volume1/Selected Share/Library')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Existing NAS account groups: 100 101',result.stdout)
+        self.assertIn('Preview only: no downloads, containers or NAS changes.',result.stdout)
+
+    def test_root_execution_import_and_malformed_groups_stop_before_actions(self):
+        result=self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_UID='0')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('not with sudo sh',result.stderr)
+        for group in ['100 101;touch','100 --privileged','100 2147483648',' ','']:
+            with self.subTest(group=group):
+                self.assertNotEqual(self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_GROUPS=group or 'invalid').returncode,0)
+        self.assertNotEqual(self.probe('import','/volume1/Selected/Library').returncode,0)
+
+    def test_bad_source_or_missing_source_stops_without_downloads_or_containers(self):
+        for source in ['/','/volume1','/volumeX/Selected/Library','/volume1/../other','/volume1/Selected,readonly=false',
+                       '/volume1/Selected\nother','/volume1/Selected\rother']:
+            with self.subTest(source=source):self.assertNotEqual(self.probe('preview',source).returncode,0)
+        result=self.probe('diagnose','/volume987654321/Selected/Library')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('no container started',result.stderr)
 
 if __name__=='__main__':unittest.main()
