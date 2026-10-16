@@ -33,6 +33,15 @@ def allowed_name(name):
     return not name.startswith('.') and name not in IGNORED
 
 
+def access_error(error):
+    # OSError text may contain a personal filename. Return only its standard
+    # errno description; validation messages here are our own fixed strings.
+    if isinstance(error,OSError):
+        return {'code':'filesystem_error','errno':error.errno,
+                'message':os.strerror(error.errno) if error.errno else 'Filesystem access failed'}
+    return {'code':'validation_failed','message':str(error)[:160] if isinstance(error,ValueError) else 'Stored record unavailable'}
+
+
 class FolderImporter:
     def __init__(self,root,collections,uploads=None,stable_seconds=30,max_pages=2000,max_entries=10000):
         self.root=Path(root).absolute();self.collections=[];self.uploads=uploads
@@ -167,7 +176,7 @@ class FolderImporter:
 
     def scan(self,limit=1,max_directories=1000):
         if not 1<=limit<=100 or not 1<=max_directories<=10000:raise ValueError('검사 한도를 확인하세요.')
-        result=dict(directories=0,ready=0,deferred=0,imported=0,unchanged=0,errors=0,pages=0)
+        result=dict(directories=0,ready=0,deferred=0,imported=0,unchanged=0,errors=0,pages=0,issues=[])
         pending=self.pending()
         while pending and result['directories']<max_directories:
             relative=pending.pop();result['directories']+=1
@@ -185,9 +194,42 @@ class FolderImporter:
                         if self.remembered(relative,signature):result['unchanged']+=1;continue
                         self.package(relative,fd,snapshot);result['imported']+=1
                         if result['imported']>=limit:break
-            except (OSError,ValueError,KeyError):result['errors']+=1
+            except (OSError,ValueError,KeyError) as error:
+                result['errors']+=1
+                if len(result['issues'])<20:
+                    # Collection names are explicitly configured, unlike private
+                    # descendant book/image names. Never include the latter.
+                    collection=next(p for p in self.collections if p==relative or p in relative.parents)
+                    issue={'collection':str(collection),**access_error(error)}
+                    if issue not in result['issues']:result['issues'].append(issue)
         self.save_pending(pending)
         result['bounded']=bool(pending)
+        return result
+
+    def diagnose(self):
+        result={'uid':os.getuid(),'gid':os.getgid(),'groups':os.getgroups(),'paths':[],'errors':0}
+        for label,relative in [('source',PurePosixPath('.'))]+[(str(p),p) for p in self.collections]:
+            item={'label':label};result['paths'].append(item)
+            try:
+                if relative.parts:
+                    with self.directory(relative.parent) as parent:
+                        info=os.stat(relative.name,dir_fd=parent,follow_symlinks=False)
+                else:info=self.root.lstat()
+                item.update(uid=info.st_uid,gid=info.st_gid,mode=oct(stat.S_IMODE(info.st_mode)),
+                            symlink=stat.S_ISLNK(info.st_mode))
+                with self.directory(relative) as fd:
+                    item['opened']=True
+                    item['read_only_mount']=bool(os.fstatvfs(fd).f_flag&os.ST_RDONLY)
+                    if relative.parts:
+                        pages,children,stable,_,_=self.snapshot(fd)
+                        item.update(direct_images=len(pages),child_directories=len(children),stable=stable)
+                    else:
+                        wanted={p.parts[0].casefold() for p in self.collections}
+                        item['matching_collection_names']=[name for name in self.entries(fd) if name.casefold() in wanted]
+            except (OSError,ValueError) as error:
+                item['error']=access_error(error);result['errors']+=1
+        mapping=Path('/proc/self/uid_map')
+        if mapping.is_file():result['uid_map']=mapping.read_text().strip()
         return result
 
     def pending(self):
@@ -218,7 +260,7 @@ class FolderImporter:
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--operation',choices=['plan','import'],default='plan')
+    parser.add_argument('--operation',choices=['plan','diagnose','import'],default='plan')
     parser.add_argument('--root',default=os.environ.get('STUDIO_FOLDER_ROOT','/nas-library'))
     parser.add_argument('--collections',default=os.environ.get('STUDIO_FOLDER_COLLECTIONS','["manga","images"]'))
     parser.add_argument('--limit',type=int,default=1)
@@ -227,7 +269,8 @@ def main():
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
         uploads=Uploads(Store(database),destination,int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024**2)))
-    result=FolderImporter(args.root,json.loads(args.collections),uploads).scan(args.limit)
+    importer=FolderImporter(args.root,json.loads(args.collections),uploads)
+    result=importer.diagnose() if args.operation=='diagnose' else importer.scan(args.limit)
     print(json.dumps({'operation':args.operation,**result},sort_keys=True))
     if result['errors']:raise SystemExit(1)
 

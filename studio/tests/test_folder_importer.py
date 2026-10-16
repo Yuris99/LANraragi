@@ -44,6 +44,34 @@ class FolderImportTests(unittest.TestCase):
         self.assertEqual(result['ready'],1);self.assertEqual(result['pages'],3)
         self.assertFalse((self.root/'uploads').exists());self.assertEqual(before,self.contents())
 
+    def test_diagnosis_reports_access_metadata_without_personal_paths_or_writes(self):
+        importer=FolderImporter(self.source,['manga','images'],stable_seconds=0)
+        before=self.contents()
+        result=importer.diagnose()
+        self.assertEqual(result['errors'],0)
+        self.assertEqual(result['uid'],os.getuid())
+        self.assertEqual(result['paths'][0]['matching_collection_names'],['images','manga'])
+        self.assertTrue(all(p['opened'] for p in result['paths']))
+        self.assertNotIn('Book',json.dumps(result));self.assertNotIn(str(self.source),json.dumps(result))
+        self.assertFalse((self.root/'uploads').exists());self.assertEqual(before,self.contents())
+
+    def test_permission_failure_has_errno_without_leaking_exception_filenames(self):
+        importer=FolderImporter(self.source,['manga','images'],stable_seconds=0)
+        error=PermissionError(13,'private exception text','private-book.png')
+        with patch.object(importer,'directory',side_effect=error):
+            report=importer.diagnose();scan=importer.scan()
+        self.assertEqual(report['errors'],3);self.assertEqual(scan['errors'],2)
+        self.assertEqual(scan['issues'][0]['errno'],13)
+        self.assertNotIn('private',json.dumps([report,scan]))
+
+    def test_diagnosis_distinguishes_missing_paths_and_page_limits(self):
+        importer=FolderImporter(self.source,['missing','manga/Book'],stable_seconds=0,max_pages=2)
+        report=importer.diagnose()
+        self.assertEqual(report['paths'][1]['error']['errno'],2)
+        self.assertTrue(report['paths'][2]['opened'])
+        self.assertEqual(report['paths'][2]['error']['code'],'validation_failed')
+        self.assertNotIn('1.png',json.dumps(report))
+
     def test_natural_order_generated_archive_and_source_bytes_are_preserved(self):
         before=self.contents();self.assertEqual(self.importer().scan()['imported'],1)
         row=self.uploads.list()[0]
