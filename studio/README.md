@@ -10,6 +10,18 @@ The normal `/` screen pixelates thumbnails, detail covers and reader pages by de
 
 The default HTML starts masked before JavaScript initializes. Images remain hidden while their low-resolution canvas is prepared, and a canvas failure keeps the mask. `python -B studio/tests/mosaic_smoke.py` checks these behaviors with synthetic images, including desktop/mobile layouts.
 
+## Browser file transfer
+
+Use **↑ 업로드** to select CBZ, image ZIP or PDF files (up to 20 per batch). Files stream sequentially; the default per-file limit is 512 MiB, configurable with `STUDIO_MAX_UPLOAD_BYTES` (maximum 2 GiB). ZIPs are CRC checked with bounded entry/directory/expanded-size limits; encrypted, split, unsafe-path archives are rejected. PDFs receive header/end-marker checks, not a full parser validation. PDF rendering depends on the LANraragi image.
+
+Completed files live in a **new dedicated `studio-uploads` volume**, writable by Studio and mounted read-only under LANraragi's `content/StudioUploads`. Temporary uploads are not indexed. Existing library files are never replaced. Full-file SHA-256 deduplicates uploads; equal filenames with different bytes remain separate. Partial upstream archive IDs alone never trigger a merge: existing candidates require a matching full-file hash. Conflicting upstream IDs are shown explicitly while the separately stored upload remains downloadable.
+
+The upload dialog lists the most recent 100 files with **↓ 받기** links. Original bytes and the first upload's filename are preserved; authenticated byte-range downloads are available immediately, including while LANraragi indexing is pending. While the dialog is open, completed files are matched to the catalog every five seconds; **열기** appears after indexing. Existing work detail downloads remain available. Both regular and `/unsen` routes use the same authentication; worker tokens cannot upload or download library files.
+
+Both Compose files connect the shared volume. For direct Python runs set `STUDIO_UPLOAD_DIR` to a dedicated directory also exposed to LANraragi. Use the same verified UID/GID for both services. Back up **the upload volume separately together with the Studio database and LANraragi data**; the SQLite backup includes upload records but not archive bytes. Stop writers before a coordinated backup/restore. Do not remove volumes during upgrades. Interrupted transfers must be reselected; completed duplicate retries are safe. A killed process can leave unindexed `.staging/*.part` files; these are not automatically deleted.
+
+`python -B studio/tests/upload_smoke.py` runs synthetic browser transfer/index/reader checks against the isolated loopback Compose service (default port 43126; override `STUDIO_SMOKE_PORT`). It reads the ignored development env file for authentication and never accesses external media.
+
 ## Current implementation
 
 - Korean thumbnail/list interface, title/artist/tag/source-ID search, pagination, eight sort modes, cover sizes and reading direction.

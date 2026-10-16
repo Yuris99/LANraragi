@@ -2,6 +2,7 @@
 import base64
 import concurrent.futures
 import hmac
+import hashlib
 import json
 import mimetypes
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 from connectors import fetch_comments
 from sources import parse_source
 from store import Store
+from uploads import Uploads,UploadError
 
 HERE=Path(__file__).parent
 
@@ -41,9 +43,10 @@ class LRR:
 
 
 class Studio:
-    def __init__(self, store, lrr):
+    def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
         self.sync_lock=threading.Lock()
+        self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
     def sync(self):
         if not self.sync_lock.acquire(blocking=False):
@@ -57,6 +60,39 @@ class Studio:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 metadata=list(pool.map(lambda i:self.lrr.json('/api/archives/'+i+'/metadata'),valid))
             return {'synced':self.store.sync_lrr(metadata)}
+        finally:self.sync_lock.release()
+
+    def sync_uploads(self):
+        pending=[item for item in self.uploads.list() if not item['lrr_id'] and item['state']=='stored']
+        if not pending:return {'synced':0}
+        if not self.sync_lock.acquire(blocking=False):return {'synced':0,'pending':True}
+        try:
+            archives=self.lrr.json('/api/archives')
+            if not isinstance(archives,list):raise ValueError('LANraragi 목록 형식 오류')
+            indexed={item['arcid']:item for item in archives if isinstance(item,dict) and re.fullmatch('[0-9a-f]{40}',item.get('arcid',''))}
+            metadata=[];links=[]
+            for upload in pending:
+                # The upstream ID hashes only the first 512000 bytes. Never use it
+                # alone to merge an upload with a previously indexed archive.
+                _,stream=self.uploads.open(upload['sha256'])
+                with stream:candidate=hashlib.sha1(stream.read(512000)).hexdigest()
+                if candidate not in indexed:continue
+                remote=indexed[candidate];matches=Path(remote.get('filename','')).stem==upload['sha256']
+                if not matches:
+                    digest=hashlib.sha256();received=0
+                    with self.lrr.open('/api/archives/'+candidate+'/download') as response:
+                        while block:=response.read(min(256*1024,upload['bytes']+1-received)):
+                            received+=len(block);digest.update(block)
+                            if received>upload['bytes']:break
+                    matches=received==upload['bytes'] and digest.hexdigest()==upload['sha256']
+                if not matches:
+                    with self.store.db() as db:db.execute("UPDATE uploads SET state='conflict' WHERE sha256=?",(upload['sha256'],))
+                    continue
+                metadata.append(self.lrr.json('/api/archives/'+candidate+'/metadata'))
+                links.append((candidate,upload['sha256']))
+            synced=self.store.sync_lrr(metadata)
+            with self.store.db() as db:db.executemany("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",links)
+            return {'synced':synced}
         finally:self.sync_lock.release()
 
     def fetch_metadata(self, work_id, source_id):
@@ -199,7 +235,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(dict(status='ok',lanraragi_connected=connected,
                                      version=info.get('version'),targets=['nas','pc'],
                                      comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'unsupported','hitomi':'unsupported'},metadata_fetch='installed-plugins',
-                                     command_workers='operator-configured'))
+                                     command_workers='operator-configured',uploads_enabled=self.app.uploads.root is not None,
+                                     max_upload_bytes=self.app.uploads.max_bytes))
+        if path=='/api/uploads':return self.respond({'items':self.app.uploads.list(),'enabled':self.app.uploads.root is not None,'max_bytes':self.app.uploads.max_bytes})
+        match=re.fullmatch(r'/api/uploads/([0-9a-f]{64})/download',path)
+        if match:return self.download_upload(match[1])
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
                 int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1'))
@@ -246,6 +286,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers();self.wfile.write(raw)
 
+    def download_upload(self,sha):
+        row,stream=self.app.uploads.open(sha)
+        with stream:
+            size=row['bytes'];start=0;end=size-1;status=200
+            value=self.headers.get('Range')
+            if value:
+                match=re.fullmatch(r'bytes=(\d*)-(\d*)',value)
+                if not match or not any(match.groups()):
+                    return self.respond({'error':'단일 바이트 범위만 지원합니다.'},416)
+                if match[1]:start=int(match[1]);end=min(end,int(match[2])) if match[2] else end
+                else:start=max(0,size-int(match[2]))
+                if not 0<=start<=end<size:return self.respond({'error':'파일 범위를 초과했습니다.'},416)
+                status=206
+            self.send_response(status)
+            self.send_header('Content-Type','application/octet-stream')
+            self.send_header('Content-Disposition',"attachment; filename=download"+Path(row['original_name']).suffix+"; filename*=UTF-8''"+urllib.parse.quote(row['original_name'],safe=''))
+            self.send_header('Content-Length',str(end-start+1));self.send_header('Accept-Ranges','bytes')
+            if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+            self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+            stream.seek(start);remaining=end-start+1
+            while remaining:
+                block=stream.read(min(256*1024,remaining))
+                if not block:break
+                self.wfile.write(block);remaining-=len(block)
+
     def do_POST(self):
         if not self.authorized():return
         origin=self.headers.get('Origin')
@@ -253,6 +318,17 @@ class Handler(BaseHTTPRequestHandler):
             parsed=urllib.parse.urlsplit(origin)
             if parsed.netloc!=self.headers.get('Host') or parsed.scheme not in ('http','https'):
                 return self.respond({'error':'다른 사이트의 요청은 허용하지 않습니다.'},403)
+        if urllib.parse.urlsplit(self.path).path=='/api/uploads':
+            try:
+                if self.headers.get('Transfer-Encoding'):raise UploadError('Content-Length가 있는 파일 요청이 필요합니다.',411)
+                if self.headers.get_content_type()!='application/octet-stream':raise UploadError('파일 본문 형식이 올바르지 않습니다.',415)
+                values=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                name=values.get('filename',[''])[0]
+                self.connection.settimeout(30)
+                result=self.app.uploads.receive(self.rfile,int(self.headers.get('Content-Length','0')),name)
+                return self.respond(result,200 if result.get('duplicate') else 201)
+            except Exception as error:
+                return self.respond({'error':public_error(error)},error.status if isinstance(error,UploadError) else 400)
         if not self.headers.get('Content-Type','').startswith('application/json'):
             return self.respond({'error':'application/json 요청이 필요합니다.'},415)
         try:self.post(self.body())
@@ -260,6 +336,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/uploads/sync':return self.respond(self.app.sync_uploads())
         if path=='/api/sync':return self.respond(self.app.sync())
         if path=='/api/works':return self.respond(store.create_work(data.get('title',''),data.get('artist','')),201)
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)

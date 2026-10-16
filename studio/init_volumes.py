@@ -5,7 +5,7 @@ from pathlib import Path
 import stat
 
 MARKER='.studio-volume.json'
-NAMES=('database','thumbnails','plugins','studio')
+NAMES=('database','thumbnails','plugins','studio','uploads')
 
 
 def initialize(root,uid,gid):

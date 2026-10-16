@@ -47,3 +47,11 @@ Studio Docker 이미지는 빌드했다. 전체 포크 Dockerfile은 `dl-cdn.alp
 4. 설치 확인: 메타데이터 `ehplugin`, `hitomiplugin`, `nhplugin`; 다운로드 `chaikadl`, `ehdl`, `pixivdl`. 설치는 실사이트 성공 증거가 아니다. Hitomi 다운로드 플러그인이나 특정 외부 다운로더의 실제 동작은 검증하지 않았다. 초기 레지스트리 갱신 성공도 보장하지 않는다.
 5. 대량 합성 라이브러리 성능 측정, DB 백업/복구 검증, DS718+ 전용 경로·UID/GID·메모리 확인을 포함한 배포안 준비.
 6. 실제 NAS 배포, 기존 서비스 변경, 개인 파일 이동/삭제, 공개 노출은 사용자 승인 전에는 실행하지 않는다.
+
+## Browser upload/download continuation (2026-10-16)
+
+- Added authenticated, streamed CBZ/ZIP/PDF uploads with one concurrent transfer, configurable 512 MiB default, bounded archive checks and full-file SHA-256 deduplication. New shared upload volume is read-only to LANraragi; existing library files are not overwritten. Original-filename downloads support byte ranges before indexing completes.
+- 59 Python unit/HTTP tests pass; JavaScript syntax and diff whitespace checks pass. Tests cover interrupted/unsafe input, scoped worker rejection, cross-origin rejection, duplicate/same-name behavior, original bytes/ranges, exact upstream linking and partial-ID collision refusal.
+- Built Studio image and ran a new isolated Compose project `library-studio-file-transfer` on loopback 43126, UID/GID 10001, with five fresh named volumes and an empty synthetic-only host library. Corrected this new test directory's mode from 0700 to 0755 so the configured service UID can traverse it. No existing NAS permissions were changed.
+- Chromium `studio/tests/upload_smoke.py` passed: UI upload, immediate original download/hash and filename, duplicate preservation, actual LANraragi watcher/indexing, masked reader, mobile/desktop layout, no JavaScript errors. Integration uses the previously documented official-0.9.81 compatibility image, **not** a newly built full fork image. PDF storage accepts basic structural markers; actual PDF rendering remains unverified.
+- Upload bytes require a separate coordinated volume backup; SQLite backups now count upload records as well. Actual NAS deployment, site downloads/comments, full-fork build and external access blockers remain as previously documented.

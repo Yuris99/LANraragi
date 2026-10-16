@@ -109,6 +109,7 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.view) await view(button.dataset.view);
     const provider = button.dataset.provider ?? button.dataset.filter;
     if (provider !== undefined) { state.provider = provider; state.page = 1; document.querySelectorAll("[data-filter]").forEach((b) => b.classList.toggle("selected", b.dataset.filter === provider)); await view("library"); }
+    if (button.dataset.uploadWork) { $("#upload-dialog").close(); await showDetail(button.dataset.uploadWork); }
     if (button.dataset.id) await showDetail(button.dataset.id);
     if (button.dataset.rating) { await api(`/api/works/${state.detail.id}`, { rating: Number(button.dataset.rating) }); await showDetail(state.detail.id); }
     if (button.dataset.fetch) { button.disabled = true; try { await api(`/api/works/${state.detail.id}/sources/${button.dataset.fetch}/fetch`, {}); await showDetail(state.detail.id); toast("출처 태그를 갱신했습니다."); } finally { button.disabled = false; } }
@@ -151,3 +152,44 @@ applySettings();
 guard(load)(); guard(showJobs)();
 guard(async () => { const health = await api("/api/health"); $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
 setInterval(guard(async () => { if (state.view === "jobs" && !document.hidden) await showJobs(); }), 5000);
+
+let uploadBusy = false;
+let uploadLimit = 512 * 1024 * 1024;
+async function refreshUploads(sync = false) {
+    if (sync) { try { await api("/api/uploads/sync", {}); } catch { /* Saved uploads remain downloadable while indexing is unavailable. */ } }
+    const result = await api("/api/uploads"); uploadLimit = result.max_bytes;
+    $("#upload-limit").textContent = result.enabled ? `파일당 최대 ${Math.floor(uploadLimit / 1048576)} MiB · 한 번에 최대 20개` : "업로드 전용 저장소를 먼저 연결해야 합니다.";
+    $("#upload-start").disabled = uploadBusy || !result.enabled;
+    $("#upload-list").innerHTML = result.items.map((file) => `<div class="upload-row"><div>${esc(file.original_name)}<small>${(file.bytes / 1048576).toFixed(1)} MiB · ${file.work_id ? "보관함 등록 완료" : file.state === "conflict" ? "보관함 ID 충돌 · 파일은 별도 보존됨" : "저장 완료 · 색인 대기"}</small></div><a class="quiet" href="/api/uploads/${file.sha256}/download" download>↓ 받기</a>${file.work_id ? `<button class="quiet" data-upload-work="${file.work_id}">열기</button>` : ""}</div>`).join("");
+}
+function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", `/api/uploads?filename=${encodeURIComponent(file.name)}`);
+        request.setRequestHeader("Content-Type", "application/octet-stream");
+        request.upload.onprogress = (event) => { if (event.lengthComputable) $("#upload-progress").value = event.loaded * 100 / event.total; };
+        request.onload = () => { try { const value = JSON.parse(request.responseText); if (request.status >= 200 && request.status < 300) resolve(value); else reject(new Error(value.error || "업로드 실패")); } catch (error) { reject(error); } };
+        request.onerror = () => reject(new Error("연결이 끊겼습니다. 업로드 목록을 확인한 뒤 다시 시도하세요."));
+        request.send(file);
+    });
+}
+$("#upload").onclick = guard(async () => { $("#upload-dialog").showModal(); await refreshUploads(); });
+$("#upload-start").onclick = guard(async () => {
+    if (uploadBusy) return;
+    const files = [...$("#upload-files").files];
+    if (!files.length || files.length > 20) throw new Error("파일을 1~20개 선택하세요.");
+    if (files.some((file) => !/\.(cbz|zip|pdf)$/i.test(file.name) || file.size < 1 || file.size > uploadLimit)) throw new Error("파일 형식과 크기 한도를 확인하세요.");
+    uploadBusy = true; $("#upload-start").disabled = true; $("#upload-files").disabled = true; $("#upload-progress").hidden = false;
+    try {
+        for (const [index, file] of files.entries()) {
+            $("#upload-status").textContent = `${index + 1}/${files.length} · ${file.name} 전송 중`;
+            $("#upload-progress").value = 0;
+            const result = await uploadFile(file);
+            $("#upload-status").textContent = result.duplicate ? "이미 저장된 파일입니다." : "파일 저장 완료 · 보관함 색인 대기";
+            await refreshUploads(true);
+        }
+        $("#upload-files").value = ""; await load();
+    } catch (error) { $("#upload-status").textContent = error.message; throw error; }
+    finally { uploadBusy = false; $("#upload-start").disabled = false; $("#upload-files").disabled = false; await refreshUploads(); }
+});
+setInterval(guard(async () => { if ($("#upload-dialog").open && !uploadBusy && !document.hidden) { await refreshUploads(true); await load(); } }), 5000);

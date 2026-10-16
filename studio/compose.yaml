@@ -13,6 +13,7 @@ services:
       LRR_GID: "9001"
     volumes:
       - ${STUDIO_LIBRARY:-./data/library}:/home/koyomi/lanraragi/content
+      - studio-uploads:/home/koyomi/lanraragi/content/StudioUploads:ro
       - lrr-thumbnails:/home/koyomi/lanraragi/thumb
       - lrr-database:/home/koyomi/lanraragi/database
       - lrr-plugins:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Managed
@@ -25,6 +26,8 @@ services:
       context: ..
       dockerfile: studio/Dockerfile
     environment:
+      STUDIO_UPLOAD_DIR: /uploads
+      STUDIO_MAX_UPLOAD_BYTES: ${STUDIO_MAX_UPLOAD_BYTES:-536870912}
       STUDIO_DATABASE: ${STUDIO_DATABASE:-/data/studio.db}
       LRR_URL: http://lanraragi:3000
       NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1},lanraragi"
@@ -39,6 +42,7 @@ services:
       - ${STUDIO_BIND:-127.0.0.1}:${STUDIO_PORT:-43120}:8090
     volumes:
       - studio-data:/data
+      - studio-uploads:/uploads
     depends_on:
       lanraragi:
         condition: service_healthy
@@ -50,3 +54,4 @@ volumes:
   lrr-database:
   lrr-plugins:
   studio-data:
+  studio-uploads:

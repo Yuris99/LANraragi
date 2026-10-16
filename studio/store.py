@@ -42,9 +42,15 @@ class Store:
                 updated REAL NOT NULL, lease TEXT, lease_until REAL, remote_id TEXT,
                 message TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '{}');
               CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(target,state,created);
+              CREATE TABLE IF NOT EXISTS uploads (
+                sha256 TEXT PRIMARY KEY, original_name TEXT NOT NULL,stored_name TEXT NOT NULL,
+                bytes INTEGER NOT NULL,created REAL NOT NULL,lrr_id TEXT,
+                state TEXT NOT NULL DEFAULT 'stored');
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
             ''')
 
+            upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
+            if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
             for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
@@ -221,6 +227,11 @@ class Store:
             lrr_id = item.get('arcid','')
             if not re.fullmatch('[0-9a-f]{40}',lrr_id):
                 continue
+            stored_stem=Path(item.get('filename','')).stem
+            with self.db() as db:
+                upload=db.execute('SELECT * FROM uploads WHERE sha256=?',(stored_stem,)).fetchone()
+            if upload and (not item.get('title') or item['title']==stored_stem):
+                item={**item,'title':Path(upload['original_name']).stem}
             tags = tags_list(item.get('tags',''))
             artist = ', '.join(x.split(':',1)[1] for x in tags if x.startswith('artist:'))
             with self.db() as db:
@@ -241,6 +252,8 @@ class Store:
                     value = tag.split(':',1)[1].strip()
                     try:self.upsert_source(work['id'],{'url':value if value.startswith('https://') else 'https://'+value})
                     except ValueError:pass  # A source collision is never used to merge works.
+            if upload:
+                with self.db() as db:db.execute("UPDATE uploads SET lrr_id=?,state='indexed' WHERE sha256=?",(lrr_id,upload['sha256']))
             count += 1
         return count
 
