@@ -17,22 +17,22 @@ def proposal(original,user,client):
     return original.rstrip()+'\n\n'+MARKER+'\nMatch User '+user+' Address '+client+'\n    AllowTcpForwarding local\n    PermitOpen 127.0.0.1:43120\n# END Library Studio scoped tunnel\n'
 
 
-def effective(config,user,client,sshd=None):
+def effective(config,user,client,sshd=None,server='127.0.0.1',port=22):
     binary=sshd or shutil.which('sshd')
     if not binary:raise ValueError('OpenSSH sshd is required to validate the proposal')
-    result=subprocess.run([binary,'-T','-f',str(config),'-C','user='+user+',addr='+client+',host='+client+',laddr=127.0.0.1,lport=22'],capture_output=True,text=True,check=True)
+    result=subprocess.run([binary,'-T','-f',str(config),'-C','user='+user+',addr='+client+',host='+client+',laddr='+server+',lport='+str(port)],capture_output=True,text=True,check=True)
     return dict(line.split(' ',1) for line in result.stdout.splitlines())
 
 
-def validate(original,candidate,user,client,sshd=None):
-    target=effective(candidate,user,client,sshd)
+def validate(original,candidate,user,client,sshd=None,server='127.0.0.1',port=22):
+    target=effective(candidate,user,client,sshd,server,port)
     if target.get('allowtcpforwarding')!='local' or target.get('permitopen')!='127.0.0.1:43120' or target.get('disableforwarding')!='no':
         raise ValueError('Existing policy prevents the scoped rule; do not install/reload')
     address=ipaddress.IPv4Address(client)
     other=str(ipaddress.IPv4Address(int(address)^1))
     different_user='root' if user!='root' else 'nobody'
     for name,source in [(user,other),(different_user,client)]:
-        if effective(original,name,source,sshd)!=effective(candidate,name,source,sshd):
+        if effective(original,name,source,sshd,server,port)!=effective(candidate,name,source,sshd,server,port):
             raise ValueError('Unrelated effective policy changed; do not install/reload')
     return {'forwarding':'local','destination':'127.0.0.1:43120','unrelated_contexts_unchanged':True}
 
