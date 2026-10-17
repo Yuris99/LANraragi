@@ -58,6 +58,16 @@ class Store:
                 PRIMARY KEY(work_id,tag));
               CREATE INDEX IF NOT EXISTS user_tags_name ON user_tags(tag,work_id);
               CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL);
+              CREATE TABLE IF NOT EXISTS folder_jobs (
+                id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE,
+                source_id TEXT NOT NULL, collections TEXT NOT NULL,
+                state TEXT NOT NULL, limit_count INTEGER NOT NULL DEFAULT 10,
+                imported INTEGER NOT NULL DEFAULT 0, scanned INTEGER NOT NULL DEFAULT 0,
+                skipped INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0,
+                created REAL NOT NULL, updated REAL NOT NULL, lease TEXT, lease_until REAL,
+                message TEXT NOT NULL DEFAULT '');
+              CREATE UNIQUE INDEX IF NOT EXISTS folder_jobs_active ON folder_jobs((1))
+                WHERE state IN ('queued','running');
             ''')
 
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
@@ -528,3 +538,48 @@ class Store:
         with self.db() as db:
             ids=[x[0] for x in db.execute('SELECT id FROM works ORDER BY added')]
         return {'schema_version':1,'exported_at':time.time(),'works':[self.get_work(i) for i in ids]}
+
+    @staticmethod
+    def folder_public(row):
+        return {k:row[k] for k in ('id','collections','state','limit_count','imported','scanned','skipped','errors','created','updated','message')}
+
+    def folder_status(self):
+        with self.db() as db:
+            row=db.execute("SELECT value FROM settings WHERE key='folder-worker'").fetchone()
+            worker=json.loads(row[0]) if row else {}
+            jobs=[self.folder_public(r) for r in db.execute('SELECT * FROM folder_jobs ORDER BY created DESC LIMIT 20')]
+        for job in jobs:job['collections']=json.loads(job['collections'])
+        return {'connected':time.time()-worker.get('seen',0)<660,
+                'configured':bool(worker),'collections':worker.get('collections',[]),
+                'last_seen':worker.get('seen'),'jobs':jobs,'batch_limit':10}
+
+    def queue_folder_import(self,collections,request_key):
+        if (not isinstance(collections,list) or not collections
+            or any(type(c) is not str or c not in ('manga','images') for c in collections)
+            or len(set(collections))!=len(collections)):
+            raise ValueError('manga 또는 images에서 가져올 폴더를 선택하세요.')
+        if not isinstance(request_key,str) or not re.fullmatch('[0-9a-f]{32}',request_key):
+            raise ValueError('가져오기 요청 번호가 올바르지 않습니다.')
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            previous=db.execute('SELECT * FROM folder_jobs WHERE request_key=?',(request_key,)).fetchone()
+            if previous:return self.folder_public(previous)
+            worker=db.execute("SELECT value FROM settings WHERE key='folder-worker'").fetchone()
+            worker=json.loads(worker[0]) if worker else {}
+            if time.time()-worker.get('seen',0)>=660 or not set(collections)<=set(worker.get('collections',[])):
+                raise ValueError('NAS 폴더 작업자를 먼저 연결하세요. 원본 폴더에는 아직 접근하지 않았습니다.')
+            active=db.execute("SELECT * FROM folder_jobs WHERE state IN ('queued','running')").fetchone()
+            if active:raise ValueError('폴더 가져오기가 이미 대기 또는 실행 중입니다.')
+            now=time.time();identity=uid()
+            db.execute('''INSERT INTO folder_jobs(id,request_key,source_id,collections,state,created,updated)
+                VALUES(?,?,?,?, 'queued',?,?)''',(identity,request_key,worker['source_id'],json.dumps(collections),now,now))
+            return self.folder_public(db.execute('SELECT * FROM folder_jobs WHERE id=?',(identity,)).fetchone())
+
+    def cancel_folder_import(self,identity):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT state FROM folder_jobs WHERE id=?',(identity,)).fetchone()
+            if not row:raise KeyError('가져오기 작업을 찾을 수 없습니다.')
+            if row['state']!='queued':raise ValueError('대기 중인 작업만 취소할 수 있습니다. 실행 중인 작업은 최대10권에서 끝납니다.')
+            db.execute("UPDATE folder_jobs SET state='cancelled',updated=? WHERE id=?",(time.time(),identity))
+        return {'success':True}

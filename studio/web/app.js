@@ -475,3 +475,38 @@ $("#upload-files").onchange = (event) => chooseUploadFiles(event.target.files);
 $("#upload-folder").onchange = (event) => chooseUploadFiles(event.target.files);
 $("#upload-drop").ondragover = (event) => { event.preventDefault(); };
 $("#upload-drop").ondrop = (event) => { event.preventDefault(); chooseUploadFiles(event.dataTransfer.files); };
+
+let folderRequestKey = null, folderRequestSelection = null, folderBusy = false;
+const folderCompleted = new Set();
+async function refreshFolders() {
+    const value = await api('/api/folders');
+    const active = value.jobs.some((job) => ['queued', 'running'].includes(job.state));
+    $('#folder-worker-status').textContent = value.connected ? 'NAS 폴더 작업자 연결됨 · 한 번에10권 · 동시 작업1개' : value.configured ? '작업자 응답을 기다립니다. 예약 작업이 다시 연결되면 이어집니다.' : 'NAS 폴더 작업자가 아직 연결되지 않았습니다. 최초 연결을 마치면 여기서 가져올 수 있습니다.';
+    $('#folder-start').disabled = !value.connected || active || folderBusy;
+    for (const checkbox of $('#folder-collections').querySelectorAll('input')) checkbox.disabled = active || folderBusy || !value.collections.includes(checkbox.value);
+    $('#folder-jobs').innerHTML = value.jobs.map((job) => `<section class="detail-section"><h3>${esc(({ queued: '대기 중', running: '가져오는 중', complete: '완료', failed: '확인 필요', cancelled: '취소됨' })[job.state] || job.state)} · ${job.imported}권 추가</h3><p>${esc(job.collections.join(', '))} · 최대${job.limit_count}권 · ${job.scanned}개 폴더 검사 · 기존${job.skipped}개 건너뜀 · 문제${job.errors}개</p><progress max="10" value="${job.imported}"></progress><p class="muted">${esc(job.message)}</p>${job.state === 'queued' ? `<button type="button" class="quiet" data-folder-cancel="${job.id}">대기 취소</button>` : ''}</section>`).join('') || '<p class="muted">아직 가져오기 요청이 없습니다.</p>';
+    const finished = value.jobs.filter((job) => job.state === 'complete' && !folderCompleted.has(job.id));
+    if (finished.length) {
+        finished.forEach((job) => folderCompleted.add(job.id));
+        await api('/api/uploads/sync', {}).catch(() => {});
+        if (state.view !== 'jobs') await load();
+    }
+}
+$('#folder-open').onclick = guard(async () => { $('#folder-dialog').showModal(); await refreshFolders(); });
+$('#folder-refresh').onclick = guard(async () => { await api('/api/uploads/sync', {}).catch(() => {}); await refreshFolders(); if (state.view !== 'jobs') await load(); });
+$('#folder-start').onclick = guard(async () => {
+    if (folderBusy) return;
+    const collections = [...$('#folder-collections').querySelectorAll('input:checked')].map((input) => input.value);
+    if (!collections.length) return toast('가져올 하위 폴더를 선택하세요.');
+    // Keep the same idempotency key on a lost response; changing selection starts
+    // a new intent. A duplicate click cannot create a second10-book request.
+    const selection = JSON.stringify(collections);
+    if (!folderRequestKey || folderRequestSelection !== selection) folderRequestKey = crypto.randomUUID().replaceAll('-', '');
+    folderRequestSelection = selection; folderBusy = true; $('#folder-start').disabled = true;
+    try {
+        await api('/api/folders', { collections, request_key: folderRequestKey });
+        folderRequestKey = null; await refreshFolders(); toast('최대10권 가져오기를 요청했습니다.');
+    } finally { folderBusy = false; await refreshFolders(); }
+});
+$('#folder-jobs').onclick = guard(async (event) => { const button = event.target.closest('[data-folder-cancel]'); if (button) { await api('/api/folders/' + button.dataset.folderCancel + '/cancel', {}); await refreshFolders(); } });
+setInterval(() => { if ($('#folder-dialog').open && !document.hidden) refreshFolders().catch((error) => { $('#folder-worker-status').textContent = error.message; $('#folder-start').disabled = true; }); }, 2500);

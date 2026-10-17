@@ -20,7 +20,7 @@ def inspect_database(connection):
     if connection.execute('PRAGMA foreign_key_check').fetchone():raise ValueError('Broken foreign keys')
     tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not TABLES<=tables:raise ValueError('Not a Studio database')
-    return {table:connection.execute('SELECT count(*) FROM '+table).fetchone()[0] for table in sorted(TABLES|(tables&{'uploads','user_tags','upload_tags','imports','folder_imports','work_numbers'}))}
+    return {table:connection.execute('SELECT count(*) FROM '+table).fetchone()[0] for table in sorted(TABLES|(tables&{'uploads','user_tags','upload_tags','imports','folder_imports','work_numbers','folder_jobs'}))}
 
 
 def copy_database(source,destination,restore=False):
@@ -37,6 +37,8 @@ def copy_database(source,destination,restore=False):
                 if restore:
                     copied.execute("UPDATE jobs SET state='blocked',message='복원된 실행 작업: 원격 작업과 이전 출력을 확인하세요.',updated=? WHERE state='running'",(time.time(),))
                     copied.execute('UPDATE jobs SET lease=NULL,lease_until=NULL')
+                    if copied.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_jobs'").fetchone():
+                        copied.execute("UPDATE folder_jobs SET state='failed',lease=NULL,lease_until=NULL,message='복원한 가져오기 작업: NAS 원본과 사본을 확인한 뒤 새10권을 요청하세요.' WHERE state IN ('queued','running')")
                     copied.commit()
                 counts=inspect_database(copied)
                 copied.execute('PRAGMA journal_mode=DELETE')

@@ -231,6 +231,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        if path=='/api/folders':return self.respond(store.folder_status())
         if path=='/api/library/status':
             with store.db() as db:
                 has_folders=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_imports'").fetchone()
@@ -351,6 +352,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/folders':
+            if set(data)!={'collections','request_key'}:raise ValueError('폴더 선택과 요청 번호만 지정할 수 있습니다.')
+            return self.respond(store.queue_folder_import(data['collections'],data['request_key']),202)
+        match=re.fullmatch('/api/folders/([0-9a-f]{32})/cancel',path)
+        if match:return self.respond(store.cancel_folder_import(match[1]))
         if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
         if path=='/api/downloads':
             return self.respond(store.request_download(data.get('provider'),data.get('reference'),data.get('target'),data.get('engine')))

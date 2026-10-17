@@ -52,9 +52,10 @@ def source_access(method):
 
 
 class FolderImporter:
-    def __init__(self,root,collections,uploads=None,stable_seconds=30,max_pages=2000,max_entries=10000,source_identity=None):
+    def __init__(self,root,collections,uploads=None,stable_seconds=30,max_pages=2000,max_entries=10000,source_identity=None,progress=None,on_import=None):
         self.root=Path(root).absolute();self.collections=[];self.uploads=uploads
         self.source_identity=source_identity or contextlib.nullcontext
+        self.progress=progress or (lambda event,value:None);self.on_import=on_import
         self.stable_seconds=stable_seconds;self.max_pages=max_pages;self.max_entries=max_entries
         with self.source_identity():
             if self.root.is_symlink() or not self.root.is_dir():raise ValueError('확인된 읽기 전용 원본 폴더가 필요합니다.')
@@ -171,6 +172,7 @@ class FolderImporter:
                                 block=source.read(min(256*1024,remaining))
                                 if not block:raise ValueError('읽는 중 원본이 변경됐습니다.')
                                 target.write(block);remaining-=len(block)
+                                self.progress('heartbeat',None)
                         after=os.fstat(source.fileno())
                         if observed!=(name,after.st_size,after.st_mtime_ns,after.st_ctime_ns,after.st_dev,after.st_ino):
                             raise ValueError('읽는 중 원본이 변경됐습니다.')
@@ -189,6 +191,7 @@ class FolderImporter:
             with self.uploads.store.db() as db:
                 db.execute('INSERT OR REPLACE INTO folder_imports VALUES(?,?,?,?)',
                            (self.root_id,str(relative),signature,result['sha256']))
+                if self.on_import:self.on_import(db)
             return result
 
     def scan(self,limit=1,max_directories=1000):
@@ -196,6 +199,7 @@ class FolderImporter:
         result=dict(directories=0,ready=0,deferred=0,imported=0,unchanged=0,errors=0,pages=0,source_bytes=0,estimated_archive_bytes=0,issues=[])
         pending=self.pending()
         while pending and result['directories']<max_directories:
+            self.progress('scan',result)
             relative=pending.pop();result['directories']+=1
             if len(relative.parts)>32:result['errors']+=1;continue
             try:
@@ -213,7 +217,8 @@ class FolderImporter:
                     if self.uploads:
                         if self.remembered(relative,signature):result['unchanged']+=1;continue
                         self.package(relative,fd,snapshot);result['imported']+=1
-                        if result['imported']>=limit:break
+                        if result['imported']>=limit:
+                            self.progress('scan',result);break
             except (OSError,ValueError,KeyError) as error:
                 result['errors']+=1
                 if len(result['issues'])<20:
@@ -222,6 +227,7 @@ class FolderImporter:
                     collection=next(p for p in self.collections if p==relative or p in relative.parents)
                     issue={'collection':str(collection),**access_error(error)}
                     if issue not in result['issues']:result['issues'].append(issue)
+            self.progress('scan',result)
         self.save_pending(pending)
         result['bounded']=bool(pending)
         return result
@@ -436,7 +442,7 @@ def root_pilot_import(root,collections,database,destination,output_uid,output_gi
         return {**result,'root_source_reader':True,'output_uid':os.geteuid(),'output_gid':os.getegid()}
 
 
-def batch_import(root,collections,database,destination,limit=10,source_identity=None,require_read_only=True):
+def batch_import(root,collections,database,destination,limit=10,source_identity=None,require_read_only=True,progress=None,on_import=None,lock_held=False):
     """Continue a bounded scan, backing up first and keeping prior receipts."""
     import fcntl
     if type(limit) is not int or not 1<=limit<=10:raise ValueError('한 번에 1~10개 폴더만 등록하세요.')
@@ -448,7 +454,8 @@ def batch_import(root,collections,database,destination,limit=10,source_identity=
     lock_fd=os.open(database.parent/'folder-pilot.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     try:
         if not stat.S_ISREG(os.fstat(lock_fd).st_mode):raise ValueError('등록 잠금 파일을 확인하세요.')
-        try:fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try:
+            if not lock_held:fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise ValueError('다른 폴더 등록 작업이 실행 중입니다.') from None
         backups=database.parent/'folder-import-backups'
         if backups.is_symlink():raise ValueError('전용 백업 경로를 확인하세요.')
@@ -456,7 +463,7 @@ def batch_import(root,collections,database,destination,limit=10,source_identity=
         backup=backups/('before-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+os.urandom(8).hex()+'.db')
         verification=copy_database(database,backup)
         uploads=Uploads(Store(database),destination,512*1024**2)
-        result=FolderImporter(root,collections,uploads,source_identity=source_identity).scan(limit)
+        result=FolderImporter(root,collections,uploads,source_identity=source_identity,progress=progress,on_import=on_import).scan(limit)
         return {**result,'batch_limit':limit,'backup':backup.relative_to(database.parent).as_posix(),'backup_sha256':verification['sha256']}
     finally:os.close(lock_fd)
 
@@ -467,9 +474,86 @@ def root_batch_import(root,collections,database,destination,output_uid,output_gi
         return {**result,'root_source_reader':True,'output_uid':os.geteuid(),'output_gid':os.getegid()}
 
 
+def queue_import(root,collections,database,destination,source_identity=None,require_read_only=True):
+    """One fixed-scope queue tick. Caller holds only the approved source mount.
+
+    Shared flock is authoritative for crash recovery; receipt + imported counter
+    commit together. Restart can never turn a10-book request into20new copies.
+    No paths, code, commands or output IDs are accepted from queued data.
+    """
+    import fcntl
+    import secrets
+    inspector=FolderImporter(root,collections,source_identity=source_identity)
+    if not set(collections)<= {'manga','images'}:raise ValueError('승인된 컬렉션만 연결할 수 있습니다.')
+    with inspector.directory(PurePosixPath('.')) as fd:
+        if require_read_only and not os.fstatvfs(fd).f_flag&os.ST_RDONLY:raise ValueError('원본은 읽기 전용 mount여야 합니다.')
+        info=os.fstat(fd);source_id=hashlib.sha256(f'{info.st_dev}:{info.st_ino}'.encode()).hexdigest()
+    store=Store(database)
+    lock=os.open(Path(database).parent/'folder-pilot.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(lock).st_mode):raise ValueError('전용 잠금을 확인하세요.')
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:return {'worker':'busy'}
+        now=time.time()
+        with store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("INSERT OR REPLACE INTO settings VALUES('folder-worker',?)",(json.dumps({'source_id':source_id,'collections':collections,'seen':now}),))
+            row=db.execute("SELECT * FROM folder_jobs WHERE state IN ('queued','running') ORDER BY created LIMIT 1").fetchone()
+            if not row:return {'worker':'ready'}
+            job=dict(row)
+            try:
+                chosen=json.loads(job['collections'])
+                valid=(type(chosen) is list and chosen and all(type(c) is str and c in collections for c in chosen)
+                       and len(set(chosen))==len(chosen) and job['source_id']==source_id
+                       and type(job['limit_count']) is int and job['limit_count']==10
+                       and type(job['imported']) is int and 0<=job['imported']<=10)
+            except (TypeError,ValueError):valid=False
+            if not valid:
+                db.execute("UPDATE folder_jobs SET state='failed',message='원본 연결 또는 요청 범위가 다릅니다.',updated=? WHERE id=?",(now,job['id']))
+                return {'worker':'rejected'}
+            lease=secrets.token_hex(24)
+            db.execute("UPDATE folder_jobs SET state='running',lease=?,lease_until=?,updated=? WHERE id=?",(lease,now+120,now,job['id']))
+        last_pulse=0
+        def progress(event,value):
+            nonlocal last_pulse
+            now=time.time()
+            if event=='heartbeat' and now-last_pulse<2:return
+            last_pulse=now
+            with store.db() as db:
+                changed=db.execute("UPDATE folder_jobs SET updated=?,lease_until=? WHERE id=? AND state='running' AND lease=?",(now,now+120,job['id'],lease)).rowcount
+                if not changed:raise RuntimeError('가져오기 임대가 변경됐습니다.')
+                db.execute("UPDATE settings SET value=? WHERE key='folder-worker'",(json.dumps({'source_id':source_id,'collections':collections,'seen':now}),))
+                if event=='scan':db.execute('UPDATE folder_jobs SET scanned=?,skipped=?,errors=? WHERE id=?',
+                    (job['scanned']+value['directories'],job['skipped']+value['unchanged'],job['errors']+value['errors'],job['id']))
+        def imported(db):
+            changed=db.execute("UPDATE folder_jobs SET imported=imported+1,updated=?,lease_until=? WHERE id=? AND state='running' AND lease=? AND imported<10",(time.time(),time.time()+120,job['id'],lease)).rowcount
+            if not changed:raise RuntimeError('가져오기 한도 또는 임대가 변경됐습니다.')
+        try:
+            if job['imported']<10:
+                result=batch_import(root,chosen,database,destination,10-job['imported'],source_identity,
+                    require_read_only,progress,imported,lock_held=True)
+            else:result={'errors':0,'bounded':True}
+            if 'directories' in result:progress('scan',result)
+            with store.db() as db:
+                db.execute("UPDATE folder_jobs SET state='complete',message=?,lease=NULL,lease_until=NULL,updated=? WHERE id=? AND lease=?",
+                    ('이어서 다음10권을 가져올 수 있습니다.' if result['bounded'] else '이번 범위 검사가 끝났습니다.',time.time(),job['id'],lease))
+            return {'worker':'complete','errors':result['errors']}
+        except Exception as error:
+            with store.db() as db:
+                db.execute("UPDATE folder_jobs SET state='failed',message=?,lease=NULL,lease_until=NULL,updated=? WHERE id=? AND lease=?",
+                           (access_error(error)['message'],time.time(),job['id'],lease))
+            return {'worker':'failed'}
+    finally:os.close(lock)
+
+
+def root_queue_import(root,collections,database,destination,output_uid,output_gid):
+    with root_app_writer(database,destination,output_uid,output_gid) as identity:
+        return queue_import(root,collections,database,destination,source_identity=identity.source)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot','root-pilot','root-plan','root-batch'],default='plan')
+    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot','root-pilot','root-plan','root-batch','root-queue'],default='plan')
     parser.add_argument('--root',default=os.environ.get('STUDIO_FOLDER_ROOT','/nas-library'))
     parser.add_argument('--collections',default=os.environ.get('STUDIO_FOLDER_COLLECTIONS','["manga","images"]'))
     parser.add_argument('--limit',type=int,default=1)
@@ -484,15 +568,15 @@ def main():
         except Exception as error:
             print(json.dumps({'operation':args.operation,'errors':1,'error':access_error(error)},ensure_ascii=False));raise SystemExit(1) from None
         print(json.dumps({'operation':args.operation,**result},sort_keys=True))
-        if result['errors']:raise SystemExit(1)
+        if result.get('errors') or result.get('worker')=='failed':raise SystemExit(1)
         return
-    if args.operation in ('pilot','root-pilot','root-batch'):
+    if args.operation in ('pilot','root-pilot','root-batch','root-queue'):
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
         try:
-            if args.operation in ('root-pilot','root-batch'):
-                method=root_pilot_import if args.operation=='root-pilot' else root_batch_import
-                options={} if args.operation=='root-pilot' else {'limit':args.limit}
+            if args.operation in ('root-pilot','root-batch','root-queue'):
+                method={'root-pilot':root_pilot_import,'root-batch':root_batch_import,'root-queue':root_queue_import}[args.operation]
+                options={'limit':args.limit} if args.operation=='root-batch' else {}
                 result=method(args.root,json.loads(args.collections),database,destination,
                     int(os.environ['STUDIO_FOLDER_OUTPUT_UID']),int(os.environ['STUDIO_FOLDER_OUTPUT_GID']),**options)
             else:result=pilot_import(args.root,json.loads(args.collections),database,destination)
@@ -500,7 +584,7 @@ def main():
             print(json.dumps({'operation':args.operation,'errors':1,'error':access_error(error)},ensure_ascii=False))
             raise SystemExit(1) from None
         print(json.dumps({'operation':args.operation,**result},sort_keys=True))
-        if result['errors']:raise SystemExit(1)
+        if result.get('errors') or result.get('worker')=='failed':raise SystemExit(1)
         return
     if args.operation=='import':
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
@@ -509,7 +593,7 @@ def main():
     importer=FolderImporter(args.root,json.loads(args.collections),uploads)
     result=importer.diagnose() if args.operation=='diagnose' else importer.scan(args.limit)
     print(json.dumps({'operation':args.operation,**result},sort_keys=True))
-    if result['errors']:raise SystemExit(1)
+    if result.get('errors') or result.get('worker')=='failed':raise SystemExit(1)
 
 
 if __name__=='__main__':main()
