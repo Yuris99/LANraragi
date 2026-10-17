@@ -53,68 +53,69 @@ class RecoveryTests(unittest.TestCase):
                 self.assertNotIn('Own Compose backed up',result.stdout)
 
 
-class FolderGroupProbeTests(unittest.TestCase):
+class DedicatedAccountTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name)
         identity=self.root/'id'
-        identity.write_text('#!/bin/sh\ncase "$1" in -u) printf "%s\\n" "${STUDIO_TEST_UID:-1026}";; -g) printf "100\\n";; -G) printf "%s\\n" "${STUDIO_TEST_GROUPS:-100 101}";; *) exit 2;; esac\n')
+        identity.write_text("""#!/bin/sh
+if [ "$2" != library-studio ];then exit 99;fi
+[ "${STUDIO_TEST_MISSING:-0}" = 0 ] || exit 1
+case "$1" in
+  -u) printf '%s\\n' "${STUDIO_TEST_UID:-1030}";;
+  -g) printf '%s\\n' "${STUDIO_TEST_GID:-100}";;
+  -G) printf '%s\\n' "${STUDIO_TEST_GROUPS:-100}";;
+  -Gn) printf '%s\\n' "${STUDIO_TEST_NAMES:-users}";;
+  *) exit 2;;
+esac
+""")
         identity.chmod(0o755)
-        self.script=INSTALLER.with_name('probe-folder-groups.sh')
+        self.script=INSTALLER.with_name('check-service-account.sh')
 
-    def probe(self,*args,**values):
+    def check(self,*args,**values):
         before={path.name for path in self.root.iterdir()}
         result=subprocess.run(['sh',str(self.script),*args],capture_output=True,text=True,
                               env={**os.environ,'PATH':str(self.root)+os.pathsep+os.environ['PATH'],**values})
         self.assertEqual(before,{path.name for path in self.root.iterdir()})
         return result
 
-    def test_preview_uses_only_current_account_memberships_without_nas_mutation(self):
-        result=self.probe('preview','/volume1/Selected Share/Library')
+    def test_preview_has_no_account_lookup_or_nas_changes(self):
+        result=self.check('preview',STUDIO_TEST_MISSING='1')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('Existing NAS account groups: 100 101',result.stdout)
-        self.assertIn('Preview only: no downloads, containers or NAS changes.',result.stdout)
+        self.assertIn('No account, ACL, files or services changed',result.stdout)
 
-    def test_root_execution_import_and_malformed_groups_stop_before_actions(self):
-        result=self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_UID='0')
-        self.assertNotEqual(result.returncode,0)
-        self.assertIn('not with sudo sh',result.stderr)
-        for group in ['100 101;touch','100 --privileged','100 2147483648',' ','']:
-            with self.subTest(group=group):
-                self.assertNotEqual(self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_GROUPS=group or 'invalid').returncode,0)
-        self.assertNotEqual(self.probe('import','/volume1/Selected/Library').returncode,0)
-
-    def test_bad_source_or_missing_source_stops_without_downloads_or_containers(self):
-        for source in ['/','/volume1','/volumeX/Selected/Library','/volume1/../other','/volume1/Selected,readonly=false',
-                       '/volume1/Selected\nother','/volume1/Selected\rother']:
-            with self.subTest(source=source):self.assertNotEqual(self.probe('preview',source).returncode,0)
-        result=self.probe('diagnose','/volume987654321/Selected/Library')
-        self.assertNotEqual(result.returncode,0)
-        self.assertIn('no container started',result.stderr)
-
-
-class OneFolderPilotGuardTests(unittest.TestCase):
-    def setUp(self):
-        FolderGroupProbeTests.setUp(self)
-        self.script=INSTALLER.with_name('import-one-folder.sh')
-
-    probe=FolderGroupProbeTests.probe
-
-    def test_preview_describes_one_pinned_import_and_backup_without_nas_writes(self):
-        result=self.probe('preview','/volume1/Selected/Library')
+    def test_named_nonadministrator_service_identity_passes_without_source_access(self):
+        result=self.check('check','1030','100')
         self.assertEqual(result.returncode,0,result.stderr)
-        self.assertIn('at most one generated CBZ, 128 MiB limit',result.stdout)
-        self.assertIn('First back up Studio SQLite',result.stdout)
-        self.assertIn('Preview only: no downloads, containers or NAS changes.',result.stdout)
+        self.assertIn('account=library-studio',result.stdout)
+        self.assertIn('service_uid=1030',result.stdout)
+        self.assertIn('source_access=not_checked',result.stdout)
+        self.assertIn('nas_changes=none',result.stdout)
 
-    def test_root_bulk_modes_bad_paths_and_missing_sources_stop_before_actions(self):
-        self.assertNotEqual(self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_UID='0').returncode,0)
-        for mode in ['import','all','up','install']:
-            self.assertNotEqual(self.probe(mode,'/volume1/Selected/Library').returncode,0)
-        for path in ['/','/volume1','/volumeX/Selected','/volume1/../other','/volume1/Selected,readonly=false']:
-            self.assertNotEqual(self.probe('preview',path).returncode,0)
-        result=self.probe('run','/volume987654321/Selected/Library')
-        self.assertNotEqual(result.returncode,0)
-        self.assertIn('Verify the existing canonical source',result.stderr)
+    def test_personal_root_admin_docker_and_malformed_identities_are_refused(self):
+        for values in [dict(STUDIO_TEST_UID='1026'),dict(STUDIO_TEST_UID='0'),dict(STUDIO_TEST_GID='101'),
+                       dict(STUDIO_TEST_GROUPS='100 101'),dict(STUDIO_TEST_GROUPS='100 0'),
+                       dict(STUDIO_TEST_NAMES='users docker'),dict(STUDIO_TEST_NAMES='users administrators'),
+                       dict(STUDIO_TEST_UID='1030;touch'),dict(STUDIO_TEST_GROUPS='100 --privileged'),
+                       dict(STUDIO_TEST_UID='2147483648')]:
+            with self.subTest(values=values):
+                result=self.check('check',**values)
+                self.assertNotEqual(result.returncode,0)
+                self.assertNotIn('identity_check=passed',result.stdout)
+
+    def test_missing_account_and_mismatched_requested_ids_are_refused(self):
+        self.assertNotEqual(self.check('check',STUDIO_TEST_MISSING='1').returncode,0)
+        self.assertNotEqual(self.check('check','1026','100').returncode,0)
+        self.assertNotEqual(self.check('install').returncode,0)
+
+    def test_retired_personal_account_helpers_never_start_or_inspect_anything(self):
+        for name in ('probe-folder-groups.sh','import-one-folder.sh'):
+            self.script=INSTALLER.with_name(name)
+            for mode in ('preview','diagnose','plan','run','import'):
+                with self.subTest(script=name,mode=mode):
+                    result=self.check(mode,'/volume1/Selected/Library')
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIn('personal-account execution is withdrawn',result.stderr)
+
 
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,7 @@
 # LANraragi Studio NAS 시험 배포
 
+> **2026-10-17 변경:** 개인 계정 UID1026과 관리자 그룹101을 사용하는 기존 절차는 폐기했다. 아래의 과거 검사 결과는 이력이다. 이전 검사/등록 명령을 실행하지 않는다. 현재 기준과 실제 NAS 전환 경계는 [SERVICE_ACCOUNT.ko.md](SERVICE_ACCOUNT.ko.md)를 먼저 읽는다. 실행 중 NAS 서비스는 이 소스 변경만으로 전환되지 않는다.
+
 이 패키지는 **공식 LANraragi 0.9.81 기반 호환 이미지 + Studio**의 시험 배포용이다. 전체 포크 이미지 빌드는 클라우드 네트워크 정책에 막혀 검증하지 못했다. 외부 사이트 다운로드·자동 댓글 수집의 지원 완료를 의미하지 않는다.
 
 이미지는 코드와 의존성만 포함한다. 개인 미디어, 테스트 DB, 클라우드 개발용 `.env`, VPN 키는 포함하지 않는다. NAS 로그인 비밀은 설치 시 NAS 안에서 새로 생성하며 외부로 전송하지 않는다. 패키지의 `provenance.json`, `images.ids`, `bundle.sha256`에서 이미지와 출처를 확인할 수 있다.
@@ -8,7 +10,7 @@
 
 - 새 프로젝트 `library-studio-nas-pilot`, 새 전용 볼륨 5개와 전용 Docker 네트워크.
 - 새 루트 `/volumeN/docker/library-studio`, 그 안의 `library`, `library/downloads`, `inbox`, Compose 파일, 비밀 파일 `.env.nas`.
-- 확인된 일반 계정의 숫자 UID/GID로 Studio를 실행하고, LANraragi 앱도 같은 계정을 사용한다. 초기화 서비스만 root로 새 볼륨 최상위 권한을 준비한다.
+- 확인된 전용 비관리자 `library-studio` 계정의 숫자 UID/GID로 Studio와 LANraragi 앱을 실행한다. 개인 계정 값은 사용하지 않는다. 초기화 서비스만 root로 새 볼륨 최상위 권한을 준비한다.
 - Studio는 `127.0.0.1:43120`으로만 연결한다. LANraragi 포트는 NAS 외부로 열지 않는다. 기존 NMLO/Stash·개인 원본·기존 권한은 변경하지 않는다.
 - `inbox`는 Studio에 읽기 전용 연결한다. 원본을 복사해 등록하며 삭제·이동하지 않는다. 작업 동시 실행 1. 외부 다운로드 작업자는 시작하지 않는다.
 - 루트/프로젝트/프로젝트 볼륨이 이미 있으면 설치를 거부한다. 기존 데이터를 채택하거나 재귀 chown하지 않는다.
@@ -17,10 +19,12 @@
 
 NAS 기존 SSH 터미널에서 실행한다. 먼저 패키지를 **설치 루트 이외의** 개인 다운로드 위치에 업로드하고 압축을 푼다. 설치 루트에 먼저 압축을 풀면 신규 경로 보호 검사로 설치가 거부된다.
 
-압축 푼 폴더에서 실제 확인된 UID/GID와 루트를 넣어 다음 **계획만** 출력한다. 예시 계정 값은 자신의 진단 결과로 대체한다.
+압축 푼 폴더에서 실제 확인된 UID/GID와 루트를 넣어 다음 **계획만** 출력한다. `check-service-account.sh check`에서 확인된 전용 계정 값만 사용한다.
 
 ```sh
-sh install-pilot.sh plan /volume1/docker/library-studio 1026 100
+sh check-service-account.sh check
+# 확인한 전용 계정 UID/GID를 아래 SERVICE_UID/SERVICE_GID 자리에 입력
+sh install-pilot.sh plan /volume1/docker/library-studio SERVICE_UID SERVICE_GID
 sha256sum -c bundle.sha256
 ```
 
@@ -29,7 +33,7 @@ sha256sum -c bundle.sha256
 ## 승인 후 설치
 
 ```sh
-sudo sh install-pilot.sh install /volume1/docker/library-studio 1026 100
+sudo sh install-pilot.sh install /volume1/docker/library-studio SERVICE_UID SERVICE_GID
 ```
 
 이미지 2개를 로드하고 새 경로/볼륨을 준비한 뒤 서비스를 시작한다. 이미지 다운로드·빌드는 NAS에서 수행하지 않는다. 임의 프록시·호스트 네트워크·외부 포트 개방을 사용하지 않는다.

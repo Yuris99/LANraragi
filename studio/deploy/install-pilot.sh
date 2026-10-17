@@ -24,8 +24,11 @@ printf 'PILOT: official LANraragi 0.9.81 compatibility runtime; full fork build 
 printf 'Project: %s\nNew root: %s\nRuntime UID/GID: %s:%s\nAccess: 127.0.0.1:43120 (SSH tunnel)\n' "$project" "$root" "$runtime_uid" "$runtime_gid"
 printf 'Creates 5 new dedicated volumes, library/downloads/inbox; copies inbox files without deleting originals.\n'
 printf 'External site worker: disabled. Existing NMLO/Stash services: unchanged.\n'
+printf 'Install requires the dedicated non-administrator library-studio account; personal UID1026 is refused.\n'
 [ "$mode" = install ] || { printf 'Plan only: no files, images or services changed.\n'; exit 0; }
 [ "$(id -u)" -eq 0 ] || { printf 'Install requires sudo; do not change docker group/socket permissions.\n' >&2; exit 1; }
+# Verify the named service account before Docker, mkdir, chown or secrets.
+sh "$bundle/check-service-account.sh" check "$runtime_uid" "$runtime_gid"
 [ "$(uname -m)" = x86_64 ] || { printf 'Only the reviewed amd64 pilot is bundled.\n' >&2; exit 1; }
 [ -d "$volume/docker" ] && [ ! -L "$volume" ] && [ ! -L "$volume/docker" ] || { printf 'Verify existing volume/docker parent first.\n' >&2; exit 1; }
 [ ! -e "$root" ] && [ ! -L "$root" ] || { printf 'Root already exists: refusing adoption or overwrite. Preserve it and inspect.\n' >&2; exit 1; }

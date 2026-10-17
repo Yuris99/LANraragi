@@ -1,5 +1,7 @@
 # DS718+ 실사용 준비와 배포 검토안
 
+> **2026-10-17 superseding deployment correction:** Do not use the personal NAS account or administrators group. Earlier identity-based deployment/folder commands are withdrawn. Read [SERVICE_ACCOUNT.ko.md](deploy/SERVICE_ACCOUNT.ko.md) before further NAS work. Existing NAS containers have not been migrated by these repository edits.
+
 2026-10-16 한국 시간. 이 문서는 배포 후보이며 실제 NAS 배포 승인을 받았다는 뜻이 아니다.
 
 ## 현재 판정

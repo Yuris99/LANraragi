@@ -31,7 +31,7 @@ def build(destination,web,lrr):
                 raise ValueError('Refusing an image with application credentials baked in')
     ids=[item['Id'] for item in inspected]
     destination.mkdir(mode=0o755,parents=True)
-    for name in ('install-pilot.sh','resume-pilot.sh','compose.pilot.yaml','PILOT_GUIDE.ko.md'):
+    for name in ('install-pilot.sh','resume-pilot.sh','check-service-account.sh','SERVICE_ACCOUNT.ko.md','compose.pilot.yaml','PILOT_GUIDE.ko.md'):
         shutil.copyfile(HERE/name,destination/name)
     for name in ('compose.nas.yaml','compose.import.yaml'):
         shutil.copyfile(STUDIO/name,destination/name)

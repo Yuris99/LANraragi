@@ -39,7 +39,6 @@ def main():
                     '-f','studio/compose.nas.yaml','-f','studio/compose.cloud-runtime.yaml',
                     '-f','studio/deploy/compose.pilot.yaml','-f','studio/compose.folders.yaml']
     environment={k:v for k,v in os.environ.items() if k not in {'DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH'}}
-    environment['STUDIO_FOLDER_READ_GROUP']='101'  # Isolated fixture selector.
     def command(args):
         result=subprocess.run(args,cwd=repository,env=environment,capture_output=True,text=True,timeout=90)
         assert result.returncode==0,(result.stdout,result.stderr)

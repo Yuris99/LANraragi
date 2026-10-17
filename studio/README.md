@@ -1,5 +1,7 @@
 # Library Studio (work in progress)
 
+**Deployment correction (2026-10-17):** personal NAS identities and administrator groups must not be reused. The old personal-account folder helpers are disabled. The installed NAS pilot still needs an explicit dedicated-account migration; repository edits do not change it. Read [SERVICE_ACCOUNT.ko.md](deploy/SERVICE_ACCOUNT.ko.md) before any further NAS action.
+
 For the current deployment candidate, site-support matrix and operational procedures, read [NAS_READINESS.md](NAS_READINESS.md). The NAS pilot's healthy services, SSH tunnel and Studio login are user-confirmed. Actual NAS media flows, site downloads/comments and recovery rehearsal remain unverified.
 
 A personal web library built on this LANraragi fork, with a separate small Python/SQLite service for cross-site identities, source-specific metadata and download routing. This is an initial implementation, not a finished release.
