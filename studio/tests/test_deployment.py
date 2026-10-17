@@ -118,4 +118,27 @@ esac
                     self.assertIn('personal-account execution is withdrawn',result.stderr)
 
 
+class RootFolderPilotTests(unittest.TestCase):
+    def run_helper(self,*args):
+        result=subprocess.run(['sh',str(INSTALLER.with_name('import-one-folder-root.sh')),*args],capture_output=True,text=True)
+        return result
+
+    def test_preview_is_side_effect_free_and_does_not_inherit_operator_groups(self):
+        result=self.run_helper('preview','/volume1/Selected/Library')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('source reader=root (0:0), no inherited account groups',result.stdout)
+        self.assertIn('128 MiB limit',result.stdout)
+        self.assertIn('Preview only: no downloads, containers or NAS changes',result.stdout)
+
+    def test_bulk_and_malformed_mount_arguments_are_rejected_before_actions(self):
+        for mode in ('install','import','all','up'):
+            self.assertNotEqual(self.run_helper(mode,'/volume1/Selected/Library').returncode,0)
+        for source in ('/','/volume1','/volumeX/Selected','/volume1/../other','/volume1/Selected,readonly=false',
+                       '/volume1/Selected\nother','/volume1/Selected\rother','/volume1/Selected\\other'):
+            with self.subTest(source=source):self.assertNotEqual(self.run_helper('preview',source).returncode,0)
+        result=self.run_helper('run','/volume987654321/Selected/Library')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Verify the existing canonical source',result.stderr)
+
+
 if __name__=='__main__':unittest.main()
