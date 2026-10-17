@@ -7,6 +7,10 @@ services:
     pull_policy: never
     platform: linux/amd64
     user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    # A source's existing ACL may require an existing supplementary NAS group.
+    # Verify membership/read access first; never change host ACLs to fit a UID.
+    group_add:
+      - "${STUDIO_FOLDER_READ_GROUP:?Set the verified existing NAS source-read group ID}"
     entrypoint: [python, /app/folder_importer.py]
     command: [--operation, plan]
     environment:
