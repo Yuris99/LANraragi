@@ -92,4 +92,29 @@ class FolderGroupProbeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn('no container started',result.stderr)
 
+
+class OneFolderPilotGuardTests(unittest.TestCase):
+    def setUp(self):
+        FolderGroupProbeTests.setUp(self)
+        self.script=INSTALLER.with_name('import-one-folder.sh')
+
+    probe=FolderGroupProbeTests.probe
+
+    def test_preview_describes_one_pinned_import_and_backup_without_nas_writes(self):
+        result=self.probe('preview','/volume1/Selected/Library')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('at most one generated CBZ, 128 MiB limit',result.stdout)
+        self.assertIn('First back up Studio SQLite',result.stdout)
+        self.assertIn('Preview only: no downloads, containers or NAS changes.',result.stdout)
+
+    def test_root_bulk_modes_bad_paths_and_missing_sources_stop_before_actions(self):
+        self.assertNotEqual(self.probe('preview','/volume1/Selected/Library',STUDIO_TEST_UID='0').returncode,0)
+        for mode in ['import','all','up','install']:
+            self.assertNotEqual(self.probe(mode,'/volume1/Selected/Library').returncode,0)
+        for path in ['/','/volume1','/volumeX/Selected','/volume1/../other','/volume1/Selected,readonly=false']:
+            self.assertNotEqual(self.probe('preview',path).returncode,0)
+        result=self.probe('run','/volume987654321/Selected/Library')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('Verify the existing canonical source',result.stderr)
+
 if __name__=='__main__':unittest.main()
