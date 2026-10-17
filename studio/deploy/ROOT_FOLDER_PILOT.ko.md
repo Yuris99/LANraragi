@@ -35,4 +35,10 @@ Compose로 직접 호출하는 별도 운영 경로는 기존 `compose.folders.y
 
 성공 JSON은 `root_source_reader=true`, `output_uid/gid`, `errors=0`, `imported=1` 또는 재시도 `unchanged=1`과 백업 상대 이름/SHA256을 반환한다. 개인 작품명/페이지 파일명을 출력하지 않는다. Studio의 업로드 목록 → 색인/열기 → 동기화 → 썸네일/리더/폴더 태그/PC 다운로드를 확인한다. 전체326개 등록이나 백그라운드 감시는 켜지 않는다.
 
-클라우드 검증은 실제 NAS 결과와 구분한다. 일반 앱 UID가 거부되는 mode0700/0600 합성 원본을 root 읽기 작업자로 처리하고, 기존 비루트 앱에서 실제 LANraragi 색인/리더/다운로드/태그/DB 쓰기를 확인했다. 생성된 모든 data/uploads 파일·폴더의 UID/GID는1026:100이고 원본 파일/폴더의 바이트·소유자·그룹·권한·수정 시각은 보존됐다. 잘못된 출력 UID는 등록 전에 거부됐다. 두 재시도에도 같은 한 권만 유지됐다. 실제 NAS root 시험은 사용자 실행 결과를 받은 뒤 기록한다.
+클라우드 검증은 실제 NAS 결과와 구분한다. 일반 앱 UID가 거부되는 mode0700/0600 합성 원본을 root 읽기 작업자로 처리하고, 기존 비루트 앱에서 실제 LANraragi 색인/리더/다운로드/태그/DB 쓰기를 확인했다. 생성된 모든 data/uploads 파일·폴더의 UID/GID는1026:100이고 원본 파일/폴더의 바이트·소유자·그룹·권한·수정 시각은 보존됐다. 잘못된 출력 UID는 등록 전에 거부됐다. 두 재시도에도 같은 한 권만 유지됐다. 실제 NAS 결과는 아래 사용자 보고의 범위까지 확인됐다.
+
+## 사용자 보고: NAS 첫 등록 성공
+
+2026-10-17 사용자가 고정 root 도구를 NAS에서 실행했고, 최종 JSON은 operation=root-pilot, errors0, imported1, pages88, fixed_selection=true, root_source_reader=true, output_uid1026/output_gid100, unchanged0이었다. 등록 전 SQLite 백업 상대 이름과 SHA256도 반환됐다. 실제 개인 DB·백업·미디어·작품명은 클라우드/GitHub에 옮기지 않고 이 문서에는 반환 수치만 기록한다.
+
+이 결과는 NAS에서 root 원본 읽기, 고정한 한 폴더의 CBZ 사본 생성, Studio 업로드 기록 저장 및 DB 사전 백업 성공의 증거다. LANraragi 색인 완료, NAS 브라우저 썸네일·88쪽 리더·이어 읽기·PC 다운로드 및 NAS 재시도 결과는 별도로 확인해야 한다. 서비스 이미지/실행 계정/원본 ACL·소유권을 바꾸거나 Stash/NMLO를 변경하는 절차는 실행하지 않았다. 전체 자동 등록은 시작하지 않는다.
