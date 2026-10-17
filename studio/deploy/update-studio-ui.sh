@@ -4,7 +4,7 @@ set -eu
 umask 077
 mode=${1:-plan}
 root=${2:-/volume1/docker/library-studio}
-case "$mode" in plan|apply|rollback) ;; *) printf 'Use: update-studio-ui.sh plan|apply|rollback /volumeN/docker/library-studio\n' >&2;exit 2;;esac
+case "$mode" in plan|apply|rollback|apply-release) ;; *) printf 'Use: update-studio-ui.sh plan|apply|rollback /volumeN/docker/library-studio\n' >&2;exit 2;;esac
 case "$root" in /volume*/docker/library-studio) ;; *) printf 'Refusing unrelated app root\n' >&2;exit 2;;esac
 volume=${root%/docker/library-studio};number=${volume#/volume}
 case "$number" in ''|*[!0-9]*) printf 'Invalid volume root\n' >&2;exit 2;;esac
@@ -12,12 +12,29 @@ project=library-studio-nas-pilot
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
 revision=4a0be59112b88a4241c7a7bec1f36d2f1273a6f5
 manifest_sha=7e359c34b5b7f493dcbc32c4e01bb39bb0b34f7b8b92be774bf4d8a3539ca3c3
+if [ "$mode" = apply-release ];then
+  [ "$#" -eq 4 ] || exit 2
+  printf '%s\n' "$3" | LC_ALL=C grep -Eq '^[0-9a-f]{40}$' || exit 2
+  printf '%s\n' "$4" | LC_ALL=C grep -Eq '^[0-9a-f]{64}$' || exit 2
+  revision=$3;manifest_sha=$4;mode=apply
+else
+  [ "$#" -le 2 ] || exit 2
+fi
 printf 'Project: %s; update only Studio code with original image and existing volumes.\n' "$project"
 printf 'Apply: verify public code, back up SQLite, mount code read-only, recreate only Studio.\n'
 printf 'Preserves media, LANraragi, Stash/NMLO, secrets and loopback access.\n'
 [ "$mode" != plan ] || { printf 'Plan only: no files, Docker calls or NAS changes.\n';exit 0; }
 [ "$(id -u)" -eq 0 ] || { printf 'Use sudo for apply/rollback.\n' >&2;exit 1; }
 [ -d "$root" ] && [ ! -L "$root" ] && [ "$(readlink -f "$root")" = "$root" ] || { printf 'Verify canonical existing app root first.\n' >&2;exit 1; }
+# Shared by manual updates and the optional fixed NAS pull task. Never steal a
+# live/unknown lock. SIGKILL/power loss is handled by the documented local check.
+lock=$root/.studio-ui-update.lock
+mkdir "$lock" 2>/dev/null || { printf 'Studio update already locked; check the local task before recovery.\n' >&2;exit 75; }
+printf '%s\n' "$$" > "$lock/pid"
+cleanup_lock() { rm -f "$lock/pid";rmdir "$lock"; }
+trap cleanup_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 for file in compose.nas.yaml compose.import.yaml compose.pilot.yaml .env.nas;do
   [ -f "$root/$file" ] && [ ! -L "$root/$file" ] || { printf 'Missing/unsafe pilot config: %s\n' "$file" >&2;exit 1; }
 done
@@ -27,12 +44,20 @@ compose_new() { docker_local compose --env-file "$root/.env.nas" -p "$project" -
 verify_compose() {
 # Credential-bearing Compose JSON stays in this NAS-local pipe, never in logs.
 docker_local run --rm -i --pull=never --network none --read-only --cap-drop ALL \
-  --env "EXPECTED_CODE=$1" --env "EXPECTED_USER=$writer" --env "EXPECTED_IMAGE=$image" --entrypoint python "$image" -c '
+  --env "EXPECTED_CODE=$1" --env "EXPECTED_ROOT=$root" --env "EXPECTED_USER=$writer" --env "EXPECTED_IMAGE=$image" --entrypoint python "$image" -c '
 import json,os,sys
 c=json.load(sys.stdin);s=c["services"]["studio"]
 assert s["image"]==os.environ["EXPECTED_IMAGE"] and s["user"]==os.environ["EXPECTED_USER"]
 p=s["ports"];assert len(p)==1 and p[0]["host_ip"]=="127.0.0.1" and str(p[0]["published"])=="43120" and p[0]["target"]==8090
-m={v["target"]:v for v in s["volumes"]};assert m["/app"]["type"]=="bind" and m["/app"]["source"]==os.environ["EXPECTED_CODE"] and m["/app"]["read_only"]
+m={v["target"]:v for v in s["volumes"]}
+expected={"/data","/uploads","/inbox"}
+if os.environ["EXPECTED_CODE"]:
+ expected.add("/app");assert m["/app"]["type"]=="bind" and m["/app"]["source"]==os.environ["EXPECTED_CODE"] and m["/app"]["read_only"]
+assert set(m)==expected and len(s["volumes"])==len(expected)
+assert m["/inbox"]["type"]=="bind" and m["/inbox"]["source"]==os.environ["EXPECTED_ROOT"]+"/inbox" and m["/inbox"]["read_only"]
+for key in ("privileged","devices","cap_add","group_add","pid","ipc","network_mode","entrypoint","command","configs","secrets","volumes_from"):
+ assert not s.get(key)
+assert str(s.get("mem_limit"))=="268435456"
 for target,key in [("/data","studio-data"),("/uploads","studio-uploads")]:
  v=m[target];assert v["type"]=="volume" and c["volumes"][v["source"]]["name"]=="library-studio-nas-pilot_"+key
  assert not v.get("read_only",False)
@@ -55,6 +80,7 @@ for value in "$uid" "$gid";do
 done
 identity=$(docker_local inspect --type container --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Image}}' "$project-studio-1")
 [ "$identity" = "$project|studio|$image" ] || { printf 'Existing Studio identity differs; stop.\n' >&2;exit 1; }
+compose_base config --format json | verify_compose ''
 overlay=$root/compose.ui.yaml
 if [ "$mode" = rollback ];then
   reviewed_overlay "$overlay" || { printf 'No reviewed UI overlay to roll back.\n' >&2;exit 1; }
@@ -132,6 +158,7 @@ rollback_on_error() {
     mv "$overlay" "$backup/compose.ui.failed.yaml"
     if [ -n "$previous_file" ];then cp -p "$previous_file" "$overlay";fi
   fi
+  cleanup_lock
   exit "$result"
 }
 trap rollback_on_error EXIT
@@ -155,4 +182,5 @@ with urllib.request.urlopen(tag_request,timeout=10) as response:tags=json.load(r
 assert isinstance(tags,list)
 print(json.dumps({"studio_update":"complete","folder_archives":status["folder_archives"],"thumbnail_blur":"10px","cover_fit":"contain","detail_reader":"original","reader_navigation":"short-source-ids","short_ids":"Hitomi/E/N/L","tag_filter":"exact","site_downloads":"not-verified"}))'
 trap - EXIT
+cleanup_lock
 printf 'UI updated. Refresh the browser; this script rollback mode restores the previous code and preserves DB/uploads.\n'
