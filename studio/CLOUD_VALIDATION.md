@@ -2,7 +2,9 @@
 
 ## 2026-10-18: Studio 배포 전용 통로
 
-사용자가 업데이트마다 SSH 명령을 붙여 넣는 대신 Studio 배포만 맡길 수 있는 방법을 요청했다. 고정 NAS-local pull task와 증가하는 generation/불변 소스 revision/manifest SHA만 받는 배포 요청을 구현했다. 일반 원격 셸/계정/Docker API/Compose 변경을 열지 않는다. 실행기는 한 번 검증한 NAS-local 파일로 고정하며 새 앱 배포에서 root 스크립트를 받아 실행하거나 자신을 교체하지 않는다. 최초 설치/DSM root 예약 작업은 사용자 측에서 적용해야 하고 기본 요청은 disabled다. GitHub 게시와 NAS 적용 성공을 구분한다. 절차/권한/한계는 [NAS_DEPLOY_CHANNEL.ko.md](deploy/NAS_DEPLOY_CHANNEL.ko.md)에 기록했다.
+후속 활성화: 사용자가 최초 설정 안내 뒤 “한듯?”으로 응답해 generation2/enabled=true로 기존 검증 소스의 적용을 요청했다. 공개 manifest와16개 파일을 실제 HTTPS로 받아 SHA256 및 로컬 검증본 바이트 일치를 다시 확인했다. 요청은 고정 실행기의 실제 JSON parser로 검사했다. 이 기록은 사용자 측 설치/예약 작업/Studio 건강 성공을 확인한 기록이 아니다. 클라우드의 NAS 관리 접속 권한과 자동 상태 회신은 여전히 없으며 실제 적용 결과는 별도 확인한다.
+
+사용자가 업데이트마다 SSH 명령을 붙여 넣는 대신 Studio 배포만 맡길 수 있는 방법을 요청했다. 고정 NAS-local pull task와 증가하는 generation/불변 소스 revision/manifest SHA만 받는 배포 요청을 구현했다. 일반 원격 셸/계정/Docker API/Compose 변경을 열지 않는다. 실행기는 한 번 검증한 NAS-local 파일로 고정하며 새 앱 배포에서 root 스크립트를 받아 실행하거나 자신을 교체하지 않는다. 최초 설치/DSM root 예약 작업은 사용자 측에서 적용해야 하고 최초 요청은 disabled로 게시했다. GitHub 게시와 NAS 적용 성공을 구분한다. 절차/권한/한계는 [NAS_DEPLOY_CHANNEL.ko.md](deploy/NAS_DEPLOY_CHANNEL.ko.md)에 기록했다.
 
 - 최종150개 unit/HTTP/deployment 테스트, JS/셸 구문 및 diff 검사 통과. 새12개 테스트는 실제 JSON/Compose scope parser의 명령·경로·추가 필드·중복 JSON 키·타입·마운트·root/그룹/특권·공개 포트 확대 거부, 고정 실행기/로컬 설정 해시, generation 중복/역행, 실패 격리와 새 generation 재시도, 통신 실패 재시도, 로컬 철회, 살아 있는 잠금 보호/죽은 잠금 로컬 정리, 설치기 고정 해시/신규 디렉터리/덮어쓰기 거부를 확인한다. 테스트 NAS 경로/UID와 Docker transport만 fixture로 바꾼다.
 - 기존 실제 Docker/브라우저 UI 갱신 회귀 통과: 이전 overlay 업그레이드, 사전 SQLite 백업, 블러/전체 표지/3쪽 리더/짧은 주소/브라우저 이력/설정, 실패 시 코드 보존,2단계 rollback, 다운로드 SHA256 보존, LRR 시작 시각 유지.

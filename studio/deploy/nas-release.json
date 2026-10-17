@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "enabled": false,
-  "generation": 1,
+  "enabled": true,
+  "generation": 2,
   "revision": "4a0be59112b88a4241c7a7bec1f36d2f1273a6f5",
   "manifest_sha256": "7e359c34b5b7f493dcbc32c4e01bb39bb0b34f7b8b92be774bf4d8a3539ca3c3"
 }
