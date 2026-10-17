@@ -10,8 +10,8 @@ volume=${root%/docker/library-studio};number=${volume#/volume}
 case "$number" in ''|*[!0-9]*) printf 'Invalid volume root\n' >&2;exit 2;;esac
 project=library-studio-nas-pilot
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
-revision=4daad4703a9ba0164f5c94149fb0310fc5337d7f
-manifest_sha=e1a6b52df282fc2de2cd32494e2f8825deda913b9aeed5fe83790b7322a7dcf8
+revision=eedc7871d3d1b55bd0fd2798d9fe18f4f0a030bb
+manifest_sha=789484cda99f7f0bdae210baaf0ae642b28ef055c1829a541e867cecdd8dc7d7
 printf 'Project: %s; update only Studio code with original image and existing volumes.\n' "$project"
 printf 'Apply: verify public code, back up SQLite, mount code read-only, recreate only Studio.\n'
 printf 'Preserves media, LANraragi, Stash/NMLO, secrets and loopback access.\n'
@@ -150,6 +150,6 @@ import base64,json,os,urllib.request
 auth=base64.b64encode(("admin:"+os.environ["STUDIO_PASSWORD"]).encode()).decode()
 req=urllib.request.Request("http://127.0.0.1:8090/api/library/status",headers={"Authorization":"Basic "+auth})
 with urllib.request.urlopen(req,timeout=10) as response:status=json.load(response)
-print(json.dumps({"studio_update":"complete","folder_archives":status["folder_archives"],"thumbnail_blur":"10px","cover_fit":"contain","detail_reader":"original","site_downloads":"not-verified"}))'
+print(json.dumps({"studio_update":"complete","folder_archives":status["folder_archives"],"thumbnail_blur":"10px","cover_fit":"contain","detail_reader":"original","reader_navigation":"page-history","site_downloads":"not-verified"}))'
 trap - EXIT
 printf 'UI updated. Refresh the browser; this script rollback mode restores the previous code and preserves DB/uploads.\n'
