@@ -1,5 +1,6 @@
 """Installer safety checks: planning/errors never invoke Docker or write a NAS."""
 from pathlib import Path
+import hashlib
 import os
 import shutil
 import subprocess
@@ -139,6 +140,44 @@ class RootFolderPilotTests(unittest.TestCase):
         result=self.run_helper('run','/volume987654321/Selected/Library')
         self.assertNotEqual(result.returncode,0)
         self.assertIn('Verify the existing canonical source',result.stderr)
+
+
+class NASUpdateGuardTests(unittest.TestCase):
+    def test_runtime_manifest_covers_and_matches_all_deployed_source_files(self):
+        root=INSTALLER.parent.parent
+        rows=(root/'deploy/runtime-manifest.sha256').read_text().splitlines()
+        files={str(p.relative_to(root)) for p in root.glob('*.py')}|{'web/app.js','web/index.html','web/style.css'}
+        recorded={}
+        for row in rows:
+            digest,path=row.split('  ',1)
+            self.assertNotIn(path,recorded)
+            self.assertIn(path,files)
+            self.assertEqual(hashlib.sha256((root/path).read_bytes()).hexdigest(),digest)
+            recorded[path]=digest
+        self.assertEqual(set(recorded),files)
+
+    def test_ui_update_plan_has_no_nas_or_docker_side_effects(self):
+        script=INSTALLER.with_name('update-studio-ui.sh')
+        result=subprocess.run(['sh',str(script),'plan','/volume1/docker/library-studio'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('recreate only Studio',result.stdout)
+        self.assertIn('Plan only: no files, Docker calls or NAS changes',result.stdout)
+
+    def test_ui_update_rejects_unrelated_roots_and_modes(self):
+        script=INSTALLER.with_name('update-studio-ui.sh')
+        for mode,root in [('apply','/volume1/docker/stash'),('apply','/volume1/../docker/library-studio'),('up','/volume1/docker/library-studio')]:
+            result=subprocess.run(['sh',str(script),mode,root],capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+
+    def test_batch_preview_and_missing_source_do_not_write_outputs(self):
+        script=INSTALLER.with_name('manage-folders-root.sh')
+        result=subprocess.run(['sh',str(script),'preview','/volume1/Selected/Library'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('at most 10 new folders',result.stdout)
+        for mode in ('plan','batch'):
+            result=subprocess.run(['sh',str(script),mode,'/volume987654321/Selected/Library'],capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Verify the existing canonical source',result.stderr)
 
 
 if __name__=='__main__':unittest.main()
