@@ -3,15 +3,17 @@ import base64
 import hashlib
 import json
 import os
+import sqlite3
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from folder_importer import FolderImporter
+from folder_importer import FolderImporter,pilot_import
 from make_synthetic import create_fixture
 from store import Store
 from uploads import Uploads
@@ -167,6 +169,65 @@ class FolderImportTests(unittest.TestCase):
         self.assertEqual(result['counts']['folder_imports'],1)
         restored=Store(self.root/'backup.db')
         with restored.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM folder_imports').fetchone()[0],1)
+
+    def age_source(self):
+        old=time.time()-120
+        for path in [self.source,*self.source.rglob('*')]:os.utime(path,(old,old))
+
+    def run_pilot(self,**kwargs):
+        return pilot_import(self.source,['manga'],self.store.path,self.uploads.root,require_read_only=False,**kwargs)
+
+    def test_pilot_pins_one_folder_on_retries_and_backs_up_before_database_migration(self):
+        another=self.source/'manga'/'Later';another.mkdir();(another/'1.png').write_bytes((self.book/'1.png').read_bytes())
+        self.age_source();before=self.contents()
+        first=self.run_pilot();second=self.run_pilot()
+        self.assertEqual(first['imported'],1);self.assertEqual(second['unchanged'],1)
+        self.assertEqual(len(self.uploads.list()),1);self.assertEqual(before,self.contents())
+        self.assertNotIn('Book',json.dumps(first));self.assertNotIn(str(self.source),json.dumps(first))
+        state=Path(self.store.path).parent/'folder-pilot.json'
+        self.assertEqual(json.loads(state.read_text())['relative'],'manga/Book')
+        self.assertEqual(state.stat().st_mode&0o777,0o600)
+        with sqlite3.connect(self.root/first['backup']) as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM uploads').fetchone()[0],0)
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='folder_imports'").fetchone())
+        self.assertEqual((self.root/first['backup']).stat().st_mode&0o777,0o600)
+
+    def test_pilot_backup_failure_stops_before_store_migrations_or_archive_writes(self):
+        self.age_source()
+        with patch('folder_importer.copy_database',side_effect=OSError(28,'backup disk full')):
+            with self.assertRaises(OSError):self.run_pilot()
+        self.assertFalse(self.uploads.root.exists())
+        with self.store.db() as db:
+            self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='folder_imports'").fetchone())
+
+    def test_pilot_refuses_changed_source_or_a_different_collection_without_advancing(self):
+        self.age_source();self.run_pilot()
+        (self.book/'1.png').write_bytes((self.book/'2.png').read_bytes())
+        with self.assertRaises(ValueError):self.run_pilot()
+        with self.assertRaises(ValueError):
+            pilot_import(self.source,['images'],self.store.path,self.uploads.root,require_read_only=False)
+        self.assertEqual(len(self.uploads.list()),1)
+        self.assertEqual(len(list((self.root/'folder-pilot-backups').glob('*.db'))),1)
+
+    def test_pilot_rejects_selection_escape_and_symlink_before_more_writes(self):
+        self.age_source();self.run_pilot();state=self.root/'folder-pilot.json'
+        saved=json.loads(state.read_text());saved['relative']='../outside'
+        state.write_text(json.dumps(saved))
+        with self.assertRaises(ValueError):self.run_pilot()
+        state.unlink();state.symlink_to(self.root/'studio.db')
+        with self.assertRaises(OSError):self.run_pilot()
+        self.assertEqual(len(self.uploads.list()),1)
+
+    def test_pilot_requires_readonly_source_and_exclusive_pilot_lock(self):
+        self.age_source()
+        with self.assertRaisesRegex(ValueError,'읽기 전용'):
+            pilot_import(self.source,['manga'],self.store.path,self.uploads.root)
+        self.assertFalse((self.root/'folder-pilot.json').exists())
+        import fcntl
+        with (self.root/'folder-pilot.lock').open('w') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ValueError,'실행 중'):self.run_pilot()
+        self.assertFalse(self.uploads.root.exists())
 
 
 if __name__=='__main__':unittest.main()

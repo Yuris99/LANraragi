@@ -16,6 +16,7 @@ import tempfile
 import time
 import zipfile
 
+from backup import copy_database
 from server import image_content_type
 from store import Store
 from uploads import Uploads, UploadError
@@ -257,14 +258,115 @@ class FolderImporter:
                                (self.cursor_key,json.dumps([str(p) for p in pending],ensure_ascii=False)))
                 else:db.execute('DELETE FROM settings WHERE key=?',(self.cursor_key,))
 
+    def choose_pilot(self,max_bytes,max_directories=1000):
+        """Choose one small, stable folder locally without emitting its name."""
+        pending=list(reversed(self.collections));examined=0
+        while pending and examined<max_directories:
+            relative=pending.pop();examined+=1
+            if len(relative.parts)>32:raise ValueError('시험 폴더의 깊이 한도를 초과했습니다.')
+            with self.directory(relative) as fd:
+                pages,children,stable,signature,_=self.snapshot(fd)
+                if len(pending)+len(children)>20000:raise ValueError('선택한 시험 범위를 줄이세요.')
+                pending.extend(relative/name for name in reversed(children))
+                bound=sum(p[1] for p in pages)+len(pages)*256+16384
+                if pages and stable and bound<=max_bytes:return str(relative),signature
+        raise ValueError('시험 크기 한도 안의 안정된 이미지 폴더를 찾지 못했습니다.')
+
+
+def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,require_read_only=True):
+    """Back up first, then import the same one pinned folder on every retry.
+
+    Selection/lock/backups remain in the dedicated NAS data volume. This never
+    advances the bulk cursor or prints the selected private folder's name.
+    """
+    import fcntl
+    database=Path(database).absolute()
+    if database.is_symlink() or not database.is_file():raise ValueError('기존 Studio 전용 DB를 확인하세요.')
+    if not 1<=max_bytes<=512*1024**2:raise ValueError('시험 파일 크기 한도를 확인하세요.')
+    inspector=FolderImporter(root,collections)
+    with inspector.directory(PurePosixPath('.')) as fd:
+        info=os.fstat(fd)
+        if require_read_only and not os.fstatvfs(fd).f_flag&os.ST_RDONLY:
+            raise ValueError('시험 원본은 읽기 전용 mount여야 합니다.')
+        identity=[info.st_dev,info.st_ino]
+    state=database.parent/'folder-pilot.json'
+    lock=database.parent/'folder-pilot.lock'
+    lock_fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(lock_fd).st_mode):raise ValueError('시험 잠금 파일을 확인하세요.')
+        try:fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:raise ValueError('다른 한 폴더 시험 작업이 실행 중입니다.') from None
+        if state.exists() or state.is_symlink():
+            state_fd=os.open(state,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            with os.fdopen(state_fd,'rb') as stream:
+                data=stream.read(65537)
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode) or len(data)>65536:
+                    raise ValueError('시험 선택 기록을 확인하세요.')
+            saved=json.loads(data)
+            if not isinstance(saved,dict) or saved.get('format')!=1 or saved.get('source')!=identity or saved.get('collections')!=collections:
+                raise ValueError('시험 원본 또는 컬렉션이 이전 선택과 다릅니다. 자동으로 다른 폴더를 선택하지 않습니다.')
+            name=saved.get('relative');signature=saved.get('snapshot')
+            if not isinstance(name,str) or not isinstance(signature,str) or not re.fullmatch('[0-9a-f]{64}',signature):
+                raise ValueError('시험 선택 기록 형식이 올바르지 않습니다.')
+            relative=PurePosixPath(name)
+            if relative.is_absolute() or any(p in ('','.','..') or not allowed_name(p) for p in name.split('/')) or not any(p==relative or p in relative.parents for p in inspector.collections):
+                raise ValueError('시험 선택이 원본 범위를 벗어납니다.')
+        else:
+            name,signature=inspector.choose_pilot(max_bytes)
+            relative=PurePosixPath(name)
+            saved={'format':1,'source':identity,'collections':collections,'relative':name,'snapshot':signature}
+            temporary=None
+            try:
+                fd,path=tempfile.mkstemp(prefix='.folder-selection-',dir=database.parent)
+                temporary=Path(path)
+                with os.fdopen(fd,'w',encoding='utf-8') as stream:
+                    json.dump(saved,stream,ensure_ascii=False);stream.flush();os.fsync(stream.fileno())
+                os.link(temporary,state)
+                directory_fd=os.open(database.parent,os.O_RDONLY|os.O_DIRECTORY)
+                try:os.fsync(directory_fd)
+                finally:os.close(directory_fd)
+            finally:
+                if temporary:temporary.unlink(missing_ok=True)
+        with inspector.directory(relative) as fd:
+            snapshot=inspector.snapshot(fd)
+            if snapshot[3]!=signature or not snapshot[2]:
+                raise ValueError('고정한 시험 폴더가 변경됐거나 안정화 대기 중입니다. 기존 선택을 보존하고 중단합니다.')
+        # Store() can migrate tables. Snapshot the live WAL database before any
+        # such initialization or archive publication.
+        backups=database.parent/'folder-pilot-backups'
+        if backups.is_symlink():raise ValueError('전용 시험 백업 경로를 확인하세요.')
+        backups.mkdir(mode=0o700,exist_ok=True)
+        backup=backups/('before-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+os.urandom(8).hex()+'.db')
+        verification=copy_database(database,backup)
+        uploads=Uploads(Store(database),destination,max_bytes)
+        importer=FolderImporter(root,collections,uploads)
+        with importer.directory(relative) as fd:
+            current=importer.snapshot(fd)
+            if current[3]!=signature or not current[2]:raise ValueError('백업 중 원본이 변경됐습니다. 시험 등록을 중단합니다.')
+            unchanged=importer.remembered(relative,signature)
+            if not unchanged:importer.package(relative,fd,current)
+        return {'errors':0,'imported':0 if unchanged else 1,'unchanged':1 if unchanged else 0,
+                'pages':len(current[0]),'fixed_selection':True,
+                'backup':backup.relative_to(database.parent).as_posix(),'backup_sha256':verification['sha256']}
+    finally:os.close(lock_fd)
+
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--operation',choices=['plan','diagnose','import'],default='plan')
+    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot'],default='plan')
     parser.add_argument('--root',default=os.environ.get('STUDIO_FOLDER_ROOT','/nas-library'))
     parser.add_argument('--collections',default=os.environ.get('STUDIO_FOLDER_COLLECTIONS','["manga","images"]'))
     parser.add_argument('--limit',type=int,default=1)
     args=parser.parse_args();uploads=None
+    if args.operation=='pilot':
+        database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
+        if not database or not destination:parser.error('Set verified dedicated database and upload paths')
+        try:
+            result=pilot_import(args.root,json.loads(args.collections),database,destination)
+        except Exception as error:
+            print(json.dumps({'operation':'pilot','errors':1,'error':access_error(error)},ensure_ascii=False))
+            raise SystemExit(1) from None
+        print(json.dumps({'operation':'pilot',**result},sort_keys=True));return
     if args.operation=='import':
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
