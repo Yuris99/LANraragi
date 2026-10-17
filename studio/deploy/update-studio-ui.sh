@@ -10,8 +10,8 @@ volume=${root%/docker/library-studio};number=${volume#/volume}
 case "$number" in ''|*[!0-9]*) printf 'Invalid volume root\n' >&2;exit 2;;esac
 project=library-studio-nas-pilot
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
-revision=eedc7871d3d1b55bd0fd2798d9fe18f4f0a030bb
-manifest_sha=789484cda99f7f0bdae210baaf0ae642b28ef055c1829a541e867cecdd8dc7d7
+revision=4a0be59112b88a4241c7a7bec1f36d2f1273a6f5
+manifest_sha=7e359c34b5b7f493dcbc32c4e01bb39bb0b34f7b8b92be774bf4d8a3539ca3c3
 printf 'Project: %s; update only Studio code with original image and existing volumes.\n' "$project"
 printf 'Apply: verify public code, back up SQLite, mount code read-only, recreate only Studio.\n'
 printf 'Preserves media, LANraragi, Stash/NMLO, secrets and loopback access.\n'
@@ -112,7 +112,7 @@ while read -r digest relative;do
 done < "$code/runtime-manifest.sha256"
 (cd "$code" && sha256sum -c runtime-manifest.sha256)
 docker_local run --rm --pull=never --user "$writer" --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
-  --mount "type=bind,src=$code,dst=/app,readonly" --entrypoint python "$image" -B -c 'import server,store,folder_importer;assert hasattr(folder_importer,"root_batch_import");print("runtime_import=ok")'
+  --mount "type=bind,src=$code,dst=/app,readonly" --entrypoint python "$image" -B -c 'import server,store,folder_importer;assert hasattr(folder_importer,"root_batch_import");assert hasattr(store.Store,"resolve_short_id") and hasattr(store.Store,"library_tags");print("runtime_import=ok")'
 stamp=$(date -u +%Y%m%dT%H%M%SZ).$$
 backup=$root/ui-update-backup.$stamp
 mkdir "$backup";chmod 700 "$backup"
@@ -150,6 +150,9 @@ import base64,json,os,urllib.request
 auth=base64.b64encode(("admin:"+os.environ["STUDIO_PASSWORD"]).encode()).decode()
 req=urllib.request.Request("http://127.0.0.1:8090/api/library/status",headers={"Authorization":"Basic "+auth})
 with urllib.request.urlopen(req,timeout=10) as response:status=json.load(response)
-print(json.dumps({"studio_update":"complete","folder_archives":status["folder_archives"],"thumbnail_blur":"10px","cover_fit":"contain","detail_reader":"original","reader_navigation":"page-history","site_downloads":"not-verified"}))'
+tag_request=urllib.request.Request("http://127.0.0.1:8090/api/library/tags",headers={"Authorization":"Basic "+auth})
+with urllib.request.urlopen(tag_request,timeout=10) as response:tags=json.load(response)
+assert isinstance(tags,list)
+print(json.dumps({"studio_update":"complete","folder_archives":status["folder_archives"],"thumbnail_blur":"10px","cover_fit":"contain","detail_reader":"original","reader_navigation":"short-source-ids","short_ids":"Hitomi/E/N/L","tag_filter":"exact","site_downloads":"not-verified"}))'
 trap - EXIT
 printf 'UI updated. Refresh the browser; this script rollback mode restores the previous code and preserves DB/uploads.\n'
