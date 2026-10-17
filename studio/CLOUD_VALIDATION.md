@@ -1,5 +1,15 @@
 # 클라우드 검증 기록 (2026-10-16, 한국 시간)
 
+## 2026-10-18: 화면에서 NAS 폴더10권씩 가져오기
+
+사용자 승인 범위로 /api/folders와 NAS 폴더 화면, 최대10권/동시1 큐, 요청 idempotency, source/collection 고정, queued 취소, 진행/중복/오류 수, 원본-사본-색인 분리 안내를 구현했다. receipt와 imported counter를 같은 SQLite 트랜잭션으로 확정하며 중단된 작업은 같은 flock을 획득한 작업자만 남은 한도 안에서 이어간다. 복원한 과거 queued/running 작업은 failed로 막는다. 고정 NAS-local root 작업자는 원본 RO/network-none/rootfs-RO/256MiB이며 source open/stat만 root, 출력은 기존 UID1026:GID100이다. 원본 경로/명령/이미지/UID를 웹 요청으로 지정할 수 없다. 설치된 root 모듈은 앱 자동 배포로 교체하지 않는다.
+
+- 전체162개 unit/HTTP/deployment 검사 통과. 신규12개 검사는10+2권과 이후0권 중복 건너뛰기,3권 뒤 중단·같은 요청 총10권 복구, receipt/counter 동시 rollback과 게시된 사본의 결정적 복구, 실제 관리자/worker/CSRF 경계, source/limit/collection 조작 거부, 큐 취소/오프라인/비공개 임대 제거, 백업 복원 재실행 방지, 살아 있는 flock 보호, preview 경로/인자 거부와 설치기 불변 핀을 포함한다. JS/셸 구문, manifest, diff 검사 통과.
+- 별도 `library-studio-folder-queue-check-pass`/loopback43136와 생성한12폴더/36PNG·JPEG·WebP로 실제 Docker/SQLite/Studio/LANraragi0.9.81/브라우저 통합 검증 통과. 평범한 앱 UID의 source 접근은 거부됨을 확인하고 실제 RO/network-none root worker로10권 후2권을 처리했다. UI 연결 전 비활성화, 연결/대기/완료, queued 취소/새로고침,12개 색인/카드, 리더 이력, desktop/mobile,12개 다운로드 SHA256, 원본 bytes/mode/UID/GID/mtime, 출력1026:100, LRR StartedAt 보존과0page errors를 확인했다. 초기 NAS 소스 기반 테스트 이미지로 실행했으며 NAS의 정확한 기존 바이너리를 실행했다고 주장하지 않는다.
+- 테스트 준비의 umask 영향으로 코드/라이브러리 디렉터리가 닫혔던 문제를 고쳤고, 작은 CBZ의 Shinobu5초 안정화 대기가 누적되므로 색인 검증 한도를180초로 조정했다. 실제12개 색인을 정상 API로 확인한 뒤 수정한 독립 실행 전체가 통과했다. 실패 실행의 생성 원본/사본은 scratch/전용 테스트 볼륨에 보존했다. 개인 자료/서비스는 사용하지 않았다.
+- 실제 공개 커밋e328e8fe828cf1288bf728d6ce4954b273a78244의16runtime 파일, manifest70abe2d17c753851d4b25c828187bd57cde15bf38accb2ea28384baef6de4faa와 고정 작업자를 HTTPS로 받아 검증본과 일치함을 확인했다. 새 화면 배포 요청은 generation3으로 이 소스에 고정한다. 소스 설치기는 같은 커밋/manifest/tick SHA에 고정하고 NAS-local 설정/manifest를 별도 해시에 포함한다.
+- 사용자가 NAS generation2 healthy와5분 예약 수정을 보고했다. 이는 새 generation3의 자동 성공이나 원본 폴더 작업자 설치 성공을 뜻하지 않는다. 새 root worker 설치는 코드 배포 통로 밖의 NAS 최초 연결이며, 사용자 실행 전 실제 NAS10권 복사/reader/새 서비스 설정 성공은 **미확인**이다. 앞서 추가 설정이 없다고 했던 설명을 정정하고 [NAS_FOLDER_UI.ko.md](deploy/NAS_FOLDER_UI.ko.md)에 구체적인 설치/작업 수정/철회/복구 범위를 제공한다. 실제 원본/ACL/Stash/NMLO/DSM 설정은 클라우드에서 변경하지 않았다.
+
 ## 2026-10-18: Studio 배포 전용 통로
 
 후속 활성화: 사용자가 최초 설정 안내 뒤 “한듯?”으로 응답해 generation2/enabled=true로 기존 검증 소스의 적용을 요청했다. 공개 manifest와16개 파일을 실제 HTTPS로 받아 SHA256 및 로컬 검증본 바이트 일치를 다시 확인했다. 요청은 고정 실행기의 실제 JSON parser로 검사했다. 이 기록은 사용자 측 설치/예약 작업/Studio 건강 성공을 확인한 기록이 아니다. 클라우드의 NAS 관리 접속 권한과 자동 상태 회신은 여전히 없으며 실제 적용 결과는 별도 확인한다.
