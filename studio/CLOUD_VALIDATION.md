@@ -1,5 +1,15 @@
 # 클라우드 검증 기록 (2026-10-16, 한국 시간)
 
+## 2026-10-18: Studio 배포 전용 통로
+
+사용자가 업데이트마다 SSH 명령을 붙여 넣는 대신 Studio 배포만 맡길 수 있는 방법을 요청했다. 고정 NAS-local pull task와 증가하는 generation/불변 소스 revision/manifest SHA만 받는 배포 요청을 구현했다. 일반 원격 셸/계정/Docker API/Compose 변경을 열지 않는다. 실행기는 한 번 검증한 NAS-local 파일로 고정하며 새 앱 배포에서 root 스크립트를 받아 실행하거나 자신을 교체하지 않는다. 최초 설치/DSM root 예약 작업은 사용자 측에서 적용해야 하고 기본 요청은 disabled다. GitHub 게시와 NAS 적용 성공을 구분한다. 절차/권한/한계는 [NAS_DEPLOY_CHANNEL.ko.md](deploy/NAS_DEPLOY_CHANNEL.ko.md)에 기록했다.
+
+- 최종150개 unit/HTTP/deployment 테스트, JS/셸 구문 및 diff 검사 통과. 새12개 테스트는 실제 JSON/Compose scope parser의 명령·경로·추가 필드·중복 JSON 키·타입·마운트·root/그룹/특권·공개 포트 확대 거부, 고정 실행기/로컬 설정 해시, generation 중복/역행, 실패 격리와 새 generation 재시도, 통신 실패 재시도, 로컬 철회, 살아 있는 잠금 보호/죽은 잠금 로컬 정리, 설치기 고정 해시/신규 디렉터리/덮어쓰기 거부를 확인한다. 테스트 NAS 경로/UID와 Docker transport만 fixture로 바꾼다.
+- 기존 실제 Docker/브라우저 UI 갱신 회귀 통과: 이전 overlay 업그레이드, 사전 SQLite 백업, 블러/전체 표지/3쪽 리더/짧은 주소/브라우저 이력/설정, 실패 시 코드 보존,2단계 rollback, 다운로드 SHA256 보존, LRR 시작 시각 유지.
+- 새 `python -B studio/tests/release_poller_smoke.py` 통과: 실제 비루트/network-none/RO Docker JSON parser, 비활성 요청 무변경, 활성 요청의 백업/코드 RO 연결/Studio 갱신/건강 확인, 같은 요청 재시작 없음, checksum 실패의 격리, 새 generation 재시도, 사전 백업2개, 직전 overlay와 원래 이미지 코드로 rollback, NAS-local 비활성화, 합성 원본/다운로드 SHA256 보존, LRR 재시작 없음. 경로/신원/이미지/포트와 HTTPS 자료만 fixture로 치환했다. 이 합성 스택은 초기 NAS 소스 기반 이미지이며 NAS의 정확한 바이너리를 테스트했다고 주장하지 않는다.
+- 설치 실행기 두 파일은 불변 공개 커밋 `6f503e823a3cc1528f9d6cc5004d09006b023f19`에서 실제 HTTPS로 받아 검증본과 바이트 일치를 확인했다. 설치기는 이 커밋과 두 SHA256에 고정한다. 클라우드 runtime은 current/running/enforced, VPN configured지만 NAS 관리 credential/TCP grant 없음. VPN 건강은 status만으로 단정하지 않았다.
+- 실제 NAS 설치/예약 작업/자동 배포는 **미실행**. 원본 미디어·개인 DB·키/비밀번호는 클라우드/GitHub로 옮기지 않았다. NMLO/Stash/실제 NAS 서비스·계정·ACL·네트워크는 변경하지 않았다. 실사이트 다운로드/댓글 성공도 여전히 미검증이다. 강제 종료/전원 장애 뒤 남은 잠금은 자동 탈취하지 않으며 로컬 복구 절차가 필요하다.
+
 이전 검증 기록이다. 후속 작업의 최신 상태와 50개 테스트, 실제 Studio 이미지 기동, 배포 후보/남은 차단은 [NAS_READINESS.md](NAS_READINESS.md)를 먼저 확인한다.
 
 `feature/library-studio`의 체크포인트 `79f7dd7007e68521002021f6c3e61ac248ccea1e`에서 독립 체크아웃으로 이어서 작업했다. NMLO 저장소와 Stash는 수정하거나 조회하지 않았다. 개인 자료는 사용하지 않았다.
