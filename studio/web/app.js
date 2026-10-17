@@ -20,6 +20,130 @@ async function api(path, data) {
     if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
     return value;
 }
+const libraryViews = ["library", "favorite", "unread"];
+function libraryState(value = {}) {
+    const integer = (n, fallback, max) => Number.isSafeInteger(Number(n)) && Number(n) >= 1 && Number(n) <= max ? Number(n) : fallback;
+    return { view: libraryViews.includes(value.view) ? value.view : "library", page: integer(value.page, 1, 1000000),
+        query: String(value.query || "").slice(0, 1024), tag: String(value.tag || "").slice(0, 120),
+        provider: ["ehentai", "hitomi", "nhentai"].includes(value.provider) ? value.provider : "", sort: ["added", "title", "artist", "pages", "bytes", "rating", "last_read", "random"].includes(value.sort) ? value.sort : "added",
+        direction: value.direction === "asc" ? "asc" : "desc", limit: [24, 48, 96].includes(Number(value.limit)) ? Number(value.limit) : 48,
+        scroll: Number.isFinite(value.scroll) && value.scroll >= 0 ? value.scroll : 0 };
+}
+let libraryContext = libraryState({ limit: settings.limit });
+let libraryKey = "", routeHref = "", routeTask = Promise.resolve(), routeRevision = 0, progressTask = Promise.resolve(), pendingReader = null;
+history.scrollRestoration = "manual";
+function routeHash(route) {
+    if (route.kind === "jobs") return "#/downloads";
+    if (route.kind === "detail") return `#/works/${route.id}`;
+    if (route.kind === "reader") return `#/works/${route.id}/read/${route.page}`;
+    const value = libraryState(route.library), params = new URLSearchParams();
+    for (const [key, field, fallback] of [["view", "view", "library"], ["page", "page", 1], ["q", "query", ""], ["tag", "tag", ""], ["provider", "provider", ""], ["sort", "sort", "added"], ["direction", "direction", "desc"], ["limit", "limit", 48]]) {
+        if (value[field] !== fallback) params.set(key, value[field]);
+    }
+    return "#/library" + (params.size ? "?" + params : "");
+}
+function addressRoute() {
+    const raw = location.hash.slice(1), split = raw.indexOf("?"), path = split < 0 ? raw : raw.slice(0, split);
+    if (!raw || raw === "/") return { kind: "library", library: libraryState({ limit: settings.limit }) };
+    if (path === "/library") {
+        const p = new URLSearchParams(split < 0 ? "" : raw.slice(split + 1));
+        return { kind: "library", library: libraryState({ view: p.get("view"), page: p.get("page"), query: p.get("q"), tag: p.get("tag"), provider: p.get("provider"), sort: p.get("sort"), direction: p.get("direction"), limit: p.get("limit") }) };
+    }
+    if (raw === "/downloads") return { kind: "jobs" };
+    const match = /^\/works\/([a-f0-9]{32})(?:\/read\/(\d+))?$/.exec(raw);
+    if (match && (!match[2] || (Number.isSafeInteger(Number(match[2])) && Number(match[2]) <= 1000000))) return { kind: match[2] ? "reader" : "detail", id: match[1], page: Math.max(1, Number(match[2]) || 1) };
+    return { kind: "library", library: libraryContext, invalid: true };
+}
+function setAddress(route, replace = false) {
+    const current = addressRoute();
+    if (current.kind === "library") libraryContext = { ...current.library, scroll: window.scrollY };
+    history.replaceState({ ...history.state, studioLibrary: libraryContext }, "");
+    const context = route.kind === "library" ? libraryState(route.library) : libraryContext;
+    const target = routeHash(route), metadata = { studioLibrary: context };
+    if (replace || location.hash === target) history.replaceState(metadata, "", target);
+    else history.pushState(metadata, "", target);
+    libraryContext = context;
+}
+function currentLibrary() { return libraryState({ ...state, limit: settings.limit, scroll: window.scrollY }); }
+function updateView() {
+    $("#library-view").hidden = state.view === "jobs"; $("#jobs-view").hidden = state.view !== "jobs";
+    $("#page-title").textContent = { library: "전체 보관함", favorite: "즐겨찾기", unread: "아직 읽지 않은 작품", jobs: "다운로드" }[state.view];
+    document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
+    document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("selected", button.dataset.filter === state.provider));
+    $("#search").value = state.query; $("#sort").value = state.sort;
+    $("#direction").textContent = state.direction === "desc" ? "↓" : "↑";
+}
+async function navigateRoute(route, { replace = false, refresh = false } = {}) {
+    clearTimeout(state.searchTimer); setAddress(route, replace); return applyRoute(refresh);
+}
+function navigateLibrary() { return navigateRoute({ kind: "library", library: { ...currentLibrary(), scroll: 0 } }); }
+async function applyRoute(refresh = false) {
+    if (!refresh && routeHref === location.href) return routeTask;
+    routeHref = location.href;
+    const revision = ++routeRevision, route = addressRoute();
+    routeTask = (async () => {
+        if (route.invalid) toast("주소 형식을 확인하세요. 보관함으로 돌아갑니다.");
+        libraryContext = route.kind === "library" ? libraryState({ ...route.library, scroll: history.state?.studioLibrary?.scroll }) : libraryState(history.state?.studioLibrary || libraryContext);
+        for (const dialog of document.querySelectorAll("dialog[open]")) if (dialog.id !== "detail" && dialog.id !== "reader") dialog.close();
+        if (route.kind === "library" || route.kind === "jobs") {
+            $("#reader").close(); $("#detail").close(); state.reader = null; state.detail = null;
+        } else if (route.kind === "detail") { $("#reader").close(); state.reader = null; }
+        Object.assign(state, libraryContext); settings.limit = libraryContext.limit;
+        if (route.kind === "jobs") state.view = "jobs";
+        updateView(); applySettings();
+        if (route.kind === "jobs") { document.title = "다운로드 · Library Studio"; await showJobs(); return; }
+        if (route.kind === "library") {
+            document.title = $("#page-title").textContent + " · Library Studio";
+            if (location.hash !== routeHash(route)) { setAddress(route, true); routeHref = location.href; }
+            await load({ fromRoute: true });
+            if (revision === routeRevision) requestAnimationFrame(() => { if (revision === routeRevision) window.scrollTo(0, libraryContext.scroll); });
+            return;
+        }
+        if (libraryKey !== routeHash({ kind: "library", library: libraryContext })) await load({ fromRoute: true });
+        if (revision !== routeRevision) return;
+        if (refresh || state.detail?.id !== route.id) {
+            const work = await api(`/api/works/${route.id}`);
+            if (revision !== routeRevision) return;
+            state.detail = work;
+        }
+        if (route.kind === "detail") { renderDetail(state.detail); document.title = state.detail.title + " · Library Studio"; return; }
+        if (!state.detail.lrr_id) throw new Error("이 작품에는 아직 읽을 파일이 없습니다.");
+        if (state.reader?.work.id !== route.id) {
+            const result = await api(`/api/media/${state.detail.lrr_id}/files`);
+            if (revision !== routeRevision) return;
+            if (!Array.isArray(result.pages) || !result.pages.length) throw new Error("페이지 준비 중입니다. 잠시 후 다시 열어 주세요.");
+            state.reader = { work: state.detail, pages: result.pages.map((url) => pageUrl(url, state.detail.lrr_id)), page: 0 };
+        }
+        pendingReader = null;
+        state.reader.page = Math.min(state.reader.pages.length, route.page) - 1;
+        const actualRoute = { ...route, page: state.reader.page + 1 };
+        if (location.hash !== routeHash(actualRoute)) { setAddress(actualRoute, true); routeHref = location.href; }
+        // Reader URLs can open directly, without placing an extra detail dialog below them.
+        $("#detail").close(); if (!$("#reader").open) $("#reader").showModal(); renderPage();
+    })().catch(async (error) => {
+        if (revision !== routeRevision) return;
+        toast(error.message);
+        if (route.kind === "reader" && state.detail?.id === route.id) {
+            // Extraction may still be preparing. Retry from detail at the
+            // originally requested page instead of losing the book in the list.
+            $("#reader").close(); state.reader = null; pendingReader = { id: route.id, page: route.page };
+            setAddress({ kind: "detail", id: route.id }, true); routeHref = location.href;
+            renderDetail(state.detail); document.title = state.detail.title + " · Library Studio";
+            return;
+        }
+        if (route.kind === "reader" || route.kind === "detail") {
+            $("#reader").close(); $("#detail").close(); state.reader = null; state.detail = null;
+            setAddress({ kind: "library", library: libraryContext }, true); routeHref = ""; await applyRoute();
+        }
+    });
+    return routeTask;
+}
+window.addEventListener("popstate", () => { clearTimeout(state.searchTimer); applyRoute(); });
+window.addEventListener("hashchange", () => { clearTimeout(state.searchTimer); applyRoute(); });
+function showDetail(id) { return navigateRoute({ kind: "detail", id }, { refresh: addressRoute().kind === "detail" && state.detail?.id === id }); }
+function closeDetail() { return navigateRoute({ kind: "library", library: libraryContext }); }
+function closeReader() { return state.reader && navigateRoute({ kind: "detail", id: state.reader.work.id }); }
+
 function saveSettings() { localStorage.setItem("studio-view", JSON.stringify(settings)); applySettings(); }
 function applySettings() {
     document.documentElement.classList.toggle("media-masked", settings.thumbnailBlur);
@@ -36,7 +160,9 @@ function cover(work) {
     return `<div class="cover">${work.lrr_id ? `<img src="/api/media/${work.lrr_id}/thumbnail" loading="lazy" decoding="async" alt="${esc(work.title)} 표지">` : `<div class="placeholder"><span>▤</span><small>METADATA ONLY</small></div>`}<span class="pages">${work.pages} P</span>${work.favorite ? `<span class="favorite-star">★</span>` : ""}</div>`;
 }
 let requestNumber = 0;
-async function load() {
+async function load({ fromRoute = false } = {}) {
+    const displayedLibrary = currentLibrary();
+    if (!fromRoute && addressRoute().kind === "library") { setAddress({ kind: "library", library: displayedLibrary }); routeHref = location.href; }
     const request = ++requestNumber;
     const query = new URLSearchParams({ q: state.query, tag: state.tag, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
     const result = await api(`/api/works?${query}`);
@@ -48,6 +174,7 @@ async function load() {
     $("#empty").hidden = result.items.length > 0;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
+    libraryKey = routeHash({ kind: "library", library: displayedLibrary });
     await refreshLibraryStatus();
 }
 async function refreshLibraryStatus() {
@@ -56,8 +183,7 @@ async function refreshLibraryStatus() {
         $("#library-status").textContent = status.folder_archives ? `NAS 폴더에서 ${status.folder_archives.toLocaleString()}권 등록됨 · 나머지 폴더는 추가 등록 후 표시됩니다. NAS 자료는 PC에서 다시 업로드할 필요가 없습니다.${status.pending_archives ? ` · 색인 대기 ${status.pending_archives}개` : ""}` : "NAS에 있는 자료는 폴더 등록으로 추가할 수 있습니다. 파일 업로드는 PC 자료를 직접 추가할 때 사용하세요.";
     } catch { $("#library-status").textContent = "NAS 자료는 폴더 등록으로 추가합니다. 파일 업로드는 선택 사항입니다."; }
 }
-async function showDetail(id) {
-    const work = await api(`/api/works/${id}`); state.detail = work;
+function renderDetail(work) {
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id ? "" : "disabled"}>▷ 읽기</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 파일" : "메타데이터만 등록됨 · 파일을 동기화하면 읽을 수 있습니다."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
@@ -73,11 +199,8 @@ async function showJobs() {
     $("#jobs").innerHTML = jobs.length ? jobs.map((j) => `<article class="job"><div><div class="job-state">${statusName[j.state] || esc(j.state)} · ${j.engine === "lanraragi" ? "서버 플러그인" : "외부 엔진"}</div><div class="job-url">${esc(j.url)}</div><div class="job-message">${esc(j.message || (j.engine === "command" && j.state === "queued" ? "대상 기기의 다운로드 작업자가 가져가기를 기다립니다." : "서버 작업 대기 중"))}</div><small class="muted">${jobDetails(j)}</small></div><div class="job-target">${j.target === "nas" ? "NAS" : "내 PC"}${["failed", "blocked"].includes(j.state) ? `<p><button class="quiet" data-retry="${j.id}">${j.engine === "lanraragi" ? "상태 확인 · 재시도" : "다시 시도"}</button></p>` : ""}</div></article>`).join("") : `<div class="empty"><span>↓</span><h2>대기 중인 다운로드가 없습니다.</h2><p>작품 URL과 저장할 기기를 선택해 주세요.</p></div>`;
 }
 async function view(value) {
-    state.view = value; state.page = 1;
-    $("#library-view").hidden = value === "jobs"; $("#jobs-view").hidden = value !== "jobs";
-    $("#page-title").textContent = { library: "전체 보관함", favorite: "즐겨찾기", unread: "아직 읽지 않은 작품", jobs: "다운로드" }[value];
-    document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === value));
-    await (value === "jobs" ? showJobs() : load());
+    if (value === "jobs") return navigateRoute({ kind: "jobs" });
+    state.view = value; state.page = 1; return navigateLibrary();
 }
 async function sync() { $("#sync").disabled = true; try { const r = await api("/api/sync", {}); toast(`${r.synced}개 작품을 동기화했습니다.`); await load(); } finally { $("#sync").disabled = false; } }
 function pageUrl(url, id) {
@@ -85,22 +208,25 @@ function pageUrl(url, id) {
     if (parsed.origin !== location.origin || parsed.pathname !== `/api/archives/${id}/page`) throw new Error("페이지 URL 형식이 올바르지 않습니다.");
     return `/api/media/${id}/page${parsed.search}`;
 }
-async function readWork() {
-    const work = await api(`/api/works/${state.detail.id}`); state.detail = work; const result = await api(`/api/media/${work.lrr_id}/files`);
-    if (!Array.isArray(result.pages) || !result.pages.length) throw new Error("페이지 준비 중입니다. 잠시 후 다시 시도해 주세요.");
-    state.reader = { work, pages: result.pages.map((url) => pageUrl(url, work.lrr_id)), page: Math.max(0, Math.min(result.pages.length - 1, work.progress - 1)) };
-    $("#reader-title").textContent = work.title; $("#reader").showModal(); renderPage();
+function readWork() {
+    if (state.detail) return navigateRoute({ kind: "reader", id: state.detail.id, page: pendingReader?.id === state.detail.id ? pendingReader.page : Math.max(1, state.detail.progress || 1) });
 }
 function renderPage() {
     const reader = state.reader; const image = $("#reader-image");
     const displayedPage = reader.page + 1;
-    image.onload = () => { api(`/api/works/${reader.work.id}/progress`, { page: displayedPage }).catch((e) => toast(e.message)); };
+    image.onload = () => {
+        if (state.reader !== reader || reader.page + 1 !== displayedPage) return;
+        reader.work.progress = displayedPage;
+        progressTask = progressTask.catch(() => {}).then(() => api(`/api/works/${reader.work.id}/progress`, { page: displayedPage })).catch((error) => toast(error.message));
+    };
     image.onerror = () => toast("페이지를 아직 불러오지 못했습니다. 추출 상태를 확인한 뒤 다시 열어 주세요.");
     image.src = reader.pages[reader.page]; $("#reader-position").textContent = `${reader.page + 1} / ${reader.pages.length}`;
     $("#reader-prev").disabled = reader.page === 0; $("#reader-next").disabled = reader.page + 1 === reader.pages.length;
+    $("#reader-page").max = String(reader.pages.length); $("#reader-page").value = String(displayedPage);
+    document.title = `${displayedPage} / ${reader.pages.length} · ${reader.work.title} · Library Studio`;
     if (reader.pages[reader.page + 1]) { const next = new Image(); next.src = reader.pages[reader.page + 1]; }
 }
-function turnPage(delta) { if (!state.reader) return; const n = state.reader.page + delta; if (n >= 0 && n < state.reader.pages.length) { state.reader.page = n; renderPage(); } }
+function turnPage(delta) { if (!state.reader) return; const n = state.reader.page + delta; if (n >= 0 && n < state.reader.pages.length) { return navigateRoute({ kind: "reader", id: state.reader.work.id, page: n + 1 }); } }
 function guard(fn) { return (...args) => Promise.resolve().then(() => fn(...args)).catch((e) => toast(e.message)); }
 document.addEventListener("click", guard(async (event) => {
     if (event.target.closest(".card-select")) return;
@@ -115,14 +241,20 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.fetch) { button.disabled = true; try { await api(`/api/works/${state.detail.id}/sources/${button.dataset.fetch}/fetch`, {}); await showDetail(state.detail.id); toast("출처 태그를 갱신했습니다."); } finally { button.disabled = false; } }
     if (button.dataset.comments) { button.disabled = true; try { const result = await api(`/api/works/${state.detail.id}/sources/${button.dataset.comments}/comments/fetch`, {}); await showDetail(state.detail.id); toast(result.message); } finally { button.disabled = false; } }
     if (button.dataset.retry) { await api(`/api/jobs/${button.dataset.retry}/retry`, {}); await showJobs(); }
-    if (button.dataset.userFilter) { state.tag = button.dataset.userFilter; state.query = ""; $("#search").value = ""; $("#detail").close(); await load(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
+    if (button.dataset.userFilter) { state.tag = button.dataset.userFilter; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
     if (button.dataset.removeUserTag) { await api("/api/tags/batch", {work_ids:[state.detail.id],remove:[button.dataset.removeUserTag]}); await showDetail(state.detail.id); await load(); }
     if (button.id === "edit-user-tags") await openTagEditor([state.detail.id]);
-    if (button.dataset.tag) { state.tag = ""; state.query = button.dataset.tag; $("#search").value = state.query; $("#detail").close(); await load(); }
+    if (button.dataset.tag) { state.tag = ""; state.query = button.dataset.tag; $("#search").value = state.query; state.page = 1; await navigateLibrary(); }
 }));
 $("#grid").addEventListener("keydown", guard(async (e) => { if (e.key === "Enter" && e.target.dataset.id) await showDetail(e.target.dataset.id); }));
 document.addEventListener("submit", guard(async (event) => {
     event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
+    if (form.id === "reader-jump") {
+        if (!state.reader) return;
+        const page = Number($("#reader-page").value);
+        if (!Number.isInteger(page) || page < 1 || page > state.reader.pages.length) throw new Error("이동할 쪽 번호를 확인하세요.");
+        await navigateRoute({ kind: "reader", id: state.reader.work.id, page });
+    }
     if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
     if (form.id === "source-form") { const value = { url: data.url }; if (data.tags) value.tags = data.tags; if (data.comments) value.comments = JSON.parse(data.comments); await api(`/api/works/${state.detail.id}/sources`, value); await showDetail(state.detail.id); await load(); }
     if (form.id === "download-form") {
@@ -168,7 +300,9 @@ $("#download-preview").onclick = guard(async () => {
     if (revision !== downloadRevision) return;
     $("#download-resolution").textContent = `${providerName[result.provider]} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
 });
-$("#close-detail").onclick = () => $("#detail").close(); $("#close-reader").onclick = () => $("#reader").close();
+$("#close-detail").onclick = guard(closeDetail); $("#close-reader").onclick = guard(closeReader);
+$("#detail").addEventListener("cancel", (event) => { event.preventDefault(); closeDetail(); });
+$("#reader").addEventListener("cancel", (event) => { event.preventDefault(); closeReader(); });
 $("#settings-button").onclick = () => $("#settings").showModal();
 $("#thumbnail-blur").onchange = (e) => { settings.thumbnailBlur = e.target.checked; saveSettings(); };
 $("#privacy-route").onclick = () => { settings.thumbnailBlur = !settings.thumbnailBlur; saveSettings(); };
@@ -183,7 +317,7 @@ $("#previous").onclick = guard(async () => { state.page -= 1; await load(); }); 
 $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () => turnPage(1);
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
 applySettings();
-guard(load)(); guard(showJobs)();
+applyRoute(); guard(showJobs)();
 guard(async () => { const health = await api("/api/health"); $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
 setInterval(guard(async () => { if (state.view === "jobs" && !document.hidden) await showJobs(); }), 5000);
 

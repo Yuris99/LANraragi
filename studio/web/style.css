@@ -19,3 +19,5 @@
 @media(max-width:700px){.topbar{height:auto;min-height:100px;padding:14px 0;flex-wrap:wrap}.topbar .search{flex-basis:100%}#download-open{display:inline-flex;font-size:11px;padding:10px}}
 
 .library-status{font-size:12px;line-height:1.7;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-wrap:anywhere}.toggle-setting{display:flex;align-items:center;gap:10px}.toggle-setting input{width:auto}.privacy-mode button{flex-shrink:0}
+
+#reader-jump{display:flex;align-items:center;gap:6px;margin:0}#reader-page{width:65px;padding:7px 8px;font-size:12px}#reader-position{white-space:nowrap}@media(max-width:700px){#reader-page{width:49px;padding:7px 4px}#reader-jump{gap:4px}.reader-bar .quiet{padding:8px}}

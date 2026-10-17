@@ -98,7 +98,15 @@ def main():
             page.wait_for_function('(n)=>document.querySelector("#reader-position").textContent===n+" / 3"',arg=number)
             page.wait_for_function('()=>document.querySelector("#reader-image").complete && document.querySelector("#reader-image").naturalWidth===320')
             assert page.locator('#reader-image').evaluate('(el)=>getComputedStyle(el).opacity')=='1'
-        page.locator('#close-reader').click();page.locator('#close-detail').click()
+        assert page.url.endswith('/read/3')
+        page.go_back();page.wait_for_url('**/read/2')
+        page.wait_for_function('()=>document.querySelector("#reader-position").textContent==="2 / 3"')
+        page.go_forward();page.wait_for_url('**/read/3');page.reload()
+        page.locator('#reader[open]').wait_for()
+        page.wait_for_function('()=>document.querySelector("#reader-position").textContent==="3 / 3"')
+        page.locator('#close-reader').click();page.locator('#detail[open]').wait_for()
+        assert '/read/' not in page.url and '/works/' in page.url
+        page.locator('#close-detail').click()
         page.locator('#settings-button').click();page.locator('#thumbnail-blur').uncheck()
         page.locator('#settings [data-close]').click();page.reload();page.locator('.card').wait_for()
         assert page.locator('.card img').evaluate('(el)=>getComputedStyle(el).filter')=='none'
@@ -148,7 +156,7 @@ def main():
     assert command(docker+['inspect','--format','{{.State.StartedAt}}',project+'-lanraragi-1']).strip()==lrr_started
     print(json.dumps({'real_apply_and_rollback':True,'prior_sqlite_backup':True,'legacy_image_reused':True,
                       'lrr_not_restarted':True,'data_download_hash_preserved':True,'thumbnail_blur':True,'cover_fit_contain':True,
-                      'existing_overlay_upgrade':True,'two_step_code_rollback':True,'hash_failure_preserves_existing_ui':True,
+                      'reader_history_reload_and_detail_url':True,'existing_overlay_upgrade':True,'two_step_code_rollback':True,'hash_failure_preserves_existing_ui':True,
                       'detail_reader_original':True,'settings_persisted':True,'nas_folder_count':True,'page_errors':errors}))
 
 

@@ -16,6 +16,14 @@ Covers use `object-fit: contain` in both grid/list and detail views: the complet
 
 `python -B studio/tests/mosaic_smoke.py` checks default blur, saved settings/migration, original detail/reader, all three card sizes and desktop/mobile grid/list layouts. Generated portrait/wide/tall images have four colored edges; actual screenshot pixels verify all edges remain visible when blur is off. Pillow and Playwright are test-only dependencies.
 
+## Reader and detail navigation
+
+Each work detail has a bookmarkable address `/#/works/<work-id>`; each reader page has `/#/works/<work-id>/read/6`. Turning from6to7 adds a browser history entry: Back returns to6, Forward returns to7. Reloading or opening the copied address restores that exact work/page. Explicit page URLs take precedence over saved reading progress. The page-number input jumps directly to a chosen page; selecting the current page does not duplicate history. Valid page links past the end are replaced with the actual last page. The prepared file list is reused while turning pages. If extraction is still preparing, detail offers a retry at the originally requested page.
+
+Browser Back from detail restores the preceding library query/filter/sort/page/scroll. Library addresses encode filters and pagination; scroll context is kept in the browser history entry. The reader’s **← 상세** link/Escape goes to detail; closing detail goes to the remembered library. Direct reader links also offer this path even without prior local navigation. These controls navigate to their destination; browser Back/Forward still follow the actual sequence of visited pages. `/unsen` keeps the same navigation while retaining its original-thumbnail entry behavior. All routes still use the same authenticated app; fragments need no new NAS/proxy paths.
+
+`python -B studio/tests/navigation_smoke.py` checks6→7→Back6→Forward7 with generated seven-page fixtures, reader/detail reload/direct links, preserved list context/scroll, file-list reuse, keyboard/mobile controls, invalid page bounds and stale-detail response cancellation. Page-load progress reports are serialized so rapid navigation cannot finish older updates after newer ones. External website download support is unchanged.
+
 ## User tags
 
 The detail screen's **내 태그 → 추가·삭제** edits a separate indexed SQLite relation. These tags survive LANraragi synchronization and never rewrite LANraragi or per-source original tags/comments. Click × to remove a user tag or its label for an exact user-tag filter. General search includes user tags; typing a new search clears that exact filter.
