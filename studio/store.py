@@ -36,6 +36,9 @@ class Store:
                 UNIQUE(provider,external_id));
               CREATE INDEX IF NOT EXISTS sources_work ON sources(work_id);
               CREATE INDEX IF NOT EXISTS works_added ON works(added);
+              CREATE TABLE IF NOT EXISTS work_numbers (
+                number INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_id TEXT NOT NULL UNIQUE REFERENCES works(id));
               CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY, work_id TEXT, url TEXT NOT NULL, target TEXT NOT NULL,
                 engine TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
@@ -62,6 +65,9 @@ class Store:
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
             for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
+            db.execute('''INSERT INTO work_numbers(work_id)
+                SELECT w.id FROM works w WHERE NOT EXISTS
+                (SELECT 1 FROM work_numbers n WHERE n.work_id=w.id) ORDER BY w.added,w.id''')
 
     @contextlib.contextmanager
     def db(self):
@@ -90,9 +96,32 @@ class Store:
             result[key] = json.loads(result[key])
         return result
 
+    @staticmethod
+    def short_identity(work):
+        for provider,prefix in [('hitomi',''),('ehentai','E'),('nhentai','N')]:
+            values=[s['external_id'] for s in work['sources'] if s['provider']==provider
+                    and re.fullmatch(r'[0-9]{1,32}',s['external_id'])]
+            if values:return prefix+min(values,key=lambda value:(len(value),value))
+        return 'L'+str(work['local_number'])
+
+    def resolve_short_id(self, value):
+        if not isinstance(value,str):raise ValueError('작품 번호 형식을 확인하세요.')
+        match=re.fullmatch(r'([ENL]?)([0-9]{1,32})',value.upper())
+        if not match:raise ValueError('작품 번호는 히토미 숫자, E번호, N번호 또는 L번호입니다.')
+        prefix,number=match.groups()
+        with self.db() as db:
+            if prefix=='L':
+                if len(number)>19 or not 1<=int(number)<=9223372036854775807:raise ValueError('로컬 번호 범위를 확인하세요.')
+                row=db.execute('SELECT work_id FROM work_numbers WHERE number=?',(int(number),)).fetchone()
+            else:
+                provider={'':'hitomi','E':'ehentai','N':'nhentai'}[prefix]
+                row=db.execute('SELECT work_id FROM sources WHERE provider=? AND external_id=?',(provider,number)).fetchone()
+        if not row:raise KeyError('보관함에 연결된 작품 번호가 없습니다. 자동 다운로드는 실행하지 않습니다.')
+        return self.get_work(row['work_id'])
+
     def get_work(self, work_id):
         with self.db() as db:
-            row = db.execute('SELECT * FROM works WHERE id=?', (work_id,)).fetchone()
+            row = db.execute('SELECT works.*,n.number AS local_number FROM works JOIN work_numbers n ON n.work_id=works.id WHERE works.id=?', (work_id,)).fetchone()
             if not row:
                 raise KeyError('작품을 찾을 수 없습니다.')
             result = self.work_row(row)
@@ -101,10 +130,11 @@ class Store:
                 'SELECT * FROM sources WHERE work_id=? ORDER BY provider,external_id', (work_id,))]
             result['all_tags'] = list(dict.fromkeys(result['tags'] + result['user_tags'] + [
                 t for s in result['sources'] for t in s['tags']]))
+            result['short_id']=self.short_identity(result)
             return result
 
     def list_works(self, query='', sort='added', descending=True, page=1, limit=48,
-                   provider='', favorite=False, unread=False, tag=''):
+                   provider='', favorite=False, unread=False, tag='', all_tag=''):
         order = {'added': 'added', 'title': 'title COLLATE NOCASE', 'artist': 'artist COLLATE NOCASE',
                  'pages': 'pages', 'bytes': 'bytes', 'rating': 'rating',
                  'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()'}
@@ -120,6 +150,12 @@ class Store:
         if tag:
             where.append("EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)")
             args.append(tag)
+        if all_tag:
+            if not isinstance(all_tag,str) or len(all_tag)>300:raise ValueError('태그 길이를 확인하세요.')
+            where.append('''(EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)
+                OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE t.value=?)
+                OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND t.value=?))''')
+            args.extend([all_tag]*3)
         if provider:
             where.append('EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider=?)')
             args.append(provider)
@@ -130,7 +166,7 @@ class Store:
         condition = ' WHERE ' + ' AND '.join(where) if where else ''
         with self.db() as db:
             total = db.execute('SELECT count(*) FROM works'+condition, args).fetchone()[0]
-            rows = db.execute('SELECT * FROM works'+condition+' ORDER BY '+order[sort]+
+            rows = db.execute('SELECT works.*,n.number AS local_number FROM works JOIN work_numbers n ON n.work_id=works.id'+condition+' ORDER BY '+order[sort]+
                               (' DESC' if descending else ' ASC')+',id LIMIT ? OFFSET ?',
                               [*args, limit, (page-1)*limit]).fetchall()
             sources={row['id']:[] for row in rows}
@@ -146,6 +182,7 @@ class Store:
                 work=self.work_row(row);work['sources']=sources[row['id']]
                 work['user_tags']=user_tags[row['id']]
                 work['all_tags']=list(dict.fromkeys(work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']]))
+                work['short_id']=self.short_identity(work)
                 items.append(work)
         return dict(items=items,total=total,page=page,limit=limit)
 
@@ -176,6 +213,17 @@ class Store:
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
             rows=db.execute("SELECT tag,count(*) AS count FROM user_tags WHERE tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def library_tags(self,query=''):
+        if not isinstance(query,str) or len(query)>300:raise ValueError('태그 검색어가 너무 깁니다.')
+        term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+        with self.db() as db:
+            rows=db.execute('''SELECT tag,count(*) AS count FROM (
+                SELECT work_id,tag FROM user_tags UNION
+                SELECT w.id,t.value FROM works w,json_each(w.tags) t UNION
+                SELECT s.work_id,t.value FROM sources s,json_each(s.tags) t)
+                WHERE tag LIKE ? ESCAPE ? GROUP BY tag ORDER BY count DESC,tag LIMIT 100''',(term,'\\')).fetchall()
         return [dict(row) for row in rows]
 
     def rename_user_tag(self,source,target):
@@ -215,6 +263,7 @@ class Store:
             db.execute('INSERT INTO works(id,lrr_id,title,artist,pages,bytes,tags,added) VALUES(?,?,?,?,?,?,?,?)',
                        (work_id,lrr_id,title,str(artist)[:500],max(0,int(pages)),max(0,int(size)),
                         json.dumps(tags_list(tags or []),ensure_ascii=False),time.time()))
+            db.execute('INSERT INTO work_numbers(work_id) VALUES(?)',(work_id,))
         return self.get_work(work_id)
 
     def update_work(self, work_id, data):

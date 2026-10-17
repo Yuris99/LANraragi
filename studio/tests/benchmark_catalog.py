@@ -21,10 +21,11 @@ def main(count=20000):
                 [(f'{n+count:032x}',f'{n:032x}','hitomi',str(n+1),f'https://hitomi.la/galleries/{n+1}.html',json.dumps([f'collection:{n%50}'])) for n in range(count)])
             db.executemany('INSERT INTO user_tags(work_id,tag) VALUES(?,?)',
                 [(f'{n:032x}',tag) for n in range(count) for tag in ['owned',f'shelf:{n%100}']])
-        def measure(query='',tag=''):
+        store=Store(store.path)  # Backfill the legacy-shaped synthetic bulk insert before measurement.
+        def measure(query='',tag='',all_tag=''):
             samples=[]
             for _ in range(10):
-                start=time.perf_counter();result=store.list_works(query=query,tag=tag,limit=120)
+                start=time.perf_counter();result=store.list_works(query=query,tag=tag,all_tag=all_tag,limit=120)
                 samples.append((time.perf_counter()-start)*1000)
                 assert len(result['items'])<=120
             return {'median_ms':round(statistics.median(samples),2),'max_ms':round(max(samples),2)}
@@ -34,8 +35,12 @@ def main(count=20000):
         concurrent_ms=(time.perf_counter()-start)*1000
         result={'synthetic_works':count,'source_records':count,'list_120':measure(''),
                 'user_tag_records':count*2,'search_user_tag_120':measure('shelf:7'),
-                'exact_user_tag_120':measure(tag='shelf:7'),'search_source_tag_120':measure('collection:7'),'search_title_120':measure('019999'),
+                'exact_user_tag_120':measure(tag='shelf:7'),'exact_all_tag_120':measure(all_tag='collection:7'),'search_source_tag_120':measure('collection:7'),'search_title_120':measure('019999'),
                 'eight_searches_four_threads_ms':round(concurrent_ms,2)}
+        samples=[]
+        for _ in range(3):
+            start=time.perf_counter();store.library_tags('collection:');samples.append((time.perf_counter()-start)*1000)
+        result['tag_picker_median_ms']=round(statistics.median(samples),2)
         print(json.dumps(result,sort_keys=True))
 
 

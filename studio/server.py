@@ -250,9 +250,12 @@ class Handler(BaseHTTPRequestHandler):
         match=re.fullmatch(r'/api/uploads/([0-9a-f]{64})/download',path)
         if match:return self.download_upload(match[1])
         if path=='/api/tags':return self.respond(store.tag_catalog(q('q')))
+        if path=='/api/library/tags':return self.respond(store.library_tags(q('q')))
+        match=re.fullmatch(r'/api/short/([^/]+)',path)
+        if match:return self.respond(store.resolve_short_id(match[1]))
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
-                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag')))
+                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag'),q('all_tag')))
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
         if match:return self.respond(store.get_work(match[1]))
         if path=='/api/jobs':

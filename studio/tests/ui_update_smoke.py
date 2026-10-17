@@ -81,7 +81,9 @@ def main():
     assert json.loads(request('/api/library/status'))['folder_archives']==1
     assert command(docker+['inspect','--format','{{.State.StartedAt}}',project+'-lanraragi-1']).strip()==lrr_started
     request('/api/sync',{});catalog=json.loads(request('/api/works'));assert catalog['total']==1
-    work=catalog['items'][0];request('/api/works/'+work['id']+'/progress',{'page':1})
+    work=catalog['items'][0];short=work['short_id']
+    assert any(row['tag'].startswith('folder:') for row in json.loads(request('/api/library/tags')))
+    request('/api/works/'+work['id']+'/progress',{'page':1})
     with sync_playwright() as pw:
         browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
         context=browser.new_context(http_credentials={'username':'admin','password':values['STUDIO_PASSWORD']})
@@ -98,14 +100,14 @@ def main():
             page.wait_for_function('(n)=>document.querySelector("#reader-position").textContent===n+" / 3"',arg=number)
             page.wait_for_function('()=>document.querySelector("#reader-image").complete && document.querySelector("#reader-image").naturalWidth===320')
             assert page.locator('#reader-image').evaluate('(el)=>getComputedStyle(el).opacity')=='1'
-        assert page.url.endswith('/read/3')
-        page.go_back();page.wait_for_url('**/read/2')
+        assert page.url.endswith('/'+short+'/3')
+        page.go_back();page.wait_for_url('**/'+short+'/2')
         page.wait_for_function('()=>document.querySelector("#reader-position").textContent==="2 / 3"')
-        page.go_forward();page.wait_for_url('**/read/3');page.reload()
+        page.go_forward();page.wait_for_url('**/'+short+'/3');page.reload()
         page.locator('#reader[open]').wait_for()
         page.wait_for_function('()=>document.querySelector("#reader-position").textContent==="3 / 3"')
         page.locator('#close-reader').click();page.locator('#detail[open]').wait_for()
-        assert '/read/' not in page.url and '/works/' in page.url
+        assert page.url==base+'/#/'+short
         page.locator('#close-detail').click()
         page.locator('#settings-button').click();page.locator('#thumbnail-blur').uncheck()
         page.locator('#settings [data-close]').click();page.reload();page.locator('.card').wait_for()
@@ -133,6 +135,7 @@ def main():
     upgrade=command(['sh',str(helper),'apply',str(root)])
     assert '"studio_update": "complete"' in upgrade and code_mount()!=first_code
     assert len(list(root.glob('ui-update-backup.*')))==2
+    assert json.loads(request('/api/works/'+work['id']))['short_id']==short
     assert hashlib.sha256(request('/api/uploads/'+archive_sha+'/download')).hexdigest()==archive_sha
     rolled=command(['sh',str(helper),'rollback',str(root)]);assert 'rolled back' in rolled
     assert code_mount()==first_code and overlay.read_text()==legacy
@@ -156,7 +159,7 @@ def main():
     assert command(docker+['inspect','--format','{{.State.StartedAt}}',project+'-lanraragi-1']).strip()==lrr_started
     print(json.dumps({'real_apply_and_rollback':True,'prior_sqlite_backup':True,'legacy_image_reused':True,
                       'lrr_not_restarted':True,'data_download_hash_preserved':True,'thumbnail_blur':True,'cover_fit_contain':True,
-                      'reader_history_reload_and_detail_url':True,'existing_overlay_upgrade':True,'two_step_code_rollback':True,'hash_failure_preserves_existing_ui':True,
+                      'reader_history_reload_and_detail_url':True,'stable_local_short_id':True,'existing_overlay_upgrade':True,'two_step_code_rollback':True,'hash_failure_preserves_existing_ui':True,
                       'detail_reader_original':True,'settings_persisted':True,'nas_folder_count':True,'page_errors':errors}))
 
 
