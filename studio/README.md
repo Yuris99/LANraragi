@@ -10,9 +10,11 @@ A personal web library built on this LANraragi fork, with a separate small Pytho
 
 ## Image display defaults
 
-New browser visits mask **library thumbnails only**, using a finer 48-column canvas (previously 12). Opening a work immediately shows its original cover and reader pages. **설정 → 목록 썸네일 모자이크** and the header toggle save the choice in that browser; refresh preserves it. Legacy `/unsen` bookmarks start with thumbnails unmasked, without overriding the saved preference unless the user changes a setting. Both routes require the same authentication. Original media and archive downloads retain their original bytes.
+New browser visits apply a soft CSS **blur to library thumbnails only**. Pixelated canvases have been removed. Opening a work immediately shows its original cover and reader pages. **설정 → 목록 썸네일 블러** and the header toggle save the choice in that browser; refresh preserves it. The previous thumbnail-mosaic on/off preference is migrated. Legacy `/unsen` bookmarks start with thumbnails unblurred without replacing the saved preference unless a setting changes. Both routes require the same authentication.
 
-The default HTML starts with thumbnails masked before JavaScript initializes. Thumbnail images remain hidden while their canvas is prepared, and a canvas failure keeps the thumbnail mask. Detail and reader images are never covered by this selector. `python -B studio/tests/mosaic_smoke.py` checks these behaviors with synthetic images, including desktop/mobile layouts.
+Covers use `object-fit: contain` in both grid/list and detail views: the complete image keeps its original ratio and is centered, with background space when the frame ratio differs. There is no image zoom, stretch or crop to fill the frame. Original media and downloads retain their bytes. Blur is active from the initial HTML class; browsers without filter support keep affected thumbnails hidden. No canvas is required.
+
+`python -B studio/tests/mosaic_smoke.py` checks default blur, saved settings/migration, original detail/reader, all three card sizes and desktop/mobile grid/list layouts. Generated portrait/wide/tall images have four colored edges; actual screenshot pixels verify all edges remain visible when blur is off. Pillow and Playwright are test-only dependencies.
 
 ## User tags
 
@@ -75,7 +77,7 @@ python -B -m unittest discover -s studio/tests -v
 node --check studio/web/app.js
 ```
 
-The latest cloud continuation passes 130 unit/HTTP/deployment tests and the JS syntax check. Synthetic browser tests cover the 48-column thumbnail-only mask, original detail/reader display and saved toggle. A real isolated Docker rehearsal verifies the source-only NAS-style update, SQLite backup, unchanged LANraragi runtime, preserved download hashes and code rollback. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
+The latest cloud continuation passes 130 unit/HTTP/deployment tests and the JS syntax check. Synthetic browser tests cover thumbnail-only blur, uncropped portrait/wide/tall covers, original detail/reader display, saved preferences and legacy-setting migration. A real isolated Docker rehearsal verifies the source-only NAS-style update, SQLite backup, unchanged LANraragi runtime, preserved download hashes and code rollback. Chromium verified real LANraragi 0.9.81 synchronization, a synthetic three-page CBZ reader, resume at page 2, thumbnails and a PC download with matching SHA-256 at desktop/mobile widths. The Studio image builds. The full fork image build is blocked by HTTP policy at Alpine package downloads; interoperability used the official 0.9.81 image with narrowly applied API-key/concurrency changes, not a successful full-fork build. See `CLOUD_VALIDATION.md` for exact boundaries and reproduction notes.
 
 ## DS718+ and cloud development
 

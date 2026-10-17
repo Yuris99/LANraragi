@@ -4,11 +4,12 @@ let tagTargets = [];
 const state = { page: 1, view: "library", provider: "", query: "", tag: "", sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
-settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", thumbnailMosaic: true, ...settings };
+settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", ...settings };
+if (typeof settings.thumbnailBlur !== "boolean") settings.thumbnailBlur = settings.thumbnailMosaic !== false;
 delete settings.mosaic;
-settings.thumbnailMosaic = settings.thumbnailMosaic !== false;
+delete settings.thumbnailMosaic;
 // Keep old original-view bookmarks usable; normal visits use the saved choice.
-if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailMosaic = false;
+if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailBlur = false;
 const providerName = { ehentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
 const statusName = { queued: "대기 중", running: "진행 중", complete: "완료", failed: "실패", blocked: "확인 필요" };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (s) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
@@ -19,29 +20,13 @@ async function api(path, data) {
     if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
     return value;
 }
-function mosaicImage(image) {
-    if (!settings.thumbnailMosaic || !image.matches("#grid .cover img") || !image.complete || !image.naturalWidth) return;
-    let canvas = image.parentElement.querySelector(".mosaic-layer");
-    if (!canvas) { canvas = document.createElement("canvas"); canvas.className = "mosaic-layer"; canvas.setAttribute("aria-hidden", "true"); image.after(canvas); }
-    canvas.hidden = true;
-    try {
-        canvas.width = 48; canvas.height = Math.max(1, Math.min(192, Math.round(48 * image.naturalHeight / image.naturalWidth)));
-        const context = canvas.getContext("2d");
-        if (!context) return;
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        canvas.hidden = false;
-    } catch { /* Keep the original hidden if canvas rendering is unavailable. */ }
-}
-document.addEventListener("load", (event) => { if (event.target.matches?.("#grid .cover img")) mosaicImage(event.target); }, true);
-document.addEventListener("error", (event) => { if (event.target.matches?.("#grid .cover img")) { const canvas = event.target.parentElement.querySelector(".mosaic-layer"); if (canvas) canvas.hidden = true; } }, true);
 function saveSettings() { localStorage.setItem("studio-view", JSON.stringify(settings)); applySettings(); }
 function applySettings() {
-    document.documentElement.classList.toggle("media-masked", settings.thumbnailMosaic);
-    $("#privacy-state").textContent = settings.thumbnailMosaic ? "목록 썸네일 모자이크 켜짐 · 작품을 열면 원본 표시" : "목록 썸네일 원본 표시";
-    $("#privacy-route").textContent = settings.thumbnailMosaic ? "모자이크 끄기" : "모자이크 켜기";
-    $("#privacy-route").setAttribute("aria-pressed", String(settings.thumbnailMosaic));
-    $("#thumbnail-mosaic").checked = settings.thumbnailMosaic;
-    if (settings.thumbnailMosaic) document.querySelectorAll("#grid .cover img").forEach(mosaicImage);
+    document.documentElement.classList.toggle("media-masked", settings.thumbnailBlur);
+    $("#privacy-state").textContent = settings.thumbnailBlur ? "목록 썸네일 블러 켜짐 · 작품을 열면 원본 표시" : "목록 썸네일 원본 표시";
+    $("#privacy-route").textContent = settings.thumbnailBlur ? "블러 끄기" : "블러 켜기";
+    $("#privacy-route").setAttribute("aria-pressed", String(settings.thumbnailBlur));
+    $("#thumbnail-blur").checked = settings.thumbnailBlur;
     document.documentElement.style.setProperty("--card-width", { small: "150px", medium: "185px", large: "230px" }[settings.size] || "185px");
     $("#grid").classList.toggle("list", settings.layout === "list");
     $("#card-size").value = settings.size; $("#page-size").value = String(settings.limit); $("#read-direction").value = settings.direction;
@@ -108,7 +93,6 @@ async function readWork() {
 }
 function renderPage() {
     const reader = state.reader; const image = $("#reader-image");
-    const mosaic = image.parentElement.querySelector(".mosaic-layer"); if (mosaic) mosaic.hidden = true;
     const displayedPage = reader.page + 1;
     image.onload = () => { api(`/api/works/${reader.work.id}/progress`, { page: displayedPage }).catch((e) => toast(e.message)); };
     image.onerror = () => toast("페이지를 아직 불러오지 못했습니다. 추출 상태를 확인한 뒤 다시 열어 주세요.");
@@ -186,8 +170,8 @@ $("#download-preview").onclick = guard(async () => {
 });
 $("#close-detail").onclick = () => $("#detail").close(); $("#close-reader").onclick = () => $("#reader").close();
 $("#settings-button").onclick = () => $("#settings").showModal();
-$("#thumbnail-mosaic").onchange = (e) => { settings.thumbnailMosaic = e.target.checked; saveSettings(); };
-$("#privacy-route").onclick = () => { settings.thumbnailMosaic = !settings.thumbnailMosaic; saveSettings(); };
+$("#thumbnail-blur").onchange = (e) => { settings.thumbnailBlur = e.target.checked; saveSettings(); };
+$("#privacy-route").onclick = () => { settings.thumbnailBlur = !settings.thumbnailBlur; saveSettings(); };
 $("#card-size").onchange = (e) => { settings.size = e.target.value; saveSettings(); };
 $("#page-size").onchange = guard(async (e) => { settings.limit = Number(e.target.value); state.page = 1; saveSettings(); await load(); });
 $("#read-direction").onchange = (e) => { settings.direction = e.target.value; saveSettings(); };
