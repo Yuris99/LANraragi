@@ -18,17 +18,18 @@ from playwright.sync_api import sync_playwright
 
 def main():
     repository=Path(__file__).resolve().parents[2]
-    pilot=os.environ.get('STUDIO_SMOKE_PILOT')=='1'
-    root=repository/('work/folder-pilot-check' if pilot else 'work/folder-check');source=root/'originals'
-    project='library-studio-folder-pilot-check' if pilot else 'library-studio-folder-check'
+    root_reader=os.environ.get('STUDIO_SMOKE_ROOT')=='1'
+    pilot=root_reader or os.environ.get('STUDIO_SMOKE_PILOT')=='1'
+    root=repository/('work/folder-root-check' if root_reader else 'work/folder-pilot-check' if pilot else 'work/folder-check');source=root/'originals'
+    project='library-studio-folder-root-check' if root_reader else 'library-studio-folder-pilot-check' if pilot else 'library-studio-folder-check'
     expected={'manga/Synthetic Folder/1.png','manga/Synthetic Folder/2.jpg','manga/Synthetic Folder/3.webp'}
     def snapshot():
-        return {str(p.relative_to(source)):(hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_mode,p.stat().st_mtime_ns)
+        return {str(p.relative_to(source)):(hashlib.sha256(p.read_bytes()).hexdigest(),p.stat().st_mode,p.stat().st_mtime_ns,p.stat().st_uid,p.stat().st_gid)
                 for p in source.rglob('*') if p.is_file()}
-    before=snapshot();assert set(before)==expected,'Use only the isolated synthetic fixture'
+    before=snapshot();folder_before={str(p.relative_to(source)):(p.stat().st_mode,p.stat().st_mtime_ns,p.stat().st_uid,p.stat().st_gid) for p in [source,*source.rglob('*')] if p.is_dir()};assert set(before)==expected,'Use only the isolated synthetic fixture'
     values=dict(line.split('=',1) for line in (root/'.env.nas').read_text().splitlines() if '=' in line)
     base='http://127.0.0.1:'+values['STUDIO_PORT']
-    assert values['STUDIO_PORT']==('43132' if pilot else '43130') and values['STUDIO_FOLDER_SOURCE']==str(source)
+    assert values['STUDIO_PORT']==('43134' if root_reader else '43132' if pilot else '43130') and values['STUDIO_FOLDER_SOURCE']==str(source)
     headers={'Authorization':'Basic '+base64.b64encode(('admin:'+values['STUDIO_PASSWORD']).encode()).decode()}
     def request(path,data=None):
         req=urllib.request.Request(base+path,data=None if data is None else json.dumps(data).encode(),
@@ -38,6 +39,7 @@ def main():
     compose=docker+['compose','--env-file',str(root/'.env.nas'),'-p',project,
                     '-f','studio/compose.nas.yaml','-f','studio/compose.cloud-runtime.yaml',
                     '-f','studio/deploy/compose.pilot.yaml','-f','studio/compose.folders.yaml']
+    if root_reader:compose+=['-f','studio/compose.folders-root.yaml']
     environment={k:v for k,v in os.environ.items() if k not in {'DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH'}}
     def command(args):
         result=subprocess.run(args,cwd=repository,env=environment,capture_output=True,text=True,timeout=90)
@@ -46,20 +48,34 @@ def main():
     assert json.loads(request('/api/health'))['lanraragi_connected']
     initial=json.loads(request('/api/uploads'))['items']
     assert len(initial)<=1 and all(row['original_name']=='Synthetic Folder.cbz' for row in initial)
+    if root_reader:
+        denied=subprocess.run(compose+['run','--rm','--no-deps','--user','1026:100','folder-import','--operation','plan'],
+                              cwd=repository,env=environment,capture_output=True,text=True,timeout=60)
+        assert denied.returncode!=0,'The generated private source must refuse the ordinary app UID'
+        if not initial:
+            wrong=subprocess.run(compose+['run','--rm','--no-deps','-e','STUDIO_FOLDER_OUTPUT_UID=1030','folder-import','--operation','root-pilot'],
+                                 cwd=repository,env=environment,capture_output=True,text=True,timeout=60)
+            assert wrong.returncode!=0 and json.loads(wrong.stdout)['errors']==1
+            assert json.loads(request('/api/uploads'))['items']==initial
     plan=json.loads(command(compose+['run','--rm','--no-deps','folder-import','--operation','plan']))
     assert plan['ready']==1 and plan['pages']==3 and plan['imported']==0 and plan['errors']==0,plan
     assert json.loads(request('/api/uploads'))['items']==initial
     check="import errno,os,socket;assert (os.getuid(),os.getgid())==(1026,100);assert [name for _,name in socket.if_nameindex()]==['lo'];\ntry: os.open('/nas-library/.write-probe',os.O_CREAT|os.O_WRONLY,0o600)\nexcept OSError as error: assert error.errno==errno.EROFS\nelse: raise AssertionError('Source is writable')"
+    if root_reader:check=check.replace('(1026,100)','(0,0)')
     command(compose+['run','--rm','--no-deps','--entrypoint','python','folder-import','-c',check])
     if initial and not pilot:
         # Reproduce a crash after CBZ publication but before its receipt commit
         # in this strictly guarded, synthetic-only project's SQLite database.
         recover="import sqlite3;db=sqlite3.connect('/data/studio.db');assert db.execute(\"SELECT count(*) FROM works WHERE title!='Synthetic Folder'\").fetchone()[0]==0;db.execute(\"DELETE FROM folder_imports WHERE path='manga/Synthetic Folder'\");db.execute(\"DELETE FROM settings WHERE key LIKE 'folder-scan:%'\");db.commit()"
         command(docker+['exec',project+'-studio-1','python','-c',recover])
-    operation='pilot' if pilot else 'import'
+    operation='root-pilot' if root_reader else 'pilot' if pilot else 'import'
     result=json.loads(command(compose+['run','--rm','--no-deps','folder-import','--operation',operation,'--limit','1']))
     assert result['imported']==(0 if pilot and initial else 1) and result['errors']==0,result
     if pilot:assert result['fixed_selection'] and result['backup'].startswith('folder-pilot-backups/')
+    if root_reader:
+        assert result['root_source_reader'] and (result['output_uid'],result['output_gid'])==(1026,100)
+        ownership="from pathlib import Path;import os;paths=[Path('/data'),Path('/uploads')];all_paths=[p for root in paths for p in [root,*root.rglob('*')]];assert all((p.stat().st_uid,p.stat().st_gid)==(1026,100) for p in all_paths);print('app_output_ownership=passed')"
+        command(docker+['exec','--user','0:0',project+'-studio-1','python','-c',ownership])
     uploads=json.loads(request('/api/uploads'))['items'];assert len(uploads)==1
     download=request('/api/uploads/'+uploads[0]['sha256']+'/download')
     assert hashlib.sha256(download).hexdigest()==uploads[0]['sha256']
@@ -93,10 +109,12 @@ def main():
         if pilot:assert again['fixed_selection'] and again['unchanged']==1
     assert len(json.loads(request('/api/uploads'))['items'])==1
     assert snapshot()==before,'Original bytes, timestamps and permissions must be preserved'
+    assert folder_before=={str(p.relative_to(source)):(p.stat().st_mode,p.stat().st_mtime_ns,p.stat().st_uid,p.stat().st_gid) for p in [source,*source.rglob('*')] if p.is_dir()},'Original directory metadata must be preserved'
     print(json.dumps(dict(readonly_source=True,plan_no_uploads=True,nas_uid_gid='1026:100',
                          original_bytes_metadata_preserved=True,actual_lanraragi_index=True,
                          png_jpeg_webp_reader=True,folder_tag=True,download_hash_match=True,
-                         restart_duplicate_preserved=True,pinned_pilot_with_backup=pilot,page_errors=errors)))
+                         restart_duplicate_preserved=True,pinned_pilot_with_backup=pilot,
+                         root_source_reader=root_reader,app_owned_outputs=True if root_reader else None,page_errors=errors)))
 
 
 if __name__=='__main__':main()

@@ -1,5 +1,7 @@
 # DS718+ 실사용 준비와 배포 검토안
 
+> **Latest user-approved path (2026-10-17):** use the disposable root source reader described in [ROOT_FOLDER_PILOT.ko.md](deploy/ROOT_FOLDER_PILOT.ko.md). The user confirmed the existing NAS Stash runs as UID0/GID0 and approved this root-reading trial. Source stays RO; data/CBZ writes use the verified existing app UID. No new NAS account or existing-service restart is required for this one-folder test. Earlier mandatory service-account migration guidance is superseded for this scope. Actual NAS root import is still pending.
+
 > **2026-10-17 superseding deployment correction:** Do not use the personal NAS account or administrators group. Earlier identity-based deployment/folder commands are withdrawn. Read [SERVICE_ACCOUNT.ko.md](deploy/SERVICE_ACCOUNT.ko.md) before further NAS work. Existing NAS containers have not been migrated by these repository edits.
 
 2026-10-16 한국 시간. 이 문서는 배포 후보이며 실제 NAS 배포 승인을 받았다는 뜻이 아니다.

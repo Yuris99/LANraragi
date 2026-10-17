@@ -5,6 +5,7 @@ Only generated CBZs/receipts are written to Studio's dedicated volumes.
 """
 import argparse
 import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -43,11 +44,20 @@ def access_error(error):
     return {'code':'validation_failed','message':str(error)[:160] if isinstance(error,ValueError) else 'Stored record unavailable'}
 
 
+def source_access(method):
+    @functools.wraps(method)
+    def call(self,*args,**kwargs):
+        with self.source_identity():return method(self,*args,**kwargs)
+    return call
+
+
 class FolderImporter:
-    def __init__(self,root,collections,uploads=None,stable_seconds=30,max_pages=2000,max_entries=10000):
+    def __init__(self,root,collections,uploads=None,stable_seconds=30,max_pages=2000,max_entries=10000,source_identity=None):
         self.root=Path(root).absolute();self.collections=[];self.uploads=uploads
+        self.source_identity=source_identity or contextlib.nullcontext
         self.stable_seconds=stable_seconds;self.max_pages=max_pages;self.max_entries=max_entries
-        if self.root.is_symlink() or not self.root.is_dir():raise ValueError('확인된 읽기 전용 원본 폴더가 필요합니다.')
+        with self.source_identity():
+            if self.root.is_symlink() or not self.root.is_dir():raise ValueError('확인된 읽기 전용 원본 폴더가 필요합니다.')
         if not isinstance(collections,list) or not 1<=len(collections)<=32:raise ValueError('가져올 하위 폴더를 1~32개 지정하세요.')
         for name in collections:
             if not isinstance(name,str) or not name or len(name)>100 or any(c in name for c in '\\\r\n\0'):
@@ -60,7 +70,8 @@ class FolderImporter:
             self.collections.append(path)
         if uploads:
             if uploads.root is None:raise ValueError('전용 업로드 저장소가 필요합니다.')
-            source=self.root.resolve();destination=uploads.root
+            with self.source_identity():source=self.root.resolve()
+            destination=uploads.root
             if source==destination or source in destination.parents or destination in source.parents:
                 raise ValueError('원본과 전용 저장소는 분리하세요.')
             with uploads.store.db() as db:
@@ -72,14 +83,17 @@ class FolderImporter:
 
     @contextlib.contextmanager
     def directory(self,relative):
-        fd=os.open(self.root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        with self.source_identity():fd=os.open(self.root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
         try:
-            for part in relative.parts:
-                child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
-                os.close(fd);fd=child
+            with self.source_identity():
+                for part in relative.parts:
+                    child=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+                    os.close(fd);fd=child
+            # Never yield with source privileges: callers may write the DB.
             yield fd
         finally:os.close(fd)
 
+    @source_access
     def entries(self,fd):
         result=[]
         with os.scandir(fd) as entries:
@@ -88,6 +102,7 @@ class FolderImporter:
                 result.append(entry.name)
         return sorted(result,key=natural_key)
 
+    @source_access
     def snapshot(self,fd):
         pages=[];children=[];ready=True
         for name in self.entries(fd):
@@ -140,7 +155,8 @@ class FolderImporter:
                 cbz.writestr(entry,json.dumps(provenance,ensure_ascii=False))
                 for index,page in enumerate(pages,1):
                     name,size,*_=page
-                    image_fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+                    with self.source_identity():
+                        image_fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
                     with os.fdopen(image_fd,'rb') as source:
                         info=os.fstat(source.fileno())
                         observed=(name,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_dev,info.st_ino)
@@ -273,7 +289,7 @@ class FolderImporter:
         raise ValueError('시험 크기 한도 안의 안정된 이미지 폴더를 찾지 못했습니다.')
 
 
-def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,require_read_only=True):
+def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,require_read_only=True,source_identity=None):
     """Back up first, then import the same one pinned folder on every retry.
 
     Selection/lock/backups remain in the dedicated NAS data volume. This never
@@ -283,7 +299,7 @@ def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,req
     database=Path(database).absolute()
     if database.is_symlink() or not database.is_file():raise ValueError('기존 Studio 전용 DB를 확인하세요.')
     if not 1<=max_bytes<=512*1024**2:raise ValueError('시험 파일 크기 한도를 확인하세요.')
-    inspector=FolderImporter(root,collections)
+    inspector=FolderImporter(root,collections,source_identity=source_identity)
     with inspector.directory(PurePosixPath('.')) as fd:
         info=os.fstat(fd)
         if require_read_only and not os.fstatvfs(fd).f_flag&os.ST_RDONLY:
@@ -339,7 +355,7 @@ def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,req
         backup=backups/('before-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+os.urandom(8).hex()+'.db')
         verification=copy_database(database,backup)
         uploads=Uploads(Store(database),destination,max_bytes)
-        importer=FolderImporter(root,collections,uploads)
+        importer=FolderImporter(root,collections,uploads,source_identity=source_identity)
         with importer.directory(relative) as fd:
             current=importer.snapshot(fd)
             if current[3]!=signature or not current[2]:raise ValueError('백업 중 원본이 변경됐습니다. 시험 등록을 중단합니다.')
@@ -351,22 +367,85 @@ def pilot_import(root,collections,database,destination,max_bytes=128*1024**2,req
     finally:os.close(lock_fd)
 
 
+class RootSourceIdentity:
+    """Single-threaded root reader; all destination operations use the app UID.
+
+    Real/saved UID remains root in this explicitly invoked disposable worker.
+    Effective IDs are elevated only for source traversal/open/stat. Open source
+    descriptors remain readable after dropping back to the output identity.
+    """
+    @contextlib.contextmanager
+    def source(self):
+        uid,gid=os.geteuid(),os.getegid()
+        os.seteuid(0)
+        try:
+            os.setegid(0)
+            yield
+        finally:
+            os.setegid(gid);os.seteuid(uid)
+
+    @contextlib.contextmanager
+    def output(self,uid,gid):
+        groups=os.getgroups()
+        os.setgroups([])
+        try:
+            os.setegid(gid);os.seteuid(uid)
+            yield
+        finally:
+            os.seteuid(0);os.setegid(0);os.setgroups(groups)
+
+
+def root_pilot_import(root,collections,database,destination,output_uid,output_gid):
+    if not hasattr(os,'geteuid') or os.getuid()!=0 or os.geteuid()!=0:
+        raise ValueError('root 원본 읽기 시험은 명시적으로 UID0으로 실행해야 합니다.')
+    for value in (output_uid,output_gid):
+        if type(value) is not int or not 1<=value<=2147483647:
+            raise ValueError('현재 앱의 확인된 비루트 출력 UID/GID가 필요합니다.')
+    database=Path(database).absolute();destination=Path(destination).absolute()
+    # Only the previously initialized dedicated app volumes may be written.
+    for path,name in ((database.parent,'studio'),(destination,'uploads')):
+        if path.is_symlink() or not path.is_dir() or path.resolve()!=path:
+            raise ValueError('확인된 앱 전용 볼륨 경로가 필요합니다.')
+        info=path.stat()
+        if (info.st_uid,info.st_gid)!=(output_uid,output_gid):
+            raise ValueError('앱 전용 볼륨의 소유 ID가 예상과 다릅니다.')
+        fd=os.open(path/'.studio-volume.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError('앱 전용 볼륨 식별 기록을 확인하세요.')
+            marker=stream.read(4097)
+            if len(marker)>4096:
+                raise ValueError('앱 전용 볼륨 식별 기록을 확인하세요.')
+        if json.loads(marker)!={'format':1,'name':name,'uid':output_uid,'gid':output_gid}:
+            raise ValueError('앱 전용 볼륨 식별자 또는 출력 ID가 다릅니다.')
+    info=database.lstat()
+    if not stat.S_ISREG(info.st_mode) or (info.st_uid,info.st_gid)!=(output_uid,output_gid):
+        raise ValueError('기존 앱 DB의 형식과 소유 ID를 확인하세요.')
+    identity=RootSourceIdentity()
+    with identity.output(output_uid,output_gid):
+        result=pilot_import(root,collections,database,destination,source_identity=identity.source)
+        return {**result,'root_source_reader':True,'output_uid':os.geteuid(),'output_gid':os.getegid()}
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot'],default='plan')
+    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot','root-pilot'],default='plan')
     parser.add_argument('--root',default=os.environ.get('STUDIO_FOLDER_ROOT','/nas-library'))
     parser.add_argument('--collections',default=os.environ.get('STUDIO_FOLDER_COLLECTIONS','["manga","images"]'))
     parser.add_argument('--limit',type=int,default=1)
     args=parser.parse_args();uploads=None
-    if args.operation=='pilot':
+    if args.operation in ('pilot','root-pilot'):
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
         try:
-            result=pilot_import(args.root,json.loads(args.collections),database,destination)
+            if args.operation=='root-pilot':
+                result=root_pilot_import(args.root,json.loads(args.collections),database,destination,
+                    int(os.environ['STUDIO_FOLDER_OUTPUT_UID']),int(os.environ['STUDIO_FOLDER_OUTPUT_GID']))
+            else:result=pilot_import(args.root,json.loads(args.collections),database,destination)
         except Exception as error:
-            print(json.dumps({'operation':'pilot','errors':1,'error':access_error(error)},ensure_ascii=False))
+            print(json.dumps({'operation':args.operation,'errors':1,'error':access_error(error)},ensure_ascii=False))
             raise SystemExit(1) from None
-        print(json.dumps({'operation':'pilot',**result},sort_keys=True));return
+        print(json.dumps({'operation':args.operation,**result},sort_keys=True));return
     if args.operation=='import':
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')

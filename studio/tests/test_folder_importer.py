@@ -1,10 +1,11 @@
 """Read-only folder import: source integrity, restart/dedup and race guards."""
 import base64
+import contextlib
 import hashlib
 import json
 import os
 import sqlite3
-from pathlib import Path
+from pathlib import Path,PurePosixPath
 import sys
 import tempfile
 import time
@@ -13,7 +14,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from folder_importer import FolderImporter,pilot_import
+from folder_importer import FolderImporter,pilot_import,root_pilot_import
 from make_synthetic import create_fixture
 from store import Store
 from uploads import Uploads
@@ -228,6 +229,34 @@ class FolderImportTests(unittest.TestCase):
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             with self.assertRaisesRegex(ValueError,'실행 중'):self.run_pilot()
         self.assertFalse(self.uploads.root.exists())
+
+    def test_source_privilege_context_never_encloses_destination_writes(self):
+        active=[];entries=[]
+        @contextlib.contextmanager
+        def source_identity():
+            active.append(True);entries.append(True)
+            try:yield
+            finally:active.pop()
+        importer=FolderImporter(self.source,['manga'],self.uploads,stable_seconds=0,source_identity=source_identity)
+        receive=self.uploads.receive
+        def receive_as_app(*args,**kwargs):
+            self.assertFalse(active,'Source privileges leaked into upload/database writes')
+            return receive(*args,**kwargs)
+        with patch.object(self.uploads,'receive',side_effect=receive_as_app):
+            with importer.directory(PurePosixPath('manga/Book')) as fd:
+                self.assertFalse(active,'Directory yielded with source privileges')
+            result=importer.scan()
+        self.assertEqual(result['imported'],1);self.assertTrue(entries);self.assertFalse(active)
+
+    def test_root_pilot_rejects_nonroot_and_invalid_output_identity_before_writes(self):
+        with patch('folder_importer.os.getuid',return_value=1026):
+            with self.assertRaisesRegex(ValueError,'UID0'):
+                root_pilot_import(self.source,['manga'],self.store.path,self.uploads.root,1026,100)
+        with patch('folder_importer.os.getuid',return_value=0),patch('folder_importer.os.geteuid',return_value=0,create=True):
+            for uid,gid in [(0,100),(1026,0),(-1,100),(True,100),(2147483648,100)]:
+                with self.subTest(uid=uid,gid=gid),self.assertRaises(ValueError):
+                    root_pilot_import(self.source,['manga'],self.store.path,self.uploads.root,uid,gid)
+        self.assertFalse((self.root/'folder-pilot.json').exists());self.assertFalse(self.uploads.root.exists())
 
 
 if __name__=='__main__':unittest.main()

@@ -1,0 +1,10 @@
+# Explicit root-source-reader opt-in; combine after compose.folders.yaml.
+# Only the disposable folder worker changes. Existing web/LANraragi stay as-is.
+services:
+  folder-import:
+    user: "0:0"
+    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
+    command: [--operation, root-pilot]
+    environment:
+      STUDIO_FOLDER_OUTPUT_UID: ${STUDIO_UID:?Set the verified current app output UID}
+      STUDIO_FOLDER_OUTPUT_GID: ${STUDIO_GID:?Set the verified current app output GID}

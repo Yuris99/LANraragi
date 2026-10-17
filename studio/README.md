@@ -1,5 +1,7 @@
 # Library Studio (work in progress)
 
+> **Latest user-approved path (2026-10-17):** use the disposable root source reader described in [ROOT_FOLDER_PILOT.ko.md](deploy/ROOT_FOLDER_PILOT.ko.md). The user confirmed the existing NAS Stash runs as UID0/GID0 and approved this root-reading trial. Source stays RO; data/CBZ writes use the verified existing app UID. No new NAS account or existing-service restart is required for this one-folder test. Earlier mandatory service-account migration guidance is superseded for this scope. Actual NAS root import is still pending.
+
 **Deployment correction (2026-10-17):** personal NAS identities and administrator groups must not be reused. The old personal-account folder helpers are disabled. The installed NAS pilot still needs an explicit dedicated-account migration; repository edits do not change it. Read [SERVICE_ACCOUNT.ko.md](deploy/SERVICE_ACCOUNT.ko.md) before any further NAS action.
 
 For the current deployment candidate, site-support matrix and operational procedures, read [NAS_READINESS.md](NAS_READINESS.md). The NAS pilot's healthy services, SSH tunnel and Studio login are user-confirmed. Actual NAS media flows, site downloads/comments and recovery rehearsal remain unverified.
