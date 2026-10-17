@@ -107,6 +107,14 @@ def main():
         again=json.loads(command(compose+['run','--rm','--no-deps','folder-import','--operation',operation]))
         assert again['imported']==0 and again['errors']==0,again
         if pilot:assert again['fixed_selection'] and again['unchanged']==1
+    if root_reader:
+        # Moving from the fixed pilot to the bounded continuation must skip
+        # its existing receipt, preserve output ownership, and take a snapshot.
+        batch=json.loads(command(compose+['run','--rm','--no-deps','folder-import','--operation','root-batch','--limit','1']))
+        assert batch['imported']==0 and batch['unchanged']==1 and batch['errors']==0,batch
+        assert batch['backup'].startswith('folder-import-backups/') and batch['root_source_reader']
+        assert (batch['output_uid'],batch['output_gid'])==(1026,100)
+        command(docker+['exec','--user','0:0',project+'-studio-1','python','-c',ownership])
     assert len(json.loads(request('/api/uploads'))['items'])==1
     assert snapshot()==before,'Original bytes, timestamps and permissions must be preserved'
     assert folder_before=={str(p.relative_to(source)):(p.stat().st_mode,p.stat().st_mtime_ns,p.stat().st_uid,p.stat().st_gid) for p in [source,*source.rglob('*')] if p.is_dir()},'Original directory metadata must be preserved'
@@ -114,6 +122,7 @@ def main():
                          original_bytes_metadata_preserved=True,actual_lanraragi_index=True,
                          png_jpeg_webp_reader=True,folder_tag=True,download_hash_match=True,
                          restart_duplicate_preserved=True,pinned_pilot_with_backup=pilot,
+                         bounded_batch_retry_preserved=root_reader,
                          root_source_reader=root_reader,app_owned_outputs=True if root_reader else None,page_errors=errors)))
 
 

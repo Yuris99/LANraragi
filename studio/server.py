@@ -231,6 +231,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        if path=='/api/library/status':
+            with store.db() as db:
+                has_folders=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_imports'").fetchone()
+                folders=db.execute('SELECT count(*) FROM folder_imports').fetchone()[0] if has_folders else 0
+                pending=db.execute("SELECT count(*) FROM uploads WHERE lrr_id IS NULL AND state='stored'").fetchone()[0]
+            return self.respond({'folder_archives':folders,'pending_archives':pending,'folder_registration':'manual','site_downloads':'not-verified'})
         if path=='/api/health':
             try:
                 info=self.app.lrr.json('/api/info');connected=True

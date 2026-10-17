@@ -286,9 +286,22 @@ class HTTPTests(unittest.TestCase):
         return urllib.request.urlopen(req,timeout=5)
 
     def test_authentication_covers_static_and_catalog(self):
-        for path in ['/','/unsen','/unsen/','/api/works','/api/export','/app.js']:
+        for path in ['/','/unsen','/unsen/','/api/works','/api/export','/api/library/status','/app.js']:
             with self.subTest(path=path),self.assertRaises(urllib.error.HTTPError) as error:self.request(path,auth=False)
             self.assertEqual(error.exception.code,401)
+
+    def test_library_status_handles_no_folders_and_returns_counts_without_private_names(self):
+        with self.request('/api/library/status') as response:
+            self.assertEqual(json.load(response)['folder_archives'],0)
+        with self.app.store.db() as db:
+            db.execute("INSERT INTO uploads(sha256,original_name,stored_name,bytes,created) VALUES(?,?,?,?,?)",('b'*64,'Private title.cbz','b'*64+'.cbz',123,1))
+            db.execute('CREATE TABLE folder_imports(root TEXT,path TEXT,snapshot TEXT,sha256 TEXT)')
+            db.execute('INSERT INTO folder_imports VALUES(?,?,?,?)',('private-root','private-book','signature','b'*64))
+        with self.request('/api/library/status') as response:
+            result=json.load(response)
+        self.assertEqual((result['folder_archives'],result['pending_archives']),(1,1))
+        self.assertEqual(result['site_downloads'],'not-verified')
+        self.assertNotIn('private',json.dumps(result).lower())
 
     def test_same_origin_required_for_mutations(self):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works',{'title':'Example'},origin='https://other.invalid')
@@ -342,7 +355,7 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.app.store.job(job['id'])['state'],'running')
 
     def test_worker_token_cannot_read_or_mutate_library(self):
-        for path,body in [('/',None),('/api/export',None),('/api/works',{'title':'Unauthorized'}),('/api/sync',{})]:
+        for path,body in [('/',None),('/api/export',None),('/api/library/status',None),('/api/works',{'title':'Unauthorized'}),('/api/sync',{})]:
             headers={'Authorization':'Bearer worker-test-token','Content-Type':'application/json'}
             req=urllib.request.Request(self.url+path,data=None if body is None else json.dumps(body).encode(),headers=headers)
             with self.subTest(path=path),self.assertRaises(urllib.error.HTTPError) as error:

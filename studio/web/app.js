@@ -4,9 +4,11 @@ let tagTargets = [];
 const state = { page: 1, view: "library", provider: "", query: "", tag: "", sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
-settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", ...settings };
+settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", thumbnailMosaic: true, ...settings };
 delete settings.mosaic;
-const mediaMasked = !/^\/unsen\/?$/.test(location.pathname);
+settings.thumbnailMosaic = settings.thumbnailMosaic !== false;
+// Keep old original-view bookmarks usable; normal visits use the saved choice.
+if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailMosaic = false;
 const providerName = { ehentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
 const statusName = { queued: "대기 중", running: "진행 중", complete: "완료", failed: "실패", blocked: "확인 필요" };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (s) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
@@ -18,27 +20,28 @@ async function api(path, data) {
     return value;
 }
 function mosaicImage(image) {
-    if (!mediaMasked || !image.complete || !image.naturalWidth) return;
+    if (!settings.thumbnailMosaic || !image.matches("#grid .cover img") || !image.complete || !image.naturalWidth) return;
     let canvas = image.parentElement.querySelector(".mosaic-layer");
     if (!canvas) { canvas = document.createElement("canvas"); canvas.className = "mosaic-layer"; canvas.setAttribute("aria-hidden", "true"); image.after(canvas); }
     canvas.hidden = true;
     try {
-        canvas.width = 12; canvas.height = Math.max(1, Math.min(48, Math.round(12 * image.naturalHeight / image.naturalWidth)));
+        canvas.width = 48; canvas.height = Math.max(1, Math.min(192, Math.round(48 * image.naturalHeight / image.naturalWidth)));
         const context = canvas.getContext("2d");
         if (!context) return;
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
         canvas.hidden = false;
     } catch { /* Keep the original hidden if canvas rendering is unavailable. */ }
 }
-document.addEventListener("load", (event) => { if (event.target.matches?.(".cover img, #reader-image")) mosaicImage(event.target); }, true);
-document.addEventListener("error", (event) => { if (event.target.matches?.(".cover img, #reader-image")) { const canvas = event.target.parentElement.querySelector(".mosaic-layer"); if (canvas) canvas.hidden = true; } }, true);
+document.addEventListener("load", (event) => { if (event.target.matches?.("#grid .cover img")) mosaicImage(event.target); }, true);
+document.addEventListener("error", (event) => { if (event.target.matches?.("#grid .cover img")) { const canvas = event.target.parentElement.querySelector(".mosaic-layer"); if (canvas) canvas.hidden = true; } }, true);
 function saveSettings() { localStorage.setItem("studio-view", JSON.stringify(settings)); applySettings(); }
 function applySettings() {
-    document.documentElement.classList.toggle("media-masked", mediaMasked);
-    $("#privacy-state").textContent = mediaMasked ? "모자이크 화면" : "원본 표시 중";
-    $("#privacy-route").href = mediaMasked ? "/unsen" : "/";
-    $("#privacy-route").textContent = mediaMasked ? "원본 화면으로" : "모자이크 화면으로";
-    if (mediaMasked) document.querySelectorAll(".cover img, #reader-image").forEach(mosaicImage);
+    document.documentElement.classList.toggle("media-masked", settings.thumbnailMosaic);
+    $("#privacy-state").textContent = settings.thumbnailMosaic ? "목록 썸네일 모자이크 켜짐 · 작품을 열면 원본 표시" : "목록 썸네일 원본 표시";
+    $("#privacy-route").textContent = settings.thumbnailMosaic ? "모자이크 끄기" : "모자이크 켜기";
+    $("#privacy-route").setAttribute("aria-pressed", String(settings.thumbnailMosaic));
+    $("#thumbnail-mosaic").checked = settings.thumbnailMosaic;
+    if (settings.thumbnailMosaic) document.querySelectorAll("#grid .cover img").forEach(mosaicImage);
     document.documentElement.style.setProperty("--card-width", { small: "150px", medium: "185px", large: "230px" }[settings.size] || "185px");
     $("#grid").classList.toggle("list", settings.layout === "list");
     $("#card-size").value = settings.size; $("#page-size").value = String(settings.limit); $("#read-direction").value = settings.direction;
@@ -60,6 +63,13 @@ async function load() {
     $("#empty").hidden = result.items.length > 0;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
+    await refreshLibraryStatus();
+}
+async function refreshLibraryStatus() {
+    try {
+        const status = await api("/api/library/status");
+        $("#library-status").textContent = status.folder_archives ? `NAS 폴더에서 ${status.folder_archives.toLocaleString()}권 등록됨 · 나머지 폴더는 추가 등록 후 표시됩니다. NAS 자료는 PC에서 다시 업로드할 필요가 없습니다.${status.pending_archives ? ` · 색인 대기 ${status.pending_archives}개` : ""}` : "NAS에 있는 자료는 폴더 등록으로 추가할 수 있습니다. 파일 업로드는 PC 자료를 직접 추가할 때 사용하세요.";
+    } catch { $("#library-status").textContent = "NAS 자료는 폴더 등록으로 추가합니다. 파일 업로드는 선택 사항입니다."; }
 }
 async function showDetail(id) {
     const work = await api(`/api/works/${id}`); state.detail = work;
@@ -176,6 +186,8 @@ $("#download-preview").onclick = guard(async () => {
 });
 $("#close-detail").onclick = () => $("#detail").close(); $("#close-reader").onclick = () => $("#reader").close();
 $("#settings-button").onclick = () => $("#settings").showModal();
+$("#thumbnail-mosaic").onchange = (e) => { settings.thumbnailMosaic = e.target.checked; saveSettings(); };
+$("#privacy-route").onclick = () => { settings.thumbnailMosaic = !settings.thumbnailMosaic; saveSettings(); };
 $("#card-size").onchange = (e) => { settings.size = e.target.value; saveSettings(); };
 $("#page-size").onchange = guard(async (e) => { settings.limit = Number(e.target.value); state.page = 1; saveSettings(); await load(); });
 $("#read-direction").onchange = (e) => { settings.direction = e.target.value; saveSettings(); };

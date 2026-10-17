@@ -14,7 +14,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from folder_importer import FolderImporter,pilot_import,root_pilot_import
+from folder_importer import FolderImporter,pilot_import,root_pilot_import,batch_import
 from make_synthetic import create_fixture
 from store import Store
 from uploads import Uploads
@@ -257,6 +257,32 @@ class FolderImportTests(unittest.TestCase):
                 with self.subTest(uid=uid,gid=gid),self.assertRaises(ValueError):
                     root_pilot_import(self.source,['manga'],self.store.path,self.uploads.root,uid,gid)
         self.assertFalse((self.root/'folder-pilot.json').exists());self.assertFalse(self.uploads.root.exists())
+
+
+    def test_bounded_batches_skip_pilot_and_resume_next_folders(self):
+        for name in ('Later A','Later B'):
+            folder=self.source/'manga'/name;folder.mkdir();(folder/'1.png').write_bytes((self.book/'1.png').read_bytes())
+        self.age_source();before=self.contents();self.run_pilot()
+        def batch():return batch_import(self.source,['manga'],self.store.path,self.uploads.root,limit=1,require_read_only=False)
+        first=batch();second=batch();last=batch()
+        self.assertEqual((first['imported'],first['unchanged']),(1,1))
+        self.assertEqual(second['imported'],1);self.assertEqual((last['imported'],last['unchanged']),(0,3))
+        self.assertEqual(len(self.uploads.list()),3);self.assertEqual(self.contents(),before)
+        self.assertEqual(self.run_pilot()['unchanged'],1)
+        self.assertEqual(len(list((self.root/'folder-import-backups').glob('*.db'))),3)
+
+    def test_batch_backup_failure_stops_before_schema_or_archive_changes(self):
+        self.age_source()
+        with patch('folder_importer.copy_database',side_effect=OSError(28,'disk full')):
+            with self.assertRaises(OSError):batch_import(self.source,['manga'],self.store.path,self.uploads.root,require_read_only=False)
+        self.assertFalse(self.uploads.root.exists())
+        with self.store.db() as db:self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='folder_imports'").fetchone())
+
+    def test_batch_limit_and_readonly_guards_stop_before_registration(self):
+        for limit in (0,11,True):
+            with self.assertRaises(ValueError):batch_import(self.source,['manga'],self.store.path,self.uploads.root,limit=limit)
+        with self.assertRaisesRegex(ValueError,'읽기 전용'):batch_import(self.source,['manga'],self.store.path,self.uploads.root)
+        self.assertFalse(self.uploads.root.exists())
 
 
 if __name__=='__main__':unittest.main()

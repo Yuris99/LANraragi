@@ -42,3 +42,21 @@ Compose로 직접 호출하는 별도 운영 경로는 기존 `compose.folders.y
 2026-10-17 사용자가 고정 root 도구를 NAS에서 실행했고, 최종 JSON은 operation=root-pilot, errors0, imported1, pages88, fixed_selection=true, root_source_reader=true, output_uid1026/output_gid100, unchanged0이었다. 등록 전 SQLite 백업 상대 이름과 SHA256도 반환됐다. 실제 개인 DB·백업·미디어·작품명은 클라우드/GitHub에 옮기지 않고 이 문서에는 반환 수치만 기록한다.
 
 이 결과는 NAS에서 root 원본 읽기, 고정한 한 폴더의 CBZ 사본 생성, Studio 업로드 기록 저장 및 DB 사전 백업 성공의 증거다. LANraragi 색인 완료, NAS 브라우저 썸네일·88쪽 리더·이어 읽기·PC 다운로드 및 NAS 재시도 결과는 별도로 확인해야 한다. 서비스 이미지/실행 계정/원본 ACL·소유권을 바꾸거나 Stash/NMLO를 변경하는 절차는 실행하지 않았다. 전체 자동 등록은 시작하지 않는다.
+
+## 남은 NAS 폴더의 계획과 이어 등록
+
+현재 한 권만 표시되는 것은 `root-pilot`의 고정 선택 때문이다. 같은 명령을 반복해도 다음 작품을 가져오지 않는다. 기존 NAS 자료를 PC에서 다시 업로드할 필요는 없다. 새 `manage-folders-root.sh`는 같은 검증된 프로젝트/이미지/볼륨과 root 원본 읽기 방식을 사용하며, 상시 서비스를 재시작하지 않는다.
+
+```sh
+sh manage-folders-root.sh preview /volumeN/SELECTED_SHARE/ROOT
+sh manage-folders-root.sh plan /volumeN/SELECTED_SHARE/ROOT
+sh manage-folders-root.sh batch /volumeN/SELECTED_SHARE/ROOT
+```
+
+`plan`은 원본과 코드만 RO로 연결한다. DB/업로드 볼륨은 연결하지 않으며 이미지 바이트를 읽지 않고 파일 메타데이터만 합산한다. 결과의 `source_bytes`는 감지한 이미지 크기 합계, `estimated_archive_bytes`는 압축하지 않는 CBZ의 예상 총량이다. 이미 등록한 폴더까지 포함한 전체 후보 추정치이며, 남은 추가 용량의 정확한 계산은 아니다. `bounded=true`라면 기본1,000디렉터리 범위가 잘렸으므로 전체 크기로 해석하지 않는다. 원본과 사본이 함께 존재하며 생성/검증 중 임시 공간도 필요하다. 여유 공간을 검토한 뒤 batch를 실행한다.
+
+`batch`는 실행당 새 폴더 최대10개, 생성 아카이브당512MiB로 제한한다. 먼저 전용 data 볼륨에 `folder-import-backups/before-…db`를 만들고 무결성을 확인한다. 사전 백업 실패 시 마이그레이션/CBZ 게시 전에 중단한다. 고정 pilot과 같은 exclusive lock으로 동시 실행을 막는다. 이전 receipt는 건너뛰고 검사 cursor를 저장하므로 다음 batch 호출은 이어간다. 자동 반복/전체326권 등록/백그라운드 감시는 켜지 않는다. 각 호출은 보관용 DB 스냅샷을 남긴다.
+
+결과의 errors/issues와 imported/unchanged/bounded를 확인하고 Studio에서 동기화한다. 일부가 성공하고 오류가 있으면 종료코드는1이며 성공 기록·백업·출력은 보존한다. 전체 검사가 끝나면 다음 호출은 처음부터 확인하지만 동일 snapshot/hash는 중복 저장하지 않는다. 크기 제한·원본 변경 등 실패는 원인을 확인한 뒤 재검사한다. 기존 원본을 지우거나 볼륨을 초기화해 해결하지 않는다.
+
+새 화면은 [NAS_UI_UPDATE.ko.md](NAS_UI_UPDATE.ko.md)로 별도 적용한다. `/api/library/status`의 폴더 수는 성공한 receipt 수이며, 원본 전체 폴더 수나 LANraragi 색인 완료 수는 아니다. 클라우드에서 계획/다회 batch·기존 pilot 건너뛰기·백업 실패·입력 한도·원본 보존·실제 legacy 앱 호환을 검증했다. 실제 NAS의 새 batch 실행 결과는 아직 확인되지 않았다.

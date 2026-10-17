@@ -1,4 +1,4 @@
-"""Synthetic-only Chromium checks for default pixelation and explicit /unsen."""
+"""Synthetic-only Chromium checks for thumbnail pixelation, reveal and saved toggle."""
 import io
 import json
 import os
@@ -39,38 +39,48 @@ def main():
                     browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
                     context=browser.new_context(http_credentials={'username':'admin','password':'synthetic-mosaic-password'})
                     page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-                    # An old browser setting must never disable the default route mask.
-                    page.add_init_script("localStorage.setItem('studio-view', JSON.stringify({mosaic:false}))")
+                    # Old route-only preferences cannot disable a fresh default.
+                    page.add_init_script("if (!localStorage.getItem('studio-view')) localStorage.setItem('studio-view', JSON.stringify({mosaic:false}))")
                     base='http://127.0.0.1:'+str(server.server_port)
                     page.goto(base)
                     page.locator('.card .mosaic-layer:not([hidden])').wait_for(state='visible')
                     assert page.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='0'
-                    assert page.locator('.card canvas').evaluate('(el) => el.width')==12
+                    assert page.locator('.card canvas').evaluate('(el) => el.width')==48
                     page.locator('.card').click()
-                    page.locator('#detail .mosaic-layer:not([hidden])').wait_for(state='visible')
+                    page.wait_for_function("() => document.querySelector('#detail img')?.complete && document.querySelector('#detail img').naturalWidth > 0")
+                    assert page.locator('#detail img').evaluate('(el) => getComputedStyle(el).opacity')=='1'
+                    assert page.locator('#detail .mosaic-layer').count()==0
                     page.locator('#read-work').click()
-                    page.locator('.reader-page .mosaic-layer:not([hidden])').wait_for(state='visible')
-                    assert page.locator('#reader-image').evaluate('(el) => getComputedStyle(el).opacity')=='0'
-                    page.goto(base+'/unsen')
-                    page.locator('.card img').wait_for()
+                    page.wait_for_function("() => document.querySelector('#reader-image')?.complete && document.querySelector('#reader-image').naturalWidth > 0")
+                    assert page.locator('#reader-image').evaluate('(el) => getComputedStyle(el).opacity')=='1'
+                    assert page.locator('.reader-page .mosaic-layer').count()==0
+                    page.locator('#close-reader').click();page.locator('#close-detail').click()
+                    page.locator('#settings-button').click();page.locator('#thumbnail-mosaic').uncheck()
                     assert page.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='1'
-                    assert not page.locator('html').evaluate('(el) => el.classList.contains("media-masked")')
+                    page.locator('#settings [data-close]').click();page.reload();page.locator('.card').wait_for()
+                    assert page.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='1'
+                    assert page.evaluate("JSON.parse(localStorage.getItem('studio-view')).thumbnailMosaic") is False
                     page.locator('#privacy-route').click()
                     page.locator('.card .mosaic-layer:not([hidden])').wait_for(state='visible')
-                    assert page.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='0'
+                    page.reload();page.locator('.card .mosaic-layer:not([hidden])').wait_for(state='visible')
+                    page.goto(base+'/unsen');page.locator('.card img').wait_for()
+                    assert page.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='1'
+                    page.goto(base);page.locator('.card .mosaic-layer:not([hidden])').wait_for(state='visible')
                     for width,height in [(390,844),(1440,1000)]:
                         page.set_viewport_size({'width':width,'height':height})
                         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                    # Rendering failure keeps the source hidden rather than revealing it.
+                    # Thumbnail canvas failure stays masked; opening still reveals.
                     failed=context.new_page();failed.add_init_script('HTMLCanvasElement.prototype.getContext = () => null')
                     failed.goto(base);failed.locator('.card img').wait_for()
                     failed.wait_for_function("() => document.querySelector('.card img').complete")
                     assert failed.locator('.card img').evaluate('(el) => getComputedStyle(el).opacity')=='0'
+                    failed.locator('.card').click()
+                    assert failed.locator('#detail img').evaluate('(el) => getComputedStyle(el).opacity')=='1'
                     assert not errors,errors
                     browser.close()
-                print(json.dumps({'default_mask':True,'legacy_setting_cannot_unmask':True,'thumbnail_detail_reader':True,
-                                  'explicit_unsen':True,'return_to_default_mask':True,'canvas_failure_keeps_mask':True,
-                                  'desktop_mobile':True,'page_errors':errors}))
+                print(json.dumps({'default_thumbnail_mask':True,'mosaic_columns':48,'detail_reader_original':True,
+                                  'settings_toggle_persisted':True,'explicit_unsen_compatible':True,
+                                  'canvas_failure_keeps_thumbnail_mask':True,'desktop_mobile':True,'page_errors':errors}))
             finally:server.shutdown();server.server_close();thread.join()
 
 

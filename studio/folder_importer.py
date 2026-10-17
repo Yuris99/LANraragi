@@ -193,7 +193,7 @@ class FolderImporter:
 
     def scan(self,limit=1,max_directories=1000):
         if not 1<=limit<=100 or not 1<=max_directories<=10000:raise ValueError('검사 한도를 확인하세요.')
-        result=dict(directories=0,ready=0,deferred=0,imported=0,unchanged=0,errors=0,pages=0,issues=[])
+        result=dict(directories=0,ready=0,deferred=0,imported=0,unchanged=0,errors=0,pages=0,source_bytes=0,estimated_archive_bytes=0,issues=[])
         pending=self.pending()
         while pending and result['directories']<max_directories:
             relative=pending.pop();result['directories']+=1
@@ -205,6 +205,9 @@ class FolderImporter:
                     pending.extend(relative/name for name in reversed(children))
                     if not pages:continue
                     result['pages']+=len(pages)
+                    total=sum(page[1] for page in pages)
+                    result['source_bytes']+=total
+                    result['estimated_archive_bytes']+=total+len(pages)*256+16384
                     if not ready:result['deferred']+=1;continue
                     result['ready']+=1
                     if self.uploads:
@@ -395,7 +398,8 @@ class RootSourceIdentity:
             os.seteuid(0);os.setegid(0);os.setgroups(groups)
 
 
-def root_pilot_import(root,collections,database,destination,output_uid,output_gid):
+@contextlib.contextmanager
+def root_app_writer(database,destination,output_uid,output_gid):
     if not hasattr(os,'geteuid') or os.getuid()!=0 or os.geteuid()!=0:
         raise ValueError('root 원본 읽기 시험은 명시적으로 UID0으로 실행해야 합니다.')
     for value in (output_uid,output_gid):
@@ -423,29 +427,81 @@ def root_pilot_import(root,collections,database,destination,output_uid,output_gi
         raise ValueError('기존 앱 DB의 형식과 소유 ID를 확인하세요.')
     identity=RootSourceIdentity()
     with identity.output(output_uid,output_gid):
+        yield identity
+
+
+def root_pilot_import(root,collections,database,destination,output_uid,output_gid):
+    with root_app_writer(database,destination,output_uid,output_gid) as identity:
         result=pilot_import(root,collections,database,destination,source_identity=identity.source)
+        return {**result,'root_source_reader':True,'output_uid':os.geteuid(),'output_gid':os.getegid()}
+
+
+def batch_import(root,collections,database,destination,limit=10,source_identity=None,require_read_only=True):
+    """Continue a bounded scan, backing up first and keeping prior receipts."""
+    import fcntl
+    if type(limit) is not int or not 1<=limit<=10:raise ValueError('한 번에 1~10개 폴더만 등록하세요.')
+    database=Path(database).absolute()
+    if database.is_symlink() or not database.is_file():raise ValueError('기존 Studio 전용 DB를 확인하세요.')
+    inspector=FolderImporter(root,collections,source_identity=source_identity)
+    with inspector.directory(PurePosixPath('.')) as fd:
+        if require_read_only and not os.fstatvfs(fd).f_flag&os.ST_RDONLY:raise ValueError('등록 원본은 읽기 전용 mount여야 합니다.')
+    lock_fd=os.open(database.parent/'folder-pilot.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(lock_fd).st_mode):raise ValueError('등록 잠금 파일을 확인하세요.')
+        try:fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:raise ValueError('다른 폴더 등록 작업이 실행 중입니다.') from None
+        backups=database.parent/'folder-import-backups'
+        if backups.is_symlink():raise ValueError('전용 백업 경로를 확인하세요.')
+        backups.mkdir(mode=0o700,exist_ok=True)
+        backup=backups/('before-'+time.strftime('%Y%m%dT%H%M%SZ',time.gmtime())+'-'+os.urandom(8).hex()+'.db')
+        verification=copy_database(database,backup)
+        uploads=Uploads(Store(database),destination,512*1024**2)
+        result=FolderImporter(root,collections,uploads,source_identity=source_identity).scan(limit)
+        return {**result,'batch_limit':limit,'backup':backup.relative_to(database.parent).as_posix(),'backup_sha256':verification['sha256']}
+    finally:os.close(lock_fd)
+
+
+def root_batch_import(root,collections,database,destination,output_uid,output_gid,limit=10):
+    with root_app_writer(database,destination,output_uid,output_gid) as identity:
+        result=batch_import(root,collections,database,destination,limit,source_identity=identity.source)
         return {**result,'root_source_reader':True,'output_uid':os.geteuid(),'output_gid':os.getegid()}
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot','root-pilot'],default='plan')
+    parser.add_argument('--operation',choices=['plan','diagnose','import','pilot','root-pilot','root-plan','root-batch'],default='plan')
     parser.add_argument('--root',default=os.environ.get('STUDIO_FOLDER_ROOT','/nas-library'))
     parser.add_argument('--collections',default=os.environ.get('STUDIO_FOLDER_COLLECTIONS','["manga","images"]'))
     parser.add_argument('--limit',type=int,default=1)
     args=parser.parse_args();uploads=None
-    if args.operation in ('pilot','root-pilot'):
+    if args.operation=='root-plan':
+        try:
+            if os.geteuid()!=0:raise ValueError('root 원본 검사는 UID0으로 실행하세요.')
+            inspector=FolderImporter(args.root,json.loads(args.collections))
+            with inspector.directory(PurePosixPath('.')) as fd:
+                if not os.fstatvfs(fd).f_flag&os.ST_RDONLY:raise ValueError('검사 원본은 읽기 전용 mount여야 합니다.')
+            result=inspector.scan()
+        except Exception as error:
+            print(json.dumps({'operation':args.operation,'errors':1,'error':access_error(error)},ensure_ascii=False));raise SystemExit(1) from None
+        print(json.dumps({'operation':args.operation,**result},sort_keys=True))
+        if result['errors']:raise SystemExit(1)
+        return
+    if args.operation in ('pilot','root-pilot','root-batch'):
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
         try:
-            if args.operation=='root-pilot':
-                result=root_pilot_import(args.root,json.loads(args.collections),database,destination,
-                    int(os.environ['STUDIO_FOLDER_OUTPUT_UID']),int(os.environ['STUDIO_FOLDER_OUTPUT_GID']))
+            if args.operation in ('root-pilot','root-batch'):
+                method=root_pilot_import if args.operation=='root-pilot' else root_batch_import
+                options={} if args.operation=='root-pilot' else {'limit':args.limit}
+                result=method(args.root,json.loads(args.collections),database,destination,
+                    int(os.environ['STUDIO_FOLDER_OUTPUT_UID']),int(os.environ['STUDIO_FOLDER_OUTPUT_GID']),**options)
             else:result=pilot_import(args.root,json.loads(args.collections),database,destination)
         except Exception as error:
             print(json.dumps({'operation':args.operation,'errors':1,'error':access_error(error)},ensure_ascii=False))
             raise SystemExit(1) from None
-        print(json.dumps({'operation':args.operation,**result},sort_keys=True));return
+        print(json.dumps({'operation':args.operation,**result},sort_keys=True))
+        if result['errors']:raise SystemExit(1)
+        return
     if args.operation=='import':
         database=os.environ.get('STUDIO_DATABASE');destination=os.environ.get('STUDIO_UPLOAD_DIR')
         if not database or not destination:parser.error('Set verified dedicated database and upload paths')
