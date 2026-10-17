@@ -62,7 +62,8 @@ def main():
         'args=sys.argv[1:];url=next(a for a in args if a.startswith("https://"));target=args[args.index("-o")+1]\n'+
         'prefix="https://raw.githubusercontent.com/Yuris99/LANraragi/'+('1'*40)+'/studio/"\n'+
         'assert url.startswith(prefix);relative=url[len(prefix):];assert ".." not in relative\n'+
-        'shutil.copyfile(Path('+repr(str(repository/'studio'))+')/relative,target)\n')
+        'shutil.copyfile(Path('+repr(str(repository/'studio'))+')/relative,target)\n'+
+        'import os\nif os.environ.get("STUDIO_TEST_TAMPER")=="1" and relative=="web/app.js":\n with open(target,"a") as stream:stream.write("corrupt fixture")\n')
     (stubs/'curl').chmod(0o755)
     env['PATH']=str(stubs)+os.pathsep+env['PATH']
     values=dict(line.split('=',1) for line in (root/'.env.nas').read_text().splitlines() if '=' in line)
@@ -85,8 +86,10 @@ def main():
         browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
         context=browser.new_context(http_credentials={'username':'admin','password':values['STUDIO_PASSWORD']})
         page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-        page.goto(base);page.locator('.card .mosaic-layer:not([hidden])').wait_for(state='visible')
-        assert page.locator('.card canvas').evaluate('(el)=>el.width')==48
+        page.goto(base);page.locator('.card img').wait_for()
+        assert page.locator('.card img').evaluate('(el)=>getComputedStyle(el).filter')=='blur(10px)'
+        assert page.locator('.card img').evaluate('(el)=>getComputedStyle(el).objectFit')=='contain'
+        assert page.locator('.card canvas').count()==0
         assert 'NAS 폴더에서 1권' in page.locator('#library-status').inner_text()
         page.locator('.card').click();assert page.locator('#detail img').evaluate('(el)=>getComputedStyle(el).opacity')=='1'
         page.locator('#read-work').click()
@@ -96,16 +99,43 @@ def main():
             page.wait_for_function('()=>document.querySelector("#reader-image").complete && document.querySelector("#reader-image").naturalWidth===320')
             assert page.locator('#reader-image').evaluate('(el)=>getComputedStyle(el).opacity')=='1'
         page.locator('#close-reader').click();page.locator('#close-detail').click()
-        page.locator('#settings-button').click();page.locator('#thumbnail-mosaic').uncheck()
+        page.locator('#settings-button').click();page.locator('#thumbnail-blur').uncheck()
         page.locator('#settings [data-close]').click();page.reload();page.locator('.card').wait_for()
-        assert page.locator('.card img').evaluate('(el)=>getComputedStyle(el).opacity')=='1'
+        assert page.locator('.card img').evaluate('(el)=>getComputedStyle(el).filter')=='none'
         page.locator('#download-open').click();assert '검증 전' in page.locator('#download-support').inner_text()
         assert not errors,errors
         browser.close()
     assert hashlib.sha256(request('/api/uploads/'+archive_sha+'/download')).hexdigest()==archive_sha
     backups=[p for p in root.iterdir() if p.name.startswith('ui-update-backup.')]
     assert len(backups)==1 and json.loads((backups[0]/'sqlite-backup.json').read_text())['sha256']
+    def code_mount():
+        return command(docker+['inspect','--format','{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}{{end}}{{end}}',project+'-studio-1']).strip()
+    first_code=code_mount();assert first_code
+    # Simulate the older installed overlay, which has no rollback metadata.
+    overlay=root/'compose.ui.yaml'
+    legacy='\n'.join(row for row in overlay.read_text().splitlines() if not row.startswith('# previous-ui-overlay '))+'\n'
+    overlay.write_text(legacy)
+    env['STUDIO_TEST_TAMPER']='1'
+    tampered=subprocess.run(['sh',str(helper),'apply',str(root)],cwd=repository,env=env,capture_output=True,text=True,timeout=130)
+    env.pop('STUDIO_TEST_TAMPER')
+    assert tampered.returncode!=0 and 'FAILED' in tampered.stdout
+    assert overlay.read_text()==legacy and code_mount()==first_code
+    assert len(list(root.glob('ui-update-backup.*')))==1
+    assert hashlib.sha256(request('/api/uploads/'+archive_sha+'/download')).hexdigest()==archive_sha
+    upgrade=command(['sh',str(helper),'apply',str(root)])
+    assert '"studio_update": "complete"' in upgrade and code_mount()!=first_code
+    assert len(list(root.glob('ui-update-backup.*')))==2
+    assert hashlib.sha256(request('/api/uploads/'+archive_sha+'/download')).hexdigest()==archive_sha
     rolled=command(['sh',str(helper),'rollback',str(root)]);assert 'rolled back' in rolled
+    assert code_mount()==first_code and overlay.read_text()==legacy
+    for _ in range(30):
+        try:
+            if json.loads(request('/api/library/status'))['folder_archives']==1:break
+        except Exception:pass
+        time.sleep(1)
+    else:raise AssertionError('First rollback must restore the previous reviewed UI')
+    rolled=command(['sh',str(helper),'rollback',str(root)]);assert 'rolled back' in rolled
+    assert not code_mount() and not overlay.exists()
     for _ in range(30):
         try:
             if json.loads(request('/api/health'))['lanraragi_connected']:break
@@ -117,7 +147,8 @@ def main():
     else:raise AssertionError('Rollback must restore the old server code')
     assert command(docker+['inspect','--format','{{.State.StartedAt}}',project+'-lanraragi-1']).strip()==lrr_started
     print(json.dumps({'real_apply_and_rollback':True,'prior_sqlite_backup':True,'legacy_image_reused':True,
-                      'lrr_not_restarted':True,'data_download_hash_preserved':True,'thumbnail48':True,
+                      'lrr_not_restarted':True,'data_download_hash_preserved':True,'thumbnail_blur':True,'cover_fit_contain':True,
+                      'existing_overlay_upgrade':True,'two_step_code_rollback':True,'hash_failure_preserves_existing_ui':True,
                       'detail_reader_original':True,'settings_persisted':True,'nas_folder_count':True,'page_errors':errors}))
 
 
