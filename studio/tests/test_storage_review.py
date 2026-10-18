@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -33,6 +34,24 @@ class ReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)
             with self.assertRaises(ValueError):tool.review(root,root)
+
+    def test_nas_wrapper_preview_rejects_paths_and_has_no_docker_or_network_actions(self):
+        script=Path(__file__).resolve().parents[1]/'deploy/review-nas-copies.sh'
+        result=subprocess.run(['sh',str(script),'preview','/volume1/Example/Books'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Preview only',result.stdout)
+        for path in ['/','/volumeX/Books','/volume1/../Other','/volume1/Books,readonly=false']:
+            self.assertEqual(subprocess.run(['sh',str(script),'preview',path],capture_output=True).returncode,2)
+
+    def test_nas_wrapper_pins_exact_review_source_hashes(self):
+        deploy=Path(__file__).resolve().parents[1]/'deploy'
+        script=(deploy/'review-nas-copies.sh').read_text()
+        for name in ['deploy/review-library-storage.py','deploy/archive_in_place.py','sources.py']:
+            expected=hashlib.sha256((deploy.parent/name).read_bytes()).hexdigest()+'  '+name
+            self.assertIn(expected,script)
+        self.assertIn('--network none --read-only',script)
+        self.assertIn('dst=/nas-library,readonly',script)
+        self.assertIn('dst=/copies,readonly',script)
 
     def test_symlinks_are_not_followed(self):
         with tempfile.TemporaryDirectory() as temp:
