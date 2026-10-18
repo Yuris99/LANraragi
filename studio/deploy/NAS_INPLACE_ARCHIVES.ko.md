@@ -34,6 +34,8 @@ python archive_in_place.py --root '/승인한/원본루트' --collection manga -
 
 ### NAS-local 연결 전환안
 
+최종 `migrate-inplace-library.sh plan|apply '<승인한 NAS 루트>'`는 고정 커밋486de9ea54da52aa5643f5d9831873b8e15be697의 압축 도구/연결 실행기를 해시 검증해 사용한다. 두 컬렉션을 `--preserve-nas-metadata`로 **먼저 전부 plan**하고, 후보 중 오류/기존 CBZ 충돌/불안정 파일/링크/한도 초과가 하나라도 있으면 서비스 전환과 원본 쓰기 전에 멈춘다. plan은 여기서 끝난다. apply는 아래 연결 전환이 건강하게 끝난 뒤에만 network-none/RO rootfs/256MiB/최소 capability의 임시 컨테이너에서 원본 RW + 자기 Studio DB 볼륨을 연결해 순서대로 압축·검증·삭제한다. 전체를 한 번 요청하며 작품마다 개수 진행률을 출력한다. 원본 RW는 이 명시적 일회 작업에만 있고 LANraragi의 입력은 계속 RO다. 기존 큐 작업이 남아 있으면 전환 도구의 공유 잠금/DB 검사가 원본 압축·삭제를 막는다. 소스 경로는 NAS-local 인자일 뿐 GitHub에 저장하지 않는다. 기존 연결 overlay가 있으면 설치를 반복 덮어쓰지 않는다.
+
 `connect-inplace-library.sh plan|apply '<승인한 NAS 루트>'`를 준비했다. plan은 변경이 없고, apply는 다음의 구체적인 서비스 변경을 수행한다. **이는 임시 root 리더 실행과 달리 LANraragi 웹/API·작업자 프로세스를 컨테이너 내 UID/GID0:0으로 바꾸는 권한 전환**이다. 원본 경로는 이 서비스에서도 RO이며 Docker socket/host privilege/공개 포트는 추가하지 않는다. 사용자가 NAS-local에서 이 별도 전환을 적용하기 전에는 기존 앱 자동 배포로 실행되지 않는다.
 
 1. 기존 NAS 프로젝트/두 이미지/건강 상태/자기 볼륨 label, 고정 배포 컨트롤러 및 기존 설정 해시를 확인한다. 배포/앱 업데이트 잠금을 취득한다. 기존 설정이 달라졌으면 멈춘다.
@@ -48,7 +50,7 @@ python archive_in_place.py --root '/승인한/원본루트' --collection manga -
 
 ## 검증 기록
 
-새로운22개 압축/원본삭제 테스트를 포함한 총184개 테스트 통과. 생성한 PNG/JPEG/WebP 및 비이미지 파일만 사용했다. 전체 바이트 대조·중첩/빈 폴더·충돌·링크/특수 파일·NAS 내부 폴더 보류 및 내부 ZIP 보존/해시 실패·공간 부족·중간 변경·검증 실패·게시/삭제 중 중단·배치 중단·기존 가져오기 잠금을 검사했다. 실제 Docker(network none, RO rootfs, 최소 capability, 256MiB)에서도 생성한 한 작품을 같은 위치에 CBZ로 게시하고 검증 후 원본을 제거했다.
+새로운22개 압축/원본삭제 테스트와3개 실행기 차단 테스트를 포함한 총187개 테스트 통과. 실행기 테스트는 해시 불일치·실패한 사전 검사 뒤에는 연결/삭제가 실행되지 않고 plan 입력이 RO임을 확인한다. 생성한 PNG/JPEG/WebP 및 비이미지 파일만 사용했다. 전체 바이트 대조·중첩/빈 폴더·충돌·링크/특수 파일·NAS 내부 폴더 보류 및 내부 ZIP 보존/해시 실패·공간 부족·중간 변경·검증 실패·게시/삭제 중 중단·배치 중단·기존 가져오기 잠금을 검사했다. 실제 Docker(network none, RO rootfs, 최소 capability, 256MiB)에서도 생성한 한 작품을 같은 위치에 CBZ로 게시하고 검증 후 원본을 제거했다.
 
 `python -B studio/tests/inplace_connection_smoke.py`는 별도 합성 스택에서 NAS처럼 비루트 접근이 막힌 이미지/캐시 폴더를 만들고, 같은 위치에 CBZ로 전환한 뒤 원본 폴더를 제거한다. 실제 LANraragi0.9.81을 UID0으로 전환해 RO 경로를 읽고, Studio 동기화·실제 페이지3장(캐시 제외)·전체 다운로드 SHA-256·Studio 시작 시각 보존·추가 overlay 해시 고정·임시 자격정보 JSON 제거를 검증했다. 이 Docker 이미지는 기존 NAS용 소스의 개발 이미지이며, NAS 장비에서의 실행 증거는 아니다.
 

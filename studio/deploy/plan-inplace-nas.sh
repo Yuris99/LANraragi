@@ -12,8 +12,8 @@ case "$source" in */../*|*/..|*/./*|*/.|*//*|*,*|*'\'*|*'
 '*|*"$cr"*) exit 2;;esac
 [ "$(id -u)" -eq 0 ] || { printf 'Run this read-only plan with NAS-local sudo.\n' >&2;exit 1; }
 [ -d "$source" ] && [ ! -L "$source" ] && [ "$(readlink -f "$source")" = "$source" ] || exit 1
-revision=9c328fd6b6bacbd4f092a9d29fea6c91f52115be
-module_sha=0461671c10964479645419ebc6b4ea54bc0e02e1c7e187a291122a7e2865dd85
+revision=486de9ea54da52aa5643f5d9831873b8e15be697
+module_sha=18ec6094fb0bae2840ae351c3e6dbfb1b46944dc121e9c1c56d7c80f58e4f304
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
 docker_local() { (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH;docker --host=unix:///var/run/docker.sock "$@"); }
 identity=$(docker_local inspect --type container --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Image}}' library-studio-nas-pilot-studio-1)
@@ -31,7 +31,7 @@ plan_status=0
 docker_local run --rm --pull=never --user 0:0 --network none --read-only --memory 256m --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true \
   --mount "type=bind,src=$source,dst=/nas-library,readonly" \
   --mount "type=bind,src=$stage/archive_in_place.py,dst=/tools/archive_in_place.py,readonly" \
-  --entrypoint python "$image" -B /tools/archive_in_place.py --root /nas-library --collection manga --collection images || plan_status=$?
+  --entrypoint python "$image" -B /tools/archive_in_place.py --root /nas-library --collection manga --collection images --preserve-nas-metadata || plan_status=$?
 docker_local run --rm --pull=never --user "$writer" --network none --read-only --memory 64m --cap-drop ALL --security-opt no-new-privileges:true \
   --mount "type=bind,src=$source,dst=/nas-library,readonly" --entrypoint python "$image" -B -c '
 import json,os
