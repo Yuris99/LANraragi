@@ -47,7 +47,9 @@ class ReviewTests(unittest.TestCase):
         deploy=Path(__file__).resolve().parents[1]/'deploy'
         script=(deploy/'review-nas-copies.sh').read_text()
         for name in ['deploy/review-library-storage.py','deploy/archive_in_place.py','sources.py']:
-            expected=hashlib.sha256((deploy.parent/name).read_bytes()).hexdigest()+'  '+name
+            # Immutable NAS tools keep their archived filename parser.
+            source=Path(__file__).parent/'fixtures/legacy-review-sources.py' if name=='sources.py' else deploy.parent/name
+            expected=hashlib.sha256(source.read_bytes()).hexdigest()+'  '+name
             self.assertIn(expected,script)
         self.assertIn('--network none --read-only',script)
         self.assertIn('dst=/nas-library,readonly',script)

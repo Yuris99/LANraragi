@@ -59,8 +59,10 @@ def filename_hints(filename):
     from pathlib import PurePosixPath
     name = PurePosixPath(str(filename).replace('\\', '/')).name
     name = re.sub(r'\.(?:cbz|zip|cbr|rar|7z|pdf)$', '', name, flags=re.I)[:1000]
+    basename=name
+    name=re.sub(r'\s+\[L[1-9][0-9]*\]\s*$','',name,flags=re.I)
     numbers = []
-    for match in re.finditer(r'(?<!\w)([HEN]?)([0-9]{3,12})(?!\w)', name, re.I):
+    for match in re.finditer(r'(?<!\w)([HENU]?)([0-9]{3,12})(?!\w)', name, re.I):
         prefix, number = match.groups()
         # Years and chapter/page labels without a provider prefix are ambiguous.
         if not prefix and (1900 <= int(number) <= 2099 or re.search(r'(?:chapter|ch|vol|page|p)\s*$', name[:match.start()], re.I)):
@@ -69,18 +71,18 @@ def filename_hints(filename):
         if hint not in numbers: numbers.append(hint)
     artist = ''
     # Only a leading bracket is an author hint, never arbitrary title parentheses.
-    match = re.match(r'^\s*(?:[\[(]?[HEN]?\d{3,12}[\])]?\s*[-_. ]*\s*)?\[([^\[\]]{1,150})\]', name, re.I)
+    match = re.match(r'^\s*(?:[\[(]?[HENU]?\d{3,12}[\])]?\s*[-_. ]*\s*)?\[([^\[\]]{1,150})\]', name, re.I)
     if match:
         value = match[1].strip()
-        if not re.fullmatch(r'[HEN]?\d+|(?:C|COMIC1)\d+|(?:english|korean|japanese|chinese|digital|韓国語|日本語)', value, re.I):
+        if not re.fullmatch(r'[HENU]?\d+|(?:C|COMIC1)\d+|(?:english|korean|japanese|chinese|digital|韓国語|日本語)', value, re.I):
             artist = value
     title=name
     if match and artist:title=name[match.end():].strip()
     if len(numbers)==1:
-        token=re.escape(({'hitomi':'H','ehentai':'E','nhentai':'N'}.get(numbers[0]['provider'],'')+numbers[0]['number']))
+        token=re.escape(({'hitomi':'H','ehentai':'E','nhentai':'N'}.get(numbers[0]['provider'],'U' if re.search(r'(?<!\w)U'+numbers[0]['number']+r'(?!\w)',name,re.I) else '')+numbers[0]['number']))
         title=re.sub(r'\s*[\[({]'+token+r'[\])}]\s*$','',title,flags=re.I).strip()
         title=re.sub(r'^'+token+r'\s*[-_. ]+','',title,flags=re.I).strip()
-    return {'filename': name, 'title':title or name, 'numbers': numbers, 'artist': artist,
+    return {'filename': basename, 'title':title or name, 'numbers': numbers, 'artist': artist,
             'ambiguous': len(numbers) != 1,
             'provenance': 'filename-hint-only'}
 
