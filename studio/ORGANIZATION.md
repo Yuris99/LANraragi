@@ -1,0 +1,21 @@
+# Number, artist and storage review
+
+The sidebar's **번호·작가 정리** view shows filename evidence alongside current metadata. First synchronize to store the original archive basename locally. Basenames never include parent paths. Leading bracket names and isolated numeric identifiers are hints; ambiguous numbers require input. A bare identifier is not a provider identity. Common examples include `[Artist] Title [123456]` and `[123456] [Artist] Title`; other conventions need review.
+
+Confirm an artist individually, or fill this page's empty artists from the visible filename hints. Existing artists and manually locked values stay intact; confirmed artists survive later upstream synchronization. This changes Studio metadata only, preserving upstream tags and filenames.
+
+**세 사이트 함께 확인** makes three independent public metadata requests from the running Studio instance, not from a user's browser. It displays E-Hentai, Hitomi and nhentai titles/artists separately, and links only the candidate the user selects. It never equates equal numbers across sites or merges works. No original images/files are sent. No media previews or downloads are requested. The check is serialized per instance and limited to one attempt per work per60seconds.
+
+E-Hentai needs a gallery token: normal public `gid:` search may return an exact URL, followed by the documented metadata API. Missing/unavailable results require the original full URL via the existing source form. Hitomi uses the metadata host already used by the upstream plugin; nhentai uses its public gallery JSON. Redirects, login/challenge responses, wrong IDs and malformed metadata never become selectable candidates. No automatic cookies, login bypass, alternate-source fallback or retry is used. All three are **live-site unverified**. Current managed cloud policy does not allow their domains, so fixture/browser success is not site-access evidence. Network requirements are `e-hentai.org`, `api.e-hentai.org`, `ltn.gold-usergeneratedcontent.net`, `nhentai.net`; source links additionally use `hitomi.la`. Administrator review is required for cloud-policy changes; NAS access is a separate environment.
+
+The suggested basename is `[Artist] Title [H123456].cbz`, with `E`/`N` for confirmed other sources and `U` for unresolved identity. Unsafe path characters are replaced and UTF-8 byte length is bounded. Collection folders stay separate; there is no automatic collection reassignment, rename or move. A source connection or short-address redirect does not rename an archive.
+
+## Existing copies
+
+`deploy/review-library-storage.py` is a NAS-local **read-only** tool. Its two disjoint inputs are the connected archive root and the app's copy/upload directory. It groups candidates by a full SHA-256 of every page, in natural reading order; archive-byte equality and every other ZIP member hash are recorded separately. Equal numbers/titles and upstream partial archive IDs are insufficient. Symlinks, changed archives, encrypted members, malformed ZIPs and bounded-size/scan failures are rejected. Only a new private0600 report outside both inputs is written; the stdout summary omits filenames. Do not upload this private report to GitHub/cloud.
+
+The report does **not** authorize deletion. Before actual copy removal, preserve both works' sources/comments/tags/favorites/reading progress/bookmarks and any different non-page metadata, verify the connected survivor, and account for archive indexing. Storage relocation also needs an explicit NAS-local map and rollback plan. The app-only deployment channel cannot execute host cleanup or change mounts/privileges. Thus actual copy deletion and folder unification remain pending NAS-local review and an appropriate execution path; no cleanup completion is claimed.
+
+## Validation
+
+208unit/HTTP/deployment tests passed. Generated-data Chromium testing covers artist confirmation surviving synchronization, three distinct same-number candidates without automatic linking, explicit single-source selection, filename preview and desktop/mobile. Storage-review tests verify full-page candidates, different metadata preservation, equal-number/different-content rejection, unchanged input hashes, disjoint roots and symlink rejection. No actual private library or live site was used in these tests.

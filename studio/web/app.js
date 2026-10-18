@@ -514,3 +514,69 @@ $('#folder-start').onclick = guard(async () => {
 });
 $('#folder-jobs').onclick = guard(async (event) => { const button = event.target.closest('[data-folder-cancel]'); if (button) { await api('/api/folders/' + button.dataset.folderCancel + '/cancel', {}); await refreshFolders(); } });
 setInterval(() => { if ($('#folder-dialog').open && !document.hidden) refreshFolders().catch((error) => { $('#folder-worker-status').textContent = error.message; $('#folder-start').disabled = true; }); }, 2500);
+
+
+let organizePage = 1, organizeQuery = "", organizeBusy = false;
+const organizeCandidates = new Map();
+async function renderOrganization() {
+    const result = await api(`/api/organization?page=${organizePage}&q=${encodeURIComponent(organizeQuery)}`);
+    $("#organize-page").textContent = `${result.page} / ${Math.max(1, Math.ceil(result.total / result.limit))}`;
+    $("#organize-prev").disabled = organizePage <= 1;
+    $("#organize-next").disabled = organizePage * result.limit >= result.total;
+    $("#organize-status").textContent = `${result.total}권 · 먼저 동기화하면 현재 파일명을 읽습니다. 대괄호의 값은 작가 추정이며 확인 후 저장하세요.`;
+    $("#organize-items").innerHTML = result.items.map(work => {
+        const hints = work.organization;
+        return `<section class="detail-section" data-organize-work="${work.id}"><h3>${esc(work.title)}</h3><p class="muted">파일명: ${esc(work.archive_filename || "동기화 후 확인")}</p><p>${sources(work) || "연결된 출처 없음"}</p><form class="organize-artist"><label>작가<input name="artist" maxlength="500" value="${esc(work.artist || hints.artist)}"></label><button class="quiet">작가 저장</button></form><label>확인할 번호<input class="organize-number" inputmode="numeric" maxlength="12" value="${esc(hints.numbers.length === 1 ? hints.numbers[0].number : "")}" aria-label="확인할 작품 번호"></label><p class="muted">${hints.ambiguous ? "번호가 없거나 여러 개입니다. 확인할 번호를 직접 입력하세요." : "출처가 확정되지 않은 파일명 후보입니다."}</p><button class="quiet" data-match-work="${work.id}">세 사이트 함께 확인</button><div class="organize-results" aria-live="polite"></div><form class="organize-source"><label>원본 URL로 직접 연결<input name="url" type="url" required placeholder="https://…"></label><button class="quiet">URL 연결</button></form><p class="muted">통일 파일명 미리보기: ${esc(work.proposed_filename)}</p></section>`;
+    }).join("") || '<p class="muted">표시할 작품이 없습니다. 라이브러리를 동기화하세요.</p>';
+}
+$("#organize-open").onclick = guard(async () => { $("#organize-dialog").showModal(); await renderOrganization(); });
+$("#organize-artists").onclick = guard(async () => {
+    const work_ids = [...$("#organize-items").querySelectorAll("[data-organize-work]")].map(section => section.dataset.organizeWork);
+    if (!work_ids.length) return;
+    const result = await api("/api/organization/artists", { work_ids });
+    toast(`${result.updated}권의 빈 작가를 저장했습니다. 기존 작가는 유지됩니다.`);
+    await renderOrganization(); await load();
+});
+$("#organize-prev").onclick = guard(async () => { organizePage = Math.max(1, organizePage - 1); await renderOrganization(); });
+$("#organize-next").onclick = guard(async () => { organizePage++; await renderOrganization(); });
+$("#organize-search").onsubmit = guard(async event => { event.preventDefault(); organizeQuery = new FormData(event.target).get("query"); organizePage = 1; await renderOrganization(); });
+$("#organize-items").addEventListener("submit", guard(async event => {
+    if (event.target.matches(".organize-source")) {
+        event.preventDefault();
+        const id = event.target.closest("[data-organize-work]").dataset.organizeWork;
+        await api(`/api/works/${id}/sources`, { url: new FormData(event.target).get("url") });
+        toast("입력한 원본 URL을 연결했습니다. 원격 정보는 아직 미확인입니다.");
+        await renderOrganization(); await load(); return;
+    }
+    if (!event.target.matches(".organize-artist")) return;
+    event.preventDefault();
+    const id = event.target.closest("[data-organize-work]").dataset.organizeWork;
+    await api(`/api/works/${id}`, { artist: new FormData(event.target).get("artist") });
+    toast("작가를 저장했습니다. 다음 동기화에서도 유지됩니다.");
+    await renderOrganization(); await load();
+}));
+$("#organize-items").addEventListener("click", guard(async event => {
+    const check = event.target.closest("[data-match-work]");
+    const select = event.target.closest("[data-match-select]");
+    if (check) {
+        if (organizeBusy) return toast("진행 중인 사이트 확인을 기다려 주세요.");
+        const section = check.closest("[data-organize-work]"), results = section.querySelector(".organize-results");
+        const number = section.querySelector(".organize-number").value.trim();
+        if (!/^[0-9]{1,12}$/.test(number)) return toast("확인할 번호를 입력하세요.");
+        organizeBusy = true; check.disabled = true; results.textContent = "세 사이트 메타데이터 확인 중…";
+        try {
+            const value = await api(`/api/works/${check.dataset.matchWork}/matches`, { number });
+            organizeCandidates.set(check.dataset.matchWork, value.items);
+            results.innerHTML = value.items.map((item, index) => `<div class="source-row"><h4>${providerName[item.provider]} · ${esc(item.number)}</h4><p>${esc(item.title || ({ not_found: "해당 번호 없음", needs_url: "원본 URL 필요", access_required: "접근 제한·로그인 필요", invalid_response: "응답 검증 실패", unavailable: "연결 확인 필요" })[item.status] || "미확인")}</p><p>${esc(item.artists.join(", "))}</p><p class="muted">${esc(item.message)}</p>${item.status === "found" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">원본 확인 ↗</a> <button class="quiet" data-match-select="${index}">이 출처 연결</button>` : ""}</div>`).join("");
+        } catch (error) { results.textContent = error.message; } finally { organizeBusy = false; check.disabled = false; }
+    }
+    if (select) {
+        const id = select.closest("[data-organize-work]").dataset.organizeWork;
+        const item = organizeCandidates.get(id)?.[Number(select.dataset.matchSelect)];
+        if (!item || item.status !== "found") return;
+        select.disabled = true;
+        await api(`/api/works/${id}/sources`, { url: item.url });
+        toast("선택한 출처를 연결했습니다. 작가는 확인 후 저장하세요.");
+        await renderOrganization(); await load();
+    }
+}));

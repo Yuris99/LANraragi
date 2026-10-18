@@ -7,7 +7,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from sources import parse_source, tags_list, comments_list
+from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name
 
 
 def uid():
@@ -72,6 +72,9 @@ class Store:
 
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
+            work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
+            if 'archive_filename' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN archive_filename TEXT NOT NULL DEFAULT ''")
+            if 'artist_locked' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN artist_locked INTEGER NOT NULL DEFAULT 0")
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
             for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
@@ -97,6 +100,7 @@ class Store:
     def work_row(row):
         result = dict(row)
         result['tags'] = json.loads(result['tags'])
+        result['organization'] = filename_hints(result.get('archive_filename') or result['title'])
         return result
 
     @staticmethod
@@ -295,6 +299,7 @@ class Store:
                 values[k] = json.dumps(tags_list(v),ensure_ascii=False)
             else:
                 values[k] = int(bool(v))
+        if 'artist' in values:values['artist_locked']=1
         if values:
             with self.db() as db:
                 db.execute('UPDATE works SET '+','.join(k+'=?' for k in values)+' WHERE id=?',
@@ -366,18 +371,24 @@ class Store:
             tags = tags_list(item.get('tags',''))
             artist = ', '.join(x.split(':',1)[1] for x in tags if x.startswith('artist:'))
             with self.db() as db:
-                row = db.execute('SELECT id,title_locked FROM works WHERE lrr_id=?',(lrr_id,)).fetchone()
+                row = db.execute('SELECT id,title_locked,artist_locked FROM works WHERE lrr_id=?',(lrr_id,)).fetchone()
             if row:
                 with self.db() as db:
                     db.execute('UPDATE works SET pages=?,bytes=? WHERE id=?',
                                (int(item.get('pagecount') or 0),int(item.get('arcsize') or item.get('size') or 0),row['id']))
                     if not row['title_locked']:
-                        db.execute('UPDATE works SET title=?,artist=?,tags=? WHERE id=?',
-                                   (item.get('title') or lrr_id,artist,json.dumps(tags,ensure_ascii=False),row['id']))
+                        db.execute('UPDATE works SET title=?,tags=? WHERE id=?',
+                                   (item.get('title') or lrr_id,json.dumps(tags,ensure_ascii=False),row['id']))
+                    if not row['title_locked'] and not row['artist_locked']:
+                        db.execute('UPDATE works SET artist=? WHERE id=?',(artist,row['id']))
                 work = self.get_work(row['id'])
             else:
                 work = self.create_work(item.get('title') or lrr_id,artist,lrr_id,
                                         item.get('pagecount') or 0,item.get('arcsize') or item.get('size') or 0,tags)
+            with self.db() as db:
+                filename=Path(str(item.get('filename','')).replace('\\','/')).name[:1000]
+                if upload:filename=upload['original_name']
+                db.execute('UPDATE works SET archive_filename=? WHERE id=?',(filename,work['id']))
             for tag in tags:
                 if tag.startswith('source:'):
                     value = tag.split(':',1)[1].strip()
@@ -389,6 +400,40 @@ class Store:
                     self.apply_upload_tags(db,upload['sha256'])
             count += 1
         return count
+
+    def organization_preview(self, query='', page=1):
+        result=self.list_works(query=query,page=page,limit=24,sort='title',descending=False)
+        for work in result['items']:
+            hint=work['organization']
+            source=next(iter(work['sources']),{})
+            number=source.get('external_id') or (hint['numbers'][0]['number'] if not hint['ambiguous'] else None)
+            work['proposed_filename']=canonical_archive_name(hint['title'] if work['title']==hint['filename'] else work['title'],work['artist'] or hint['artist'],source.get('provider'),number)
+        return result
+
+    def apply_filename_artists(self, work_ids):
+        if not isinstance(work_ids,list) or not 1<=len(work_ids)<=200 or any(not isinstance(i,str) or not re.fullmatch('[0-9a-f]{32}',i) for i in work_ids):
+            raise ValueError('확인한 작품을 최대200개 선택하세요.')
+        updated=0
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for work_id in set(work_ids):
+                row=db.execute('SELECT * FROM works WHERE id=?',(work_id,)).fetchone()
+                if not row:raise KeyError('작품을 찾을 수 없습니다.')
+                if row['artist'] or row['artist_locked'] or row['title_locked']:continue
+                artist=filename_hints(row['archive_filename'] or row['title'])['artist']
+                if not artist:continue
+                db.execute('UPDATE works SET artist=?,artist_locked=1 WHERE id=?',(artist,work_id));updated+=1
+        return {'updated':updated}
+
+    def begin_matching(self, work_id):
+        self.get_work(work_id)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            key='matching-attempt:'+work_id
+            row=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
+            now=time.time()
+            if row and now-float(row[0])<60:raise ValueError('세 사이트 확인은 작품별60초 간격으로 가능합니다.')
+            db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',(key,str(now)))
 
     def progress(self, work_id, page):
         work = self.get_work(work_id)

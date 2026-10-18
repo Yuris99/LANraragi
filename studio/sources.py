@@ -52,3 +52,46 @@ def comments_list(value):
         result.append({k: str(item.get(k, ''))[:20000 if k == 'text' else 500]
                        for k in ('id', 'author', 'text', 'posted_at', 'source_url', 'collector', 'fetched_at')})
     return result
+
+
+def filename_hints(filename):
+    """Conservative local evidence only; a bare number never identifies a site."""
+    from pathlib import PurePosixPath
+    name = PurePosixPath(str(filename).replace('\\', '/')).name
+    name = re.sub(r'\.(?:cbz|zip|cbr|rar|7z|pdf)$', '', name, flags=re.I)[:1000]
+    numbers = []
+    for match in re.finditer(r'(?<!\w)([HEN]?)([0-9]{3,12})(?!\w)', name, re.I):
+        prefix, number = match.groups()
+        # Years and chapter/page labels without a provider prefix are ambiguous.
+        if not prefix and (1900 <= int(number) <= 2099 or re.search(r'(?:chapter|ch|vol|page|p)\s*$', name[:match.start()], re.I)):
+            continue
+        hint = {'number': number, 'provider': {'h':'hitomi','e':'ehentai','n':'nhentai'}.get(prefix.lower())}
+        if hint not in numbers: numbers.append(hint)
+    artist = ''
+    # Only a leading bracket is an author hint, never arbitrary title parentheses.
+    match = re.match(r'^\s*(?:[\[(]?[HEN]?\d{3,12}[\])]?\s*[-_. ]*\s*)?\[([^\[\]]{1,150})\]', name, re.I)
+    if match:
+        value = match[1].strip()
+        if not re.fullmatch(r'[HEN]?\d+|(?:C|COMIC1)\d+|(?:english|korean|japanese|chinese|digital|韓国語|日本語)', value, re.I):
+            artist = value
+    title=name
+    if match and artist:title=name[match.end():].strip()
+    if len(numbers)==1:
+        token=re.escape(({'hitomi':'H','ehentai':'E','nhentai':'N'}.get(numbers[0]['provider'],'')+numbers[0]['number']))
+        title=re.sub(r'\s*[\[({]'+token+r'[\])}]\s*$','',title,flags=re.I).strip()
+        title=re.sub(r'^'+token+r'\s*[-_. ]+','',title,flags=re.I).strip()
+    return {'filename': name, 'title':title or name, 'numbers': numbers, 'artist': artist,
+            'ambiguous': len(numbers) != 1,
+            'provenance': 'filename-hint-only'}
+
+
+def canonical_archive_name(title, artist='', provider=None, number=None):
+    """A proposed basename, never a filesystem instruction or move operation."""
+    def clean(value):
+        value=re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]', '_', str(value)).strip(' .')
+        return value.encode('utf-8')[:90].decode('utf-8','ignore')
+    title = clean(title) or 'Untitled'
+    artist = clean(artist) or 'Unknown'
+    prefix = {'hitomi':'H','ehentai':'E','nhentai':'N'}.get(provider, 'U')
+    identity = f' [{prefix}{number}]' if isinstance(number,str) and re.fullmatch(r'\d{1,12}',number) else ''
+    return f'[{artist}] {title}{identity}.cbz'

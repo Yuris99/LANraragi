@@ -15,7 +15,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from connectors import fetch_comments
+from connectors import fetch_comments, source_candidates
 from sources import parse_source
 from store import Store
 from uploads import Uploads,UploadError
@@ -45,7 +45,7 @@ class LRR:
 class Studio:
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
-        self.sync_lock=threading.Lock();self.upload_cursor=''
+        self.sync_lock=threading.Lock();self.upload_cursor='';self.match_lock=threading.Lock()
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
     def sync(self):
@@ -232,6 +232,7 @@ class Handler(BaseHTTPRequestHandler):
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
         if path=='/api/folders':return self.respond(store.folder_status())
+        if path=='/api/organization':return self.respond(store.organization_preview(q('q'),int(q('page','1'))))
         if path=='/api/library/status':
             with store.db() as db:
                 has_folders=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_imports'").fetchone()
@@ -357,6 +358,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/organization/artists':
+            if set(data)!={'work_ids'}:raise ValueError('작품 선택만 지정하세요.')
+            return self.respond(store.apply_filename_artists(data['work_ids']))
         if path=='/api/folders':
             if set(data)!={'collections','request_key'}:raise ValueError('폴더 선택과 요청 번호만 지정할 수 있습니다.')
             return self.respond(store.queue_folder_import(data['collections'],data['request_key']),202)
@@ -372,6 +376,15 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/works':return self.respond(store.create_work(data.get('title',''),data.get('artist','')),201)
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
         if match:return self.respond(store.update_work(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/matches',path)
+        if match:
+            if set(data)!={'number'}:raise ValueError('확인할 번호만 지정하세요.')
+            if not isinstance(data['number'],str) or not re.fullmatch(r'[0-9]{1,12}',data['number']):raise ValueError('번호 형식을 확인하세요.')
+            if not self.app.match_lock.acquire(blocking=False):raise ValueError('다른 작품의 사이트 확인이 진행 중입니다.')
+            try:
+                store.begin_matching(match[1])
+                return self.respond({'items':source_candidates(data['number'])})
+            finally:self.app.match_lock.release()
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
         if match:return self.respond(store.upsert_source(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)

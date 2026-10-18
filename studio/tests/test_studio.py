@@ -319,6 +319,19 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(result['folder_registration'],'optional-copy')
         self.assertNotIn('private',json.dumps(result).lower())
 
+    def test_organization_requires_admin_and_checks_candidates_without_linking(self):
+        work=self.app.store.create_work('Generated')
+        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/organization',auth=False)
+        self.assertEqual(error.exception.code,401)
+        with self.request('/api/organization') as response:self.assertEqual(json.load(response)['total'],1)
+        with patch('server.source_candidates',return_value=[{'provider':'hitomi','status':'found'}]) as fetch:
+            with self.request('/api/works/'+work['id']+'/matches',{'number':'123456'}) as response:
+                self.assertEqual(json.load(response)['items'][0]['status'],'found')
+            fetch.assert_called_once_with('123456')
+        self.assertEqual(self.app.store.get_work(work['id'])['sources'],[])
+        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works/'+work['id']+'/matches',{'number':'123456'})
+        self.assertEqual(error.exception.code,400)
+
     def test_same_origin_required_for_mutations(self):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works',{'title':'Example'},origin='https://other.invalid')
         self.assertEqual(error.exception.code,403)
