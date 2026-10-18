@@ -50,6 +50,11 @@ def main():
                 page.locator('.organize-source button').click()
                 page.wait_for_function('()=>document.querySelector("#toast").textContent.includes("입력한 원본 URL")')
                 assert len(store.list_works()['items'][0]['sources'])==2
+                store.sync_lrr([dict(arcid=f'{i:040x}',filename=f'[Batch Artist {i}] Batch Title.cbz',title=f'Batch {i}',tags='') for i in range(30)])
+                page.locator('#organize-artists-all').click()
+                page.wait_for_function('()=>document.querySelector("#toast").textContent.includes("30권의 빈 작가")')
+                assert all(work['artist'] for work in store.list_works(limit=120)['items'])
+                assert store.get_work(work['id'])['artist']=='Generated Confirmed Artist'
                 for width,height in [(1440,900),(390,844)]:
                     page.set_viewport_size({'width':width,'height':height})
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

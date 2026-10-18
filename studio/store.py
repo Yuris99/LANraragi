@@ -326,7 +326,11 @@ class Store:
         comments = comments_list(data.get('comments',[]))
         if data.get('status','manual') not in ('manual','fetched','unverified'):
             raise ValueError('출처 상태가 올바르지 않습니다.')
+        artist=data.get('artist_if_empty','')
+        if not isinstance(artist,str) or len(artist)>500:raise ValueError('작가 형식을 확인하세요.')
+        artist=artist.strip()
         with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
             existing = db.execute('SELECT * FROM sources WHERE provider=? AND external_id=?',
                                   (identity['provider'],identity['external_id'])).fetchone()
             if existing and existing['work_id'] != work_id:
@@ -344,6 +348,8 @@ class Store:
                        (source_id,work_id,identity['provider'],identity['external_id'],identity['url'],
                         json.dumps(tags,ensure_ascii=False),json.dumps(comments,ensure_ascii=False),
                         fetched,data.get('status','manual')))
+            if artist:
+                db.execute("UPDATE works SET artist=?,artist_locked=1 WHERE id=? AND artist='' AND artist_locked=0 AND merged_into IS NULL",(artist,work_id))
         return self.get_work(work_id)
 
     def begin_comment_fetch(self, work_id, source_id):
@@ -462,20 +468,36 @@ class Store:
             work['proposed_filename']=canonical_archive_name(hint['title'] if work['title']==hint['filename'] else work['title'],work['artist'] or hint['artist'],source.get('provider'),number)
         return result
 
+    @staticmethod
+    def _fill_filename_artists(db, rows):
+        updated=0
+        for row in rows:
+            if row['merged_into'] or row['artist'] or row['artist_locked']:continue
+            artist=filename_hints(row['archive_filename'] or row['title'])['artist']
+            if not artist:continue
+            db.execute('UPDATE works SET artist=?,artist_locked=1 WHERE id=?',(artist,row['id']));updated+=1
+        return {'updated':updated,'inspected':len(rows),'skipped':len(rows)-updated}
+
     def apply_filename_artists(self, work_ids):
         if not isinstance(work_ids,list) or not 1<=len(work_ids)<=200 or any(not isinstance(i,str) or not re.fullmatch('[0-9a-f]{32}',i) for i in work_ids):
             raise ValueError('확인한 작품을 최대200개 선택하세요.')
-        updated=0
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            rows=[]
             for work_id in set(work_ids):
                 row=db.execute('SELECT * FROM works WHERE id=?',(work_id,)).fetchone()
                 if not row:raise KeyError('작품을 찾을 수 없습니다.')
-                if row['artist'] or row['artist_locked'] or row['title_locked']:continue
-                artist=filename_hints(row['archive_filename'] or row['title'])['artist']
-                if not artist:continue
-                db.execute('UPDATE works SET artist=?,artist_locked=1 WHERE id=?',(artist,work_id));updated+=1
-        return {'updated':updated}
+                rows.append(row)
+            return self._fill_filename_artists(db,rows)
+
+    def apply_all_filename_artists(self):
+        # One local transaction, independent of page/search and without network I/O.
+        # Fetch only eligible rows; preserve all existing values and explicit blanks.
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows=db.execute("SELECT * FROM works WHERE merged_into IS NULL AND artist='' AND artist_locked=0 LIMIT 10001").fetchall()
+            if len(rows)>10000:raise ValueError('빈 작가가 10000개를 넘습니다. 페이지별로 등록하세요.')
+            return self._fill_filename_artists(db,rows)
 
     def begin_matching(self, work_id):
         self.get_work(work_id)

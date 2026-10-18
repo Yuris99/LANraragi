@@ -65,6 +65,46 @@ class OrganizationStoreTests(unittest.TestCase):
         self.assertEqual({w['artist'] for w in self.store.list_works()['items']},{'Artist A','Existing'})
         self.assertEqual(self.store.apply_filename_artists([w['id'] for w in works])['updated'],0)
 
+    def test_whole_library_fill_crosses_pages_and_preserves_locks_and_aliases(self):
+        self.store.sync_lrr([dict(arcid=f'{i:040x}',filename=f'[Artist {i}] Title.cbz',title=f'Title {i}',tags='') for i in range(30)])
+        works=self.store.list_works(limit=120)['items']
+        self.store.update_work(works[0]['id'],{'artist':'Manual'})
+        self.store.update_work(works[1]['id'],{'artist':''})
+        self.store.update_work(works[2]['id'],{'title':'Locked title'})
+        with self.store.db() as db:
+            db.execute('UPDATE works SET merged_into=? WHERE id=?',(works[0]['id'],works[3]['id']))
+        result=self.store.apply_all_filename_artists()
+        self.assertEqual(result,{'updated':27,'inspected':27,'skipped':0})
+        self.assertEqual(self.store.get_work(works[0]['id'])['artist'],'Manual')
+        self.assertEqual(self.store.get_work(works[1]['id'])['artist'],'')
+        self.assertTrue(self.store.get_work(works[2]['id'])['artist'])
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT artist FROM works WHERE id=?',(works[3]['id'],)).fetchone()[0],'')
+        self.assertEqual(self.store.apply_all_filename_artists()['updated'],0)
+
+    def test_selected_source_fills_empty_artist_atomically_without_losing_source_details(self):
+        work=self.store.create_work('Generated')
+        url='https://nhentai.net/g/123456/'
+        self.store.upsert_source(work['id'],{'url':url,'tags':['language:test'],'comments':[{'id':'c','text':'Generated comment'}]})
+        result=self.store.upsert_source(work['id'],{'url':url,'artist_if_empty':'Candidate Artist'})
+        self.assertEqual(result['artist'],'Candidate Artist')
+        self.assertEqual(result['sources'][0]['tags'],['language:test'])
+        self.assertEqual(result['sources'][0]['comments'][0]['text'],'Generated comment')
+        result=self.store.upsert_source(work['id'],{'url':url,'artist_if_empty':'Different Artist'})
+        self.assertEqual(result['artist'],'Candidate Artist')
+        self.store.update_work(work['id'],{'artist':''})
+        self.assertEqual(self.store.upsert_source(work['id'],{'url':url,'artist_if_empty':'Candidate'})['artist'],'')
+
+    def test_source_conflict_and_invalid_artist_do_not_partially_change_metadata(self):
+        one=self.store.create_work('One');two=self.store.create_work('Two')
+        url='https://nhentai.net/g/123456/'
+        self.store.upsert_source(one['id'],{'url':url})
+        with self.assertRaises(ValueError):self.store.upsert_source(two['id'],{'url':url,'artist_if_empty':'Wrong'})
+        self.assertEqual(self.store.get_work(two['id'])['artist'],'')
+        self.assertEqual(self.store.get_work(two['id'])['sources'],[])
+        with self.assertRaises(ValueError):self.store.upsert_source(two['id'],{'url':'https://nhentai.net/g/654321/','artist_if_empty':['Invalid']})
+        self.assertEqual(self.store.get_work(two['id'])['sources'],[])
+
     def test_matching_cooldown_persists_and_does_not_create_sources(self):
         work=self.store.create_work('Generated')
         self.store.begin_matching(work['id'])

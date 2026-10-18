@@ -537,6 +537,15 @@ $("#organize-artists").onclick = guard(async () => {
     toast(`${result.updated}권의 빈 작가를 저장했습니다. 기존 작가는 유지됩니다.`);
     await renderOrganization(); await load();
 });
+$("#organize-artists-all").onclick = guard(async () => {
+    const button = $("#organize-artists-all");
+    button.disabled = true;
+    try {
+        const result = await api("/api/organization/artists/all", { scope: "library" });
+        toast(`전체 라이브러리에서 ${result.updated}권의 빈 작가를 저장했습니다. 기존 작가는 유지됩니다.`);
+        await renderOrganization(); await load();
+    } finally { button.disabled = false; }
+});
 $("#organize-prev").onclick = guard(async () => { organizePage = Math.max(1, organizePage - 1); await renderOrganization(); });
 $("#organize-next").onclick = guard(async () => { organizePage++; await renderOrganization(); });
 $("#organize-search").onsubmit = guard(async event => { event.preventDefault(); organizeQuery = new FormData(event.target).get("query"); organizePage = 1; await renderOrganization(); });
@@ -567,7 +576,7 @@ $("#organize-items").addEventListener("click", guard(async event => {
         try {
             const value = await api(`/api/works/${check.dataset.matchWork}/matches`, { number });
             organizeCandidates.set(check.dataset.matchWork, value.items);
-            results.innerHTML = value.items.map((item, index) => `<div class="source-row"><h4>${providerName[item.provider]} · ${esc(item.number)}</h4><p>${esc(item.title || ({ not_found: "해당 번호 없음", needs_url: "원본 URL 필요", access_required: "접근 제한·로그인 필요", invalid_response: "응답 검증 실패", unavailable: "연결 확인 필요" })[item.status] || "미확인")}</p><p>${esc(item.artists.join(", "))}</p><p class="muted">${esc(item.message)}</p>${item.status === "found" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">원본 확인 ↗</a> <button class="quiet" data-match-select="${index}">이 출처 연결</button>` : ""}</div>`).join("");
+            results.innerHTML = value.items.map((item, index) => `<div class="source-row"><h4>${providerName[item.provider]} · ${esc(item.number)}</h4><p>${esc(item.title || ({ not_found: "해당 번호 없음", needs_url: "원본 URL 필요", access_required: "접근 제한·로그인 필요", invalid_response: "응답 검증 실패", unavailable: "연결 확인 필요" })[item.status] || "미확인")}</p><p>${esc(item.artists.join(", "))}</p><p class="muted">${esc(item.message)}</p>${item.status === "found" ? `<a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">원본 확인 ↗</a> <button class="quiet" data-match-select="${index}">이 출처 연결${item.artists.length ? "·빈 작가 채우기" : ""}</button>` : ""}</div>`).join("");
         } catch (error) { results.textContent = error.message; } finally { organizeBusy = false; check.disabled = false; }
     }
     if (select) {
@@ -575,8 +584,8 @@ $("#organize-items").addEventListener("click", guard(async event => {
         const item = organizeCandidates.get(id)?.[Number(select.dataset.matchSelect)];
         if (!item || item.status !== "found") return;
         select.disabled = true;
-        await api(`/api/works/${id}/sources`, { url: item.url });
-        toast("선택한 출처를 연결했습니다. 작가는 확인 후 저장하세요.");
+        await api(`/api/works/${id}/sources`, { url: item.url, artist_if_empty: item.artists.join(", ") });
+        toast("선택한 출처를 연결했습니다. 빈 작가는 후보에서 채우고 기존 작가는 유지합니다.");
         await renderOrganization(); await load();
     }
 }));

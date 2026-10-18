@@ -332,6 +332,15 @@ class HTTPTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works/'+work['id']+'/matches',{'number':'123456'})
         self.assertEqual(error.exception.code,400)
 
+    def test_library_artist_fill_requires_explicit_scope_and_admin(self):
+        self.app.store.sync_lrr([dict(arcid='a'*40,filename='[Generated Artist] Title.cbz',title='Title',tags='')])
+        for data in ({},{'scope':'page'},{'scope':'library','extra':True}):
+            with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/organization/artists/all',data)
+            self.assertEqual(error.exception.code,400)
+        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/organization/artists/all',{'scope':'library'},auth=False)
+        self.assertEqual(error.exception.code,401)
+        with self.request('/api/organization/artists/all',{'scope':'library'}) as response:self.assertEqual(json.load(response)['updated'],1)
+
     def test_same_origin_required_for_mutations(self):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works',{'title':'Example'},origin='https://other.invalid')
         self.assertEqual(error.exception.code,403)

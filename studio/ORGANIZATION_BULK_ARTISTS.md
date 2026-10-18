@@ -1,0 +1,11 @@
+# Whole-library artist registration
+
+The organization dialog keeps its per-page fill action and adds **전체 라이브러리의 빈 작가를 파일명에서 채우기**. The latter operates on the entire local catalog, independently of search and pagination. It uses existing filename hints, performs no network requests, and leaves source identities unresolved. Only empty, unlocked artists on canonical works are eligible; existing artists, explicitly cleared artists and retired aliases remain unchanged. A locked title does not prevent filling a separate empty artist.
+
+The authenticated, same-origin POST `/api/organization/artists/all` requires exactly `{"scope":"library"}`. Selection and writes share one SQLite transaction. More than 10000 eligible records rejects the action before any writes; per-page registration remains available. The result reports updated, inspected and skipped eligible records. Unrecognized filename formats are skipped; a filename hint is not verified authorship.
+
+When selecting one of the three displayed source candidates, the button also offers to fill the empty artist from that candidate. The existing source endpoint accepts `artist_if_empty`, a bounded artist string, and saves the source and optional artist in one transaction. Existing/locked artists remain unchanged. A source already assigned to another work rejects both changes; omitted source comments and tags are preserved. This does not download files or automatically link equal numbers across sites. Individual artist correction remains available.
+
+Existing copy retirement is implemented separately in [COPY_CLEANUP_EXECUTION.md](COPY_CLEANUP_EXECUTION.md). Source folders, physical archive names and storage locations are unaffected by these artist actions. Suggested filenames remain previews; physical storage unification has not been implemented. Live-site support and device installation require separate evidence.
+
+Validation: 236 unit/HTTP/deployment tests passed, including cross-page registration, locked empty values, merged aliases, idempotence, source conflicts and administrator/scope validation. Generated-data Chromium validation passed for registration beyond the visible page, preserving a confirmed artist, three independent candidates, explicit selection and desktop/mobile layout. JavaScript syntax and diff checks passed. No private library or live site was used.

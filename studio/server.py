@@ -377,6 +377,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/organization/artists/all':
+            if data!={'scope':'library'}:raise ValueError('전체 라이브러리 범위를 지정하세요.')
+            return self.respond(store.apply_all_filename_artists())
         if path=='/api/organization/artists':
             if set(data)!={'work_ids'}:raise ValueError('작품 선택만 지정하세요.')
             return self.respond(store.apply_filename_artists(data['work_ids']))
