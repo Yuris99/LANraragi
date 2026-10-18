@@ -28,6 +28,14 @@ python archive_in_place.py --root '/승인한/원본루트' --collection manga -
 
 ## 연결 전환은 별도 검증
 
+### NAS 중단 보고와 제한된 재시도
+
+사용자가 실제 NAS에서 연결 overlay 존재, LANraragi UID1026, `local_updates=disabled`를 보고했다. 이전 generation3 `deployment=healthy`는 앱 코드 배포 기록이며 연결 전환 성공을 증명하지 않는다. 원래 실행기는 실패 단계를 기록하지 않았으므로 정확한 과거 실패 원인은 미확인이다. 임시 Compose JSON 파일을 권한 없는 컨테이너에서 bind로 읽던 검사를 NAS-local 표준 입력 파이프로 바꿨다. 자격정보가 포함된 구성은 여전히 클라우드/로그에 출력하지 않는다. 새 실행기는 `connection_phase`와 실패 단계/종료 코드를 표시하고 NAS-local 시도 폴더에 고정 단계 이름만 기록한다.
+
+apply 재시도는 **업데이트가 중지되고, 기존 컨트롤러/설정 해시가 모두 일치하고, root 소유의 정상 JSON overlay가 같은 승인 경로의 정확한 UID0/RO 제안이며, 실제 LANraragi가 기존 UID로 healthy이고 NASOriginals mount가 없고, overlay가 이미 고정 목록에 등록되지 않은 경우에만** 허용한다. 두 배포 잠금을 가진 상태에서 그 미적용 파일을 새 시도 폴더에 보관한 후 고정 제안을 다시 생성한다. 다른 경로/설정, symlink, 등록된 연결, 라이브 mount, 실행 중인 root reader, 활성 업데이트가 있는 경우에는 교체하지 않는다. 새 파일은 명시적으로 mode0600을 적용한다. 성공한 경우에만 추가 overlay 해시를 고정하고 앱 자동 업데이트를 복구한다. 실패하면 계속 중지하고 백업을 보존한다. 일반 설정 변경/권한 확대를 자동 채택하는 복구 경로가 아니다.
+
+검증: 거부 조건5개 단위 테스트 및 `STUDIO_INPLACE_PENDING=1 python -B studio/tests/inplace_connection_smoke.py` 실제 합성 스택 재현 통과. 이 재현은 NAS와 같은 미적용 overlay/중지 상태에서 시작해 미적용 파일 보관, root RO 연결,3페이지/캐시 제외, 다운로드 해시, Studio-only 재생성 뒤 LRR 보존 및 자동 업데이트 상태 복구를 확인했다. NAS 장비에서 새 재시도가 성공했다는 뜻은 아니다. 원본 쓰기와 삭제는 여전히 전체 preflight와 건강한 연결 전환 뒤의 명시적 converter apply에서만 실행한다.
+
 **압축 도구 준비와 LANraragi 경로 연결은 별개다.** 사용자 보고 시점의 NAS LANraragi에는 원본 루트가 연결돼 있지 않았다. GitHub 코드 게시만으로 새 CBZ가 Studio 목록에 자동으로 나타난다고 주장하면 안 된다. 기존 앱 업로드 볼륨의 사본과 DB·태그·읽던 위치도 그대로 둔다. 기존 앱 사본의 경로/ID와 새 CBZ의 연결을 확인하기 전 자동 정리하지 않는다.
 
 최종 배포안은 LANraragi에 승인한 원본 루트를 읽기 전용으로 추가하고, 그 서비스의 실제 실행 UID가 해당 폴더와 CBZ를 읽을 수 있는지 확인해야 한다. 앞선 NAS 진단에서 비루트 읽기는 실패했으므로, Docker mount만으로 읽기 권한 문제까지 해결됐다고 가정하지 않는다. 계정/ACL이나 LANraragi 실행 계정을 임의로 바꾸지 않는다. Compose 변경은 기존 고정 배포 채널의 해시 검증을 멈추므로 새 기준을 조용히 채택해서도 안 된다. 기존 Stash가 작품 폴더를 참조한다면 CBZ 전환 뒤 그 경로는 사라질 수 있으며, Stash 설정/DB는 이 도구가 수정하지 않는다.

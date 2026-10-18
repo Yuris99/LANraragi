@@ -63,14 +63,13 @@ def main():
         (control/'controller.sha256').write_text(''.join(hashlib.sha256((control/n).read_bytes()).hexdigest()+'  '+n+'\n' for n in ['poll.sh','update-studio-ui.sh']))
         (control/'configs.sha256').write_text(''.join(hashlib.sha256((root/n).read_bytes()).hexdigest()+'  '+str(root/n)+'\n' for n in ['compose.nas.yaml','compose.import.yaml','compose.pilot.yaml','.env.nas']))
         (control/'enabled').touch()
-        real_docker=shutil.which('docker')
+        pending=os.environ.get('STUDIO_INPLACE_PENDING')=='1'
+        if pending:
+            (control/'enabled').unlink()
+            (root/'compose.archive.yaml').write_text(json.dumps({'services':{'lanraragi':{'environment':{'LRR_UID':'0','LRR_GID':'0'},'volumes':[{'type':'bind','source':str(original),'target':'/home/koyomi/lanraragi/content/NASOriginals','read_only':True,'bind':{'create_host_path':False}}]}}}))
+            (root/'compose.archive.yaml').chmod(0o600)
         stubs=fixture/'bin';stubs.mkdir()
         (stubs/'id').write_text('#!/bin/sh\n[ "$1" = -u ] && printf "0\\n"\n');(stubs/'id').chmod(0o755)
-        # Host fixture files are owned by the cloud actor rather than NAS root;
-        # run only the config-reading validator as that owner in this rehearsal.
-        wrapper=stubs/'docker'
-        wrapper.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:]\nif any("dst=/review" in p for p in a):\n i=a.index("run")+1;a[i:i]=["--user","'+str(os.getuid())+':'+str(os.getgid())+'"]\nos.execv('+repr(real_docker)+',["docker",*a])\n')
-        wrapper.chmod(0o755)
         env['PATH']=str(stubs)+os.pathsep+env['PATH']
         text=(repo/'studio/deploy/connect-inplace-library.sh').read_text()
         text=text.replace('root=/volume1/docker/library-studio','root='+str(root))
@@ -78,6 +77,8 @@ def main():
         text=text.replace('case "$source" in /volume[0-9]*/*)','case "$source" in '+str(original)+')')
         text=text.replace('number=${source#/volume};number=${number%%/*}','number=1')
         text=text.replace('= 0:700 ]','= '+str(os.getuid())+':700 ]')
+        text=text.replace('= 0:600 ]','= '+str(os.getuid())+':600 ]')
+        text=text.replace('"$(stat -c \'%u\' "$overlay")" = 0','"$(stat -c \'%u\' "$overlay")" = '+str(os.getuid()))
         text=text.replace('sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0',web)
         text=text.replace('sha256:b76c792a43846f0755d0dadf98c8dd46123e8d244045e2f9b6834d9b45988957',lrr)
         # Include only the fixture CA/proxy overlay in this synthetic lifecycle.
@@ -85,6 +86,9 @@ def main():
         helper=root/'connect.sh';helper.write_text(text)
         result=command(['sh',str(helper),'apply',str(original)])
         assert 'connection=healthy' in result.stdout,result.stdout
+        if pending:
+            assert 'pending_overlay=verified_unapplied' in result.stdout
+            assert len(list(root.glob('archive-connection.*/compose.archive.unapplied.yaml')))==1
         assert (control/'enabled').exists()
         assert str(root/'compose.archive.yaml') in (control/'configs.sha256').read_text()
         # Authentication stays in memory. Never print credentials or env/configs.
@@ -114,7 +118,7 @@ def main():
         assert command(docker+['exec',project+'-lanraragi-1','s6-setuidgid','koyomi','id','-u']).stdout.strip()=='0'
         print(json.dumps({'connection':'passed','lrr_uid_gid':'0:0','source':'read_only','source_folder_removed':True,
                           'archive_download_hash':True,'reader_pages':3,'nas_metadata_preserved':True,
-                          'connector_preserved_studio':True,'studio_update_preserved_lrr':True,
+                          'connector_preserved_studio':True,'studio_update_preserved_lrr':True,'pending_recovery':pending,
                           'auto_update_baseline':'extra overlay frozen','nas_changed':False}))
     finally:
         command(base+['stop','studio','lanraragi'],check=False)
