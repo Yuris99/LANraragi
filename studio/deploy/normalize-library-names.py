@@ -138,6 +138,19 @@ def prepare(root,catalog):
     return {'schema':1,'operation_id':uuid.uuid4().hex,'items':candidates,'held':held,'unchanged':unchanged}
 
 
+def prepare_workspace(root,workspace):
+    workspace=Path(workspace);path=workspace/'plan.json'
+    if path.exists():plan=read_json(path)
+    else:
+        plan=prepare(root,read_json(workspace/'catalog.json'));save(path,plan,new=True)
+    request={'operation_id':plan['operation_id'],'items':[{k:i[k] for k in ('lrr_id','sha256','bytes')} for i in plan['items']]}
+    request_path=workspace/'request.json'
+    if request_path.exists():
+        if read_json(request_path)!=request:raise ValueError('request_plan_conflict')
+    else:save(request_path,request,new=True)
+    return plan
+
+
 def rename_noreplace(fd,old,new):
     libc=ctypes.CDLL(None,use_errno=True)
     fn=getattr(libc,'renameat2',None)
@@ -197,8 +210,7 @@ def main():
     args=parser.parse_args();workspace=Path(args.workspace).absolute();root=Path(args.root).absolute()
     if workspace.is_relative_to(root) or root.is_relative_to(workspace):raise ValueError('disjoint_workspace_required')
     if args.operation=='prepare':
-        plan=prepare(root,read_json(workspace/'catalog.json'));save(workspace/'plan.json',plan,new=True)
-        save(workspace/'request.json',{'operation_id':plan['operation_id'],'items':[{k:i[k] for k in ('lrr_id','sha256','bytes')} for i in plan['items']]},new=True)
+        plan=prepare_workspace(root,workspace)
         print(json.dumps({'operation':'prepare','ready':len(plan['items']),'held':plan['held'],'unchanged':plan['unchanged']}))
     else:print(json.dumps(apply(root,read_json(workspace/'plan.json'),read_json(workspace/'proof.json'),workspace/'journal.json',args.operation=='rollback')))
 

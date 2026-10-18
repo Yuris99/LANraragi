@@ -37,6 +37,15 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(module.prepare(self.root,[work])['unchanged'],1)
         self.assertEqual(self.apply(plan,rollback=True)['renamed'],1);self.assertEqual(self.old.stat().st_ino,before.st_ino)
 
+    def test_preparation_recovers_after_plan_publish_and_reuses_same_operation(self):
+        module.save(self.workspace/'catalog.json',[self.work],new=True)
+        first=module.prepare_workspace(self.root,self.workspace)
+        (self.workspace/'request.json').unlink()
+        again=module.prepare_workspace(self.root,self.workspace)
+        self.assertEqual(first,again)
+        self.apply(first)
+        self.assertEqual(module.prepare_workspace(self.root,self.workspace),first)
+
     def test_interrupted_rename_and_interrupted_rollback_resume(self):
         plan=self.plan()
         def crash(stage,item):
