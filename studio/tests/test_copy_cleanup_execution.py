@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import time
+import subprocess
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'deploy'))
@@ -108,6 +109,28 @@ class BackendProofTests(unittest.TestCase):
         self.assertEqual(verify_cleanup_downloads(Backend(),request)['verified']['a'*40],sha)
         request['items'][0]['sha256']='0'*64
         with self.assertRaisesRegex(ValueError,'cleanup_backend_hash_mismatch'):verify_cleanup_downloads(Backend(),request)
+
+
+class NASWrapperTests(unittest.TestCase):
+    def test_preview_and_bad_paths_never_mutate_nas(self):
+        script=Path(__file__).resolve().parents[1]/'deploy/apply-nas-copy-cleanup.sh'
+        result=subprocess.run(['sh',str(script),'preview','/volume1/Example/Books'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Preview only',result.stdout)
+        for path in ['/','/volumeX/Books','/volume1/../Other','/volume1/Books,readonly=false']:
+            self.assertEqual(subprocess.run(['sh',str(script),'apply',path],capture_output=True).returncode,2)
+
+    def test_source_pins_scope_and_fixed_runtime_manifest(self):
+        root=Path(__file__).resolve().parents[1];script=(root/'deploy/apply-nas-copy-cleanup.sh').read_text()
+        manifest=Path(__file__).with_name('fixtures')/'cleanup-execution-runtime.sha256'
+        self.assertIn('manifest_sha='+hashlib.sha256(manifest.read_bytes()).hexdigest(),script)
+        for name in ['execute-copy-cleanup.py','plan-copy-cleanup.py','review-library-storage.py','archive_in_place.py']:
+            self.assertIn(hashlib.sha256((root/'deploy'/name).read_bytes()).hexdigest()+'  deploy/'+name,script)
+        self.assertIn('dst=/nas-library,readonly',script)
+        self.assertIn('--network none --read-only',script)
+        self.assertIn('stop --time 30 library-studio-nas-pilot-studio-1',script)
+        self.assertNotIn('stop --time 30 library-studio-nas-pilot-lanraragi-1',script)
+        self.assertNotIn('SOURCE_REVISION',script)
 
 
 if __name__=='__main__':unittest.main()

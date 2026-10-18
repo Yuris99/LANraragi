@@ -19,7 +19,7 @@ printf 'Only a new private local report; no media/DB deletion, rename, service r
 [ -d "$source" ] && [ ! -L "$source" ] && [ "$(readlink -f "$source")" = "$source" ] || exit 1
 root=/volume1/docker/library-studio
 [ -d "$root" ] && [ ! -L "$root" ] && [ "$(readlink -f "$root")" = "$root" ] || exit 1
-revision=70885d7f338bd28ee29cded57a4ff38521ef9e0f
+revision=90bf17a6acb3f328b7dbdce5c27a286a73d93e79
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
 docker_local() { (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH;docker --host=unix:///var/run/docker.sock "$@"); }
 identity=$(docker_local inspect --type container --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Image}}' library-studio-nas-pilot-studio-1)

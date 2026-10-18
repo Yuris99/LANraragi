@@ -21,3 +21,5 @@ A durable SQLite retirement entry is committed before unlink. Interruption after
 ## Validation boundaries
 
 Unit tests use disposable generated archives and databases and execute real unlink, verify unchanged original bytes and byte-identical backups, preserve comments/favorites/tags/old IDs, prevent stale-index resurrection, resume both interruption points and reject missing proof, changed files or conflicting edits. The independent real Docker/LRR/Studio/Chromium rehearsal verifies full backend downloads, actual copy removal, source bytes, old-bookmark reader page and file download, with LRR identity/start time unchanged. NAS execution remains operator-local and must be reported separately from synthetic validation. This does not rename original folders or complete live-site source matching.
+
+Final validation:232unit/HTTP/deployment tests passed, including the fixed wrapper preview/path/pin checks. The real generated-data LRR/Studio/Chromium run passed with Studio stopped for mutation and restarted, full backend hashes, actual unlink, original bytes and old-reader/download continuity preserved. This is not actual NAS execution evidence.
