@@ -1,6 +1,6 @@
 """NAS-local conversion: sibling CBZ, full verification, then explicit source removal.
 
-Standalone standard-library tool. No database, network, recursive deletion, or
+Standalone standard-library tool. No database writes, network, recursive deletion, or
 automatic execution through the Studio deployment channel. Plan is the default.
 Run with other source writers paused; advisory locks cannot stop unrelated apps.
 """
@@ -19,6 +19,7 @@ import zipfile
 
 IMAGES = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif', '.jxl'}
 SYSTEM = {'@eaDir', '@tmp', '#recycle'}
+METADATA_BUNDLE = '__studio_nas_metadata__.zip'
 FLAGS = os.O_RDONLY | os.O_NOFOLLOW
 
 
@@ -54,13 +55,13 @@ def child_directory(fd, relative):
         os.close(child)
 
 
-def inventory(fd, stable_seconds=30, max_entries=20000):
+def inventory(fd, stable_seconds=30, max_entries=20000, preserve_system=False):
     entries = {}
     def walk(current, prefix='', depth=0):
         if depth > 16:
             raise ValueError('directory_depth_limit')
         for name in sorted(os.listdir(current)):
-            if name in SYSTEM:
+            if name in SYSTEM and not preserve_system:
                 raise ValueError('nas_system_directory_requires_review')
             if '\\' in name or any(ord(c) < 32 for c in name):
                 raise ValueError('unsafe_archive_name')
@@ -79,7 +80,10 @@ def inventory(fd, stable_seconds=30, max_entries=20000):
             else:
                 raise ValueError('link_or_special_file_requires_review')
     walk(fd)
-    if not any(Path(name).suffix.lower() in IMAGES for name in entries if not name.endswith('/')):
+    if METADATA_BUNDLE in entries:
+        raise ValueError('reserved_metadata_bundle_name')
+    if not any(Path(name).suffix.lower() in IMAGES for name in entries
+               if not name.endswith('/') and not is_metadata(name)):
         raise ValueError('no_images')
     return entries
 
@@ -105,25 +109,64 @@ def digest(stream, output=None):
     return result.hexdigest()
 
 
+def is_metadata(name):
+    return any(part in SYSTEM for part in Path(name).parts)
+
+
+def partition(entries):
+    return ({n: s for n, s in entries.items() if not is_metadata(n)},
+            {n: s for n, s in entries.items() if is_metadata(n)})
+
+
+def write_entries(fd, archive, entries):
+    for name, info in entries.items():
+        if name.endswith('/'):
+            archive.writestr(name, b'')
+        else:
+            with source_file(fd, name, info) as original, archive.open(name, 'w', force_zip64=True) as saved:
+                digest(original, saved)
+
+
+def verify_entries(fd, archive, expected):
+    names = archive.namelist()
+    if len(names) != len(set(names)) or set(names) != set(expected):
+        raise ValueError('archive_file_list_mismatch')
+    for name, info in expected.items():
+        if name.endswith('/'):
+            if not archive.getinfo(name).is_dir():
+                raise ValueError('archive_directory_mismatch')
+            continue
+        if archive.getinfo(name).file_size != info[3]:
+            raise ValueError('archive_size_mismatch')
+        with source_file(fd, name, info) as source, archive.open(name) as saved:
+            if digest(source) != digest(saved):
+                raise ValueError('archive_content_mismatch')
+
 def verify(fd, archive_file, expected):
-    """Read ALL archive and source bytes independently; CRC alone is insufficient."""
+    """Read ALL archive and source bytes independently, including NAS metadata."""
+    ordinary, metadata = partition(expected)
     with zipfile.ZipFile(archive_file) as archive:
-        names = archive.namelist()
-        if len(names) != len(set(names)) or set(names) != set(expected):
-            raise ValueError('archive_file_list_mismatch')
-        for name, info in expected.items():
-            if name.endswith('/'):
-                if not archive.getinfo(name).is_dir():
-                    raise ValueError('archive_directory_mismatch')
-                continue
-            if archive.getinfo(name).file_size != info[3]:
-                raise ValueError('archive_size_mismatch')
-            with source_file(fd, name, info) as source, archive.open(name) as saved:
-                if digest(source) != digest(saved):
-                    raise ValueError('archive_content_mismatch')
+        if metadata:
+            names = archive.namelist()
+            if len(names) != len(set(names)) or set(names) != set(ordinary) | {METADATA_BUNDLE}:
+                raise ValueError('archive_file_list_mismatch')
+            # Metadata is an opaque nested ZIP, so NAS thumbnail images are not
+            # exposed as reader pages. Names and bytes inside are preserved.
+            with archive.open(METADATA_BUNDLE) as stream, zipfile.ZipFile(stream) as saved:
+                verify_entries(fd, saved, metadata)
+            # Verify ordinary entries without treating the bundle as a source.
+            for name, info in ordinary.items():
+                if name.endswith('/'):
+                    if not archive.getinfo(name).is_dir(): raise ValueError('archive_directory_mismatch')
+                else:
+                    if archive.getinfo(name).file_size != info[3]: raise ValueError('archive_size_mismatch')
+                    with source_file(fd, name, info) as original, archive.open(name) as saved:
+                        if digest(original) != digest(saved): raise ValueError('archive_content_mismatch')
+        else:
+            verify_entries(fd, archive, ordinary)
 
 
-def convert(book, *, apply=False, delete_source=False, stable_seconds=30):
+def convert(book, *, apply=False, delete_source=False, stable_seconds=30, preserve_system=False):
     """One book only. Existing CBZs are NEVER overwritten or trusted for deletion."""
     book = Path(book).absolute()
     if book.name in SYSTEM or book.name.startswith('.') or book == book.parent:
@@ -136,14 +179,14 @@ def convert(book, *, apply=False, delete_source=False, stable_seconds=30):
             identity = os.fstat(source)
             if time.time() - identity.st_mtime < stable_seconds:
                 raise ValueError('source_not_stable')
-            before = inventory(source, stable_seconds)
+            before = inventory(source, stable_seconds, preserve_system=preserve_system)
+            ordinary, metadata = partition(before)
             total = sum(value[3] for name, value in before.items() if not name.endswith('/'))
             if total > 2 * 1024**3:
                 raise ValueError('book_limit_2GiB')
             result = {'operation': 'apply' if apply else 'plan', 'files': sum(not n.endswith('/') for n in before),
-                      'bytes': total, 'verified': False, 'source_removed': False}
-            if not apply:
-                return result
+                      'bytes': total, 'verified': False, 'source_removed': False,
+                      'metadata_files': sum(not n.endswith('/') for n in metadata)}
             target = book.name + '.cbz'
             try:
                 os.stat(target, dir_fd=parent, follow_symlinks=False)
@@ -151,25 +194,37 @@ def convert(book, *, apply=False, delete_source=False, stable_seconds=30):
                 pass
             else:
                 raise ValueError('existing_cbz_preserved')
+            if not apply:
+                return result
             free = os.fstatvfs(parent)
-            if free.f_bavail * free.f_frsize < total + len(before) * 1024 + 64 * 1024**2:
+            metadata_size = sum(s[3] for n, s in metadata.items() if not n.endswith('/'))
+            if free.f_bavail * free.f_frsize < total + metadata_size + len(before) * 2048 + 64 * 1024**2:
                 raise ValueError('insufficient_free_space')
             temporary = '.studio-compress-' + uuid.uuid4().hex + '.part'
             handle = os.open(temporary, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
             # A failed/interrupted .part remains unindexed for local inspection.
             with os.fdopen(handle, 'w+b') as output:
+                metadata_temp = None
+                if metadata:
+                    metadata_temp = '.studio-nasmeta-' + uuid.uuid4().hex + '.part'
+                    meta_handle = os.open(metadata_temp, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                    with os.fdopen(meta_handle, 'w+b') as saved:
+                        with zipfile.ZipFile(saved, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                            write_entries(source, archive, metadata)
+                        saved.flush()
+                        os.fsync(saved.fileno())
                 with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
-                    for name, info in before.items():
-                        if name.endswith('/'):
-                            archive.writestr(name, b'')
-                        else:
-                            with source_file(source, name, info) as original, archive.open(name, 'w', force_zip64=True) as saved:
-                                digest(original, saved)
+                    write_entries(source, archive, ordinary)
+                    if metadata_temp:
+                        with os.fdopen(os.open(metadata_temp, FLAGS, dir_fd=parent), 'rb') as saved, archive.open(METADATA_BUNDLE, 'w', force_zip64=True) as bundled:
+                            digest(saved, bundled)
                 output.flush()
                 os.fsync(output.fileno())
+                if metadata_temp:
+                    os.unlink(metadata_temp, dir_fd=parent)
                 output.seek(0)
                 verify(source, output, before)
-                if inventory(source, 0) != before:
+                if inventory(source, 0, preserve_system=preserve_system) != before:
                     raise ValueError('source_changed')
                 if os.geteuid() == 0:
                     os.fchown(output.fileno(), identity.st_uid, identity.st_gid)
@@ -189,7 +244,7 @@ def convert(book, *, apply=False, delete_source=False, stable_seconds=30):
                     if os.fstat(saved.fileno()).st_ino != os.fstat(output.fileno()).st_ino:
                         raise ValueError('published_archive_changed')
                     verify(source, saved, before)
-                if inventory(source, 0) != before or os.stat(book.name, dir_fd=parent, follow_symlinks=False).st_ino != identity.st_ino:
+                if inventory(source, 0, preserve_system=preserve_system) != before or os.stat(book.name, dir_fd=parent, follow_symlinks=False).st_ino != identity.st_ino:
                     raise ValueError('source_changed_before_removal')
                 # No rmtree: remove only enumerated, individually unchanged files.
                 # A crash leaves a valid durable CBZ and possibly a partial folder;
@@ -267,22 +322,25 @@ def import_lock(database):
         os.close(handle)
 
 
-def batch(root, collections, *, apply=False, delete_source=False, stable_seconds=30):
+def batch(root, collections, *, apply=False, delete_source=False, stable_seconds=30, preserve_system=False, progress=None):
     summary = {'operation': 'apply' if apply else 'plan', 'candidates': 0, 'verified': 0,
-               'source_removed': 0, 'bytes': 0, 'errors': 0, 'error_codes': {}}
+               'source_removed': 0, 'bytes': 0, 'metadata_files': 0, 'errors': 0, 'error_codes': {}}
     # Complete bounded discovery BEFORE any deletion changes directory iteration.
     books = list(discover(root, collections))
     for book in books:
         summary['candidates'] += 1
         try:
-            result = convert(book, apply=apply, delete_source=delete_source, stable_seconds=stable_seconds)
+            result = convert(book, apply=apply, delete_source=delete_source, stable_seconds=stable_seconds, preserve_system=preserve_system)
             summary['verified'] += int(result['verified'])
             summary['source_removed'] += int(result['source_removed'])
             summary['bytes'] += result['bytes']
+            summary['metadata_files'] += result['metadata_files']
+            if progress: progress(dict(summary))
         except (OSError, ValueError, zipfile.BadZipFile) as error:
             code = os.strerror(error.errno) if isinstance(error, OSError) and error.errno else str(error) if isinstance(error, ValueError) else 'archive_verification_failed'
             summary['errors'] += 1
             summary['error_codes'][code] = summary['error_codes'].get(code, 0) + 1
+            if progress: progress(dict(summary))
             # On any apply failure stop: no unattended continuation after a fault.
             if apply:
                 break
@@ -297,6 +355,8 @@ def main():
     parser.add_argument('--database', help='existing Studio DB; required to serialize a batch apply')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--delete-source', action='store_true', help='remove only after full published-CBZ verification')
+    parser.add_argument('--preserve-nas-metadata', action='store_true', help='preserve NAS system trees in a verified nested ZIP, not reader pages')
+    parser.add_argument('--progress', action='store_true', help='print counts after each book, never personal filenames')
     args = parser.parse_args()
     if args.delete_source and not args.apply:
         parser.error('--delete-source requires --apply')
@@ -308,9 +368,10 @@ def main():
         lock = import_lock(args.database) if args.apply and args.database else contextlib.nullcontext()
         with lock:
             if args.root:
-                result = batch(args.root, args.collection or ['manga'], apply=args.apply, delete_source=args.delete_source)
+                result = batch(args.root, args.collection or ['manga'], apply=args.apply, delete_source=args.delete_source, preserve_system=args.preserve_nas_metadata,
+                               progress=(lambda value: print(json.dumps(value), flush=True)) if args.progress else None)
             else:
-                result = convert(args.book, apply=args.apply, delete_source=args.delete_source)
+                result = convert(args.book, apply=args.apply, delete_source=args.delete_source, preserve_system=args.preserve_nas_metadata)
         print(json.dumps(result))
         if result.get('errors'):
             raise SystemExit(1)

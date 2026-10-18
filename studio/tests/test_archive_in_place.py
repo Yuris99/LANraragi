@@ -1,5 +1,6 @@
 """Destructive conversion checks use temporary generated files ONLY."""
 import os
+import io
 from pathlib import Path
 import sys
 import sqlite3
@@ -62,6 +63,8 @@ class InPlaceTests(unittest.TestCase):
 
     def test_existing_cbz_never_overwritten_or_used_to_delete(self):
         target = Path(str(self.book) + '.cbz'); target.write_bytes(b'existing')
+        with self.assertRaisesRegex(ValueError, 'existing_cbz'):
+            self.convert()
         with self.assertRaisesRegex(ValueError, 'existing_cbz'):
             self.convert(apply=True, delete_source=True)
         self.assertEqual(target.read_bytes(), b'existing'); self.assertTrue(self.book.is_dir())
@@ -193,6 +196,47 @@ class InPlaceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'insufficient_free_space'):
                 self.convert(apply=True, delete_source=True)
         self.assertTrue(self.book.is_dir()); self.assertFalse(Path(str(self.book) + '.cbz').exists())
+
+    def test_nas_metadata_preserved_byte_for_byte_without_extra_reader_pages(self):
+        metadata = self.book / '@eaDir' / '1.png'; metadata.mkdir(parents=True)
+        (metadata / 'SYNOPHOTO_THUMB_M.jpg').write_bytes(b'generated NAS thumbnail bytes')
+        (self.book / '@tmp').mkdir(); (self.book / '#recycle').mkdir()
+        (self.book / '#recycle' / 'notes.txt').write_bytes(b'preserved even here')
+        result = self.convert(apply=True, delete_source=True, preserve_system=True)
+        self.assertTrue(result['source_removed']); self.assertEqual(result['metadata_files'], 2)
+        with zipfile.ZipFile(str(self.book) + '.cbz') as archive:
+            self.assertEqual(set(archive.namelist()), set(self.original) | {tool.METADATA_BUNDLE})
+            with zipfile.ZipFile(io.BytesIO(archive.read(tool.METADATA_BUNDLE))) as saved:
+                self.assertEqual(saved.read('@eaDir/1.png/SYNOPHOTO_THUMB_M.jpg'), b'generated NAS thumbnail bytes')
+                self.assertEqual(saved.read('#recycle/notes.txt'), b'preserved even here')
+                self.assertIn('@tmp/', saved.namelist())
+            for name, content in self.original.items(): self.assertEqual(archive.read(name), content)
+
+    def test_bad_metadata_hash_rejected_even_when_pages_match(self):
+        (self.book / '@eaDir').mkdir(); (self.book / '@eaDir' / 'thumb.jpg').write_bytes(b'original')
+        wrong = self.root / 'wrong.cbz'; nested = io.BytesIO()
+        with zipfile.ZipFile(nested, 'w') as saved:
+            saved.writestr('@eaDir/', b''); saved.writestr('@eaDir/thumb.jpg', b'wrong!!!')
+        with zipfile.ZipFile(wrong, 'w') as saved:
+            for name, value in self.original.items(): saved.writestr(name, value)
+            saved.writestr(tool.METADATA_BUNDLE, nested.getvalue())
+        with tool.directory(self.book) as fd:
+            expected = tool.inventory(fd, 0, preserve_system=True)
+            with self.assertRaisesRegex(ValueError, 'content_mismatch'):
+                tool.verify(fd, wrong, expected)
+        self.assertTrue(self.book.is_dir())
+
+    def test_metadata_symlink_is_never_followed_even_when_preserving(self):
+        (self.book / '@eaDir').mkdir(); (self.book / '@eaDir' / 'alias').symlink_to(self.root)
+        with self.assertRaisesRegex(ValueError, 'link_or_special'):
+            self.convert(apply=True, delete_source=True, preserve_system=True)
+        self.assertTrue(self.book.is_dir())
+
+    def test_reserved_bundle_filename_collision_preserves_source(self):
+        (self.book / tool.METADATA_BUNDLE).write_bytes(b'existing unrelated file')
+        with self.assertRaisesRegex(ValueError, 'reserved_metadata'):
+            self.convert(apply=True, delete_source=True, preserve_system=True)
+        self.assertTrue(self.book.is_dir())
 
 
 if __name__ == '__main__': unittest.main()
