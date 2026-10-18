@@ -42,6 +42,25 @@ class LRR:
         return value
 
 
+def verify_cleanup_downloads(lrr, request):
+    """NAS-local caller only. Verify full backend bytes without exposing credentials."""
+    if not isinstance(request,dict) or not isinstance(request.get('items'),list) or len(request['items'])>100:raise ValueError('cleanup_proof_format')
+    result={'operation_id':request['operation_id'],'created':time.time(),'verified':{}}
+    for item in request['items']:
+        arcid=item['lrr_id'];size=item['bytes'];expected=item['sha256']
+        if not re.fullmatch('[0-9a-f]{40}',arcid) or not re.fullmatch('[0-9a-f]{64}',expected) or type(size) is not int or not 0<size<=2*1024**3:raise ValueError('cleanup_proof_format')
+        digest=hashlib.sha256();received=0
+        with lrr.open('/api/archives/'+arcid+'/download') as response:
+            while block:=response.read(256*1024):
+                received+=len(block)
+                if received>size:raise ValueError('cleanup_backend_hash_mismatch')
+                digest.update(block)
+        if received!=size or digest.hexdigest()!=expected:raise ValueError('cleanup_backend_hash_mismatch')
+        if arcid in result['verified'] and result['verified'][arcid]!=expected:raise ValueError('cleanup_backend_identity_conflict')
+        result['verified'][arcid]=expected
+    return result
+
+
 class Studio:
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
@@ -238,8 +257,8 @@ class Handler(BaseHTTPRequestHandler):
                 has_folders=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_imports'").fetchone()
                 folders=db.execute('SELECT count(*) FROM folder_imports').fetchone()[0] if has_folders else 0
                 pending=db.execute("SELECT count(*) FROM uploads WHERE lrr_id IS NULL AND state='stored'").fetchone()[0]
-                counts=db.execute("SELECT count(*),count(lrr_id) FROM works").fetchone()
-                uploaded=db.execute("SELECT count(*) FROM works w WHERE w.lrr_id IN (SELECT lrr_id FROM uploads WHERE lrr_id IS NOT NULL)").fetchone()[0]
+                counts=db.execute("SELECT count(*),count(lrr_id) FROM works WHERE merged_into IS NULL").fetchone()
+                uploaded=db.execute("SELECT count(*) FROM works w WHERE w.merged_into IS NULL AND w.lrr_id IN (SELECT lrr_id FROM uploads WHERE lrr_id IS NOT NULL)").fetchone()[0]
             return self.respond({'folder_archives':folders,'pending_archives':pending,
                 'catalog_works':counts[0],'indexed_archives':counts[1],
                 'uploaded_archives':uploaded,'metadata_only':counts[0]-counts[1],

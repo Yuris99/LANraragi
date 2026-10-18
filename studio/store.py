@@ -70,9 +70,16 @@ class Store:
                 WHERE state IN ('queued','running');
             ''')
 
+            db.executescript('''
+              CREATE TABLE IF NOT EXISTS copy_retirements (
+                sha256 TEXT PRIMARY KEY,copy_lrr_id TEXT NOT NULL UNIQUE,
+                old_work_id TEXT NOT NULL REFERENCES works(id),work_id TEXT NOT NULL REFERENCES works(id),
+                state TEXT NOT NULL,details TEXT NOT NULL,created REAL NOT NULL);
+            ''')
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
+            if 'merged_into' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN merged_into TEXT REFERENCES works(id)")
             if 'archive_filename' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN archive_filename TEXT NOT NULL DEFAULT ''")
             if 'artist_locked' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN artist_locked INTEGER NOT NULL DEFAULT 0")
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
@@ -135,6 +142,12 @@ class Store:
 
     def get_work(self, work_id):
         with self.db() as db:
+            seen=set()
+            while True:
+                alias=db.execute('SELECT merged_into FROM works WHERE id=?',(work_id,)).fetchone()
+                if not alias or not alias['merged_into']:break
+                if work_id in seen or len(seen)>8:raise ValueError('작품 연결 순환을 확인하세요.')
+                seen.add(work_id);work_id=alias['merged_into']
             row = db.execute('SELECT works.*,n.number AS local_number FROM works JOIN work_numbers n ON n.work_id=works.id WHERE works.id=?', (work_id,)).fetchone()
             if not row:
                 raise KeyError('작품을 찾을 수 없습니다.')
@@ -154,7 +167,7 @@ class Store:
                  'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()'}
         if sort not in order or not 1 <= limit <= 120 or not 1 <= page <= 100000:
             raise ValueError('정렬 또는 페이지 범위가 올바르지 않습니다.')
-        where, args = [], []
+        where, args = ['works.merged_into IS NULL'], []
         if query:
             # Parameters preserve SQL safety; LIKE wildcards are treated literally.
             term = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
@@ -226,7 +239,7 @@ class Store:
         if not isinstance(query,str) or len(query)>120:raise ValueError('검색어가 너무 깁니다.')
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
-            rows=db.execute("SELECT tag,count(*) AS count FROM user_tags WHERE tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
+            rows=db.execute("SELECT u.tag,count(*) AS count FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL AND u.tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
         return [dict(row) for row in rows]
 
     def library_tags(self,query=''):
@@ -234,8 +247,8 @@ class Store:
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
             rows=db.execute('''SELECT tag,count(*) AS count FROM (
-                SELECT work_id,tag FROM user_tags UNION
-                SELECT w.id,t.value FROM works w,json_each(w.tags) t UNION
+                SELECT u.work_id,u.tag FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL UNION
+                SELECT w.id,t.value FROM works w,json_each(w.tags) t WHERE w.merged_into IS NULL UNION
                 SELECT s.work_id,t.value FROM sources s,json_each(s.tags) t)
                 WHERE tag LIKE ? ESCAPE ? GROUP BY tag ORDER BY count DESC,tag LIMIT 100''',(term,'\\')).fetchall()
         return [dict(row) for row in rows]
@@ -281,7 +294,7 @@ class Store:
         return self.get_work(work_id)
 
     def update_work(self, work_id, data):
-        self.get_work(work_id)
+        work_id=self.get_work(work_id)['id']
         allowed = {'title','artist','rating','favorite','title_locked','tags'}
         if set(data)-allowed:
             raise ValueError('수정할 수 없는 필드입니다.')
@@ -307,7 +320,7 @@ class Store:
         return self.get_work(work_id)
 
     def upsert_source(self, work_id, data):
-        self.get_work(work_id)
+        work_id=self.get_work(work_id)['id']
         identity = parse_source(data.get('url'))
         tags = tags_list(data.get('tags',[]))
         comments = comments_list(data.get('comments',[]))
@@ -334,6 +347,7 @@ class Store:
         return self.get_work(work_id)
 
     def begin_comment_fetch(self, work_id, source_id):
+        work_id=self.get_work(work_id)['id']
         now=time.time()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -344,6 +358,7 @@ class Store:
             db.execute('UPDATE sources SET comments_attempted=? WHERE id=?',(now,source_id))
 
     def apply_comments(self, work_id, source_id, result):
+        work_id=self.get_work(work_id)['id']
         if result['status']=='unsupported':return
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -363,6 +378,8 @@ class Store:
             lrr_id = item.get('arcid','')
             if not re.fullmatch('[0-9a-f]{40}',lrr_id):
                 continue
+            with self.db() as db:
+                if db.execute('SELECT 1 FROM copy_retirements WHERE copy_lrr_id=?',(lrr_id,)).fetchone():continue
             stored_stem=Path(item.get('filename','')).stem
             with self.db() as db:
                 upload=db.execute('SELECT * FROM uploads WHERE sha256=?',(stored_stem,)).fetchone()
@@ -401,6 +418,41 @@ class Store:
             count += 1
         return count
 
+    @staticmethod
+    def consolidate_copy(db, old_id, survivor_id, sha, copy_lrr_id, details):
+        """Called only by NAS-local executor after full file/backend verification."""
+        previous=db.execute('SELECT * FROM copy_retirements WHERE sha256=?',(sha,)).fetchone()
+        if previous:
+            if previous['old_work_id']!=old_id or previous['work_id']!=survivor_id:raise ValueError('retirement_identity_conflict')
+            return False
+        old=db.execute('SELECT * FROM works WHERE id=?',(old_id,)).fetchone()
+        target=db.execute('SELECT * FROM works WHERE id=?',(survivor_id,)).fetchone()
+        if not old or not target or old_id==survivor_id or old['merged_into'] or target['merged_into'] or old['lrr_id']!=copy_lrr_id:raise ValueError('retirement_work_conflict')
+        if db.execute("SELECT 1 FROM jobs WHERE work_id IN (?,?) AND state IN ('queued','running')",(old_id,survivor_id)).fetchone():raise ValueError('active_download_job')
+        for field,lock in [('title','title_locked'),('artist','artist_locked')]:
+            if old[lock] and target[lock] and old[field]!=target[field]:raise ValueError('manual_metadata_conflict')
+        # Keep the untouched old work row as an archive of scalar preferences.
+        tags=list(dict.fromkeys(json.loads(old['tags'])+json.loads(target['tags'])))
+        user_values={r[0] for r in db.execute('SELECT tag FROM user_tags WHERE work_id IN (?,?)',(old_id,survivor_id))}
+        if len(user_values|set(tags))>100:raise ValueError('merged_user_tag_limit')
+        db.executemany('INSERT OR IGNORE INTO user_tags(work_id,tag) VALUES(?,?)',[(survivor_id,t) for t in tags])
+        db.execute('INSERT OR IGNORE INTO user_tags SELECT ?,tag FROM user_tags WHERE work_id=?',(survivor_id,old_id))
+        db.execute('UPDATE sources SET work_id=? WHERE work_id=?',(survivor_id,old_id))
+        pages=int(details['pages'])
+        if pages<1 or max(old['progress'],target['progress'])>pages:raise ValueError('progress_page_mismatch')
+        details={**details,'old_work_before':dict(old),'survivor_before':dict(target)}
+        values={'pages':pages,'favorite':max(old['favorite'],target['favorite']),'rating':max(old['rating'],target['rating']),
+                'progress':max(old['progress'],target['progress']),'last_read':max(old['last_read'] or 0,target['last_read'] or 0) or None,
+                'tags':json.dumps(tags,ensure_ascii=False)}
+        for field,lock in [('title','title_locked'),('artist','artist_locked')]:
+            if old[lock] or not target[field]:values[field]=old[field];values[lock]=max(old[lock],target[lock])
+        db.execute('UPDATE works SET '+','.join(k+'=?' for k in values)+' WHERE id=?',[*values.values(),survivor_id])
+        db.execute('UPDATE works SET merged_into=?,lrr_id=NULL WHERE id=?',(survivor_id,old_id))
+        db.execute("UPDATE uploads SET state='retired',lrr_id=NULL WHERE sha256=?",(sha,))
+        db.execute('INSERT INTO copy_retirements VALUES(?,?,?,?,?,?,?)',
+            (sha,copy_lrr_id,old_id,survivor_id,'merged',json.dumps(details,ensure_ascii=False),time.time()))
+        return True
+
     def organization_preview(self, query='', page=1):
         result=self.list_works(query=query,page=page,limit=24,sort='title',descending=False)
         for work in result['items']:
@@ -437,6 +489,7 @@ class Store:
 
     def progress(self, work_id, page):
         work = self.get_work(work_id)
+        work_id=work['id']
         if type(page) is not int or page<1 or page>work['pages']:
             raise ValueError('페이지 범위가 올바르지 않습니다.')
         with self.db() as db:
@@ -581,7 +634,7 @@ class Store:
 
     def export(self):
         with self.db() as db:
-            ids=[x[0] for x in db.execute('SELECT id FROM works ORDER BY added')]
+            ids=[x[0] for x in db.execute('SELECT id FROM works WHERE merged_into IS NULL ORDER BY added')]
         return {'schema_version':1,'exported_at':time.time(),'works':[self.get_work(i) for i in ids]}
 
     @staticmethod

@@ -203,7 +203,7 @@ def build_plan(report,database,library,copies):
                     old=db.execute('SELECT * FROM works WHERE lrr_id=?',(copy_id,)).fetchone()
                     upload=db.execute('SELECT * FROM uploads WHERE sha256=?',(copy_info['archive_sha256'],)).fetchone()
                     if not original:target['holds'].append('survivor_not_in_catalog')
-                    elif 'archive_filename' not in original.keys() or original['archive_filename']!=source.name:target['holds'].append('survivor_filename_not_confirmed_sync_first')
+                    elif 'archive_filename' not in original.keys() or original['archive_filename'] not in {source.name,source.stem}:target['holds'].append('survivor_filename_not_confirmed_sync_first')
                     if not old:target['holds'].append('copy_not_in_catalog')
                     if not upload or upload['stored_name']!=copy or upload['lrr_id']!=copy_id:target['holds'].append('copy_upload_record_not_confirmed')
                     phase('read_preservation_records')

@@ -128,7 +128,7 @@ class Uploads:
 
     def list(self):
         with self.store.db() as db:
-            return [dict(row) for row in db.execute('SELECT u.*,w.id AS work_id FROM uploads u LEFT JOIN works w ON w.lrr_id=u.lrr_id ORDER BY u.created DESC LIMIT 100')]
+            return [dict(row) for row in db.execute("SELECT u.*,w.id AS work_id FROM uploads u LEFT JOIN works w ON w.lrr_id=u.lrr_id WHERE u.state!='retired' ORDER BY u.created DESC LIMIT 100")]
 
     def pending(self,after=''):
         with self.store.db() as db:
