@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 class InPlaceLauncherTests(unittest.TestCase):
-    def run_case(self, plan_status=0, corrupt=False):
+    def run_case(self, plan_status=0, corrupt=False, force_apply=False):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);source=root/'source';source.mkdir()
             original=source/'keep.bin';original.write_bytes(b'generated sentinel')
@@ -23,10 +23,11 @@ class InPlaceLauncherTests(unittest.TestCase):
             (stubs/'id').write_text('#!/bin/sh\nprintf "0\\n"\n')
             (stubs/'curl').write_text('#!/usr/bin/env python3\nimport os,pathlib,sys\na=sys.argv[1:];target=pathlib.Path(a[a.index("-o")+1]);name=pathlib.Path(a[a.index("-o")-1]).name\ndata=(pathlib.Path(os.environ["TEST_DEPLOY"])/name).read_bytes()\nif os.environ["TEST_CORRUPT"]=="1":data+=b"wrong"\ntarget.write_bytes(data)\n')
             (stubs/'docker').write_text('#!/usr/bin/env python3\nimport json,os,pathlib,sys\na=sys.argv[1:];p=pathlib.Path(os.environ["TEST_LOG"]);p.write_text(p.read_text()+json.dumps(a)+"\\n")\nif "inspect" in a:print("library-studio-nas-pilot|studio|sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0|healthy")\nelse:\n print(json.dumps({"operation":"plan","errors":int(os.environ["TEST_STATUS"])}));sys.exit(int(os.environ["TEST_STATUS"]))\n')
+            if force_apply:(stubs/'sh').write_text('#!/bin/sh\nprintf "connector_entered\\n"\nexit 77\n')
             for p in stubs.iterdir():p.chmod(0o755)
             log=root/'calls';log.write_text('')
             env=dict(os.environ,PATH=str(stubs)+os.pathsep+os.environ['PATH'],TEST_DEPLOY=str(deploy),TEST_LOG=str(log),TEST_CORRUPT=str(int(corrupt)),TEST_STATUS=str(plan_status))
-            result=subprocess.run(['sh',str(wrapper),'apply' if plan_status or corrupt else 'plan',str(source)],env=env,text=True,capture_output=True)
+            result=subprocess.run(['/bin/sh',str(wrapper),'apply' if plan_status or corrupt or force_apply else 'plan',str(source)],env=env,text=True,capture_output=True)
             self.assertEqual(original.read_bytes(),b'generated sentinel')
             self.assertEqual(list(source.iterdir()),[original])
             return result,log.read_text()
@@ -48,6 +49,14 @@ class InPlaceLauncherTests(unittest.TestCase):
         result,log=self.run_case()
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('Plan only',result.stdout)
+        self.assertEqual(log.count('"run"'),1)
+        self.assertNotIn('--delete-source',log)
+
+    def test_successful_preflight_enters_connection_and_reports_its_failure(self):
+        result,log=self.run_case(force_apply=True)
+        self.assertEqual(result.returncode,77,result.stderr)
+        self.assertIn('connector_entered',result.stdout)
+        self.assertIn('phase=connect',result.stderr)
         self.assertEqual(log.count('"run"'),1)
         self.assertNotIn('--delete-source',log)
 
