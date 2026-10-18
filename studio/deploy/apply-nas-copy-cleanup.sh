@@ -39,7 +39,18 @@ if [ -e "$marker" ] || [ -L "$marker" ];then
 fi
 (cd "$control" && sha256sum -c controller.sha256 configs.sha256)
 printf 'cleanup_stage=ensure_alias_runtime\n'
-sh "$control/poll.sh" tick
+current_mount=$(docker_local inspect --format '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}|{{.Type}}|{{.RW}}{{end}}{{end}}' library-studio-nas-pilot-studio-1)
+current_hash=
+case "$current_mount" in "$root/studio-runtime."*"|bind|false")
+  current_code=${current_mount%%|*}
+  if [ -f "$current_code/runtime-manifest.sha256" ] && [ ! -L "$current_code" ] && [ "$(readlink -f "$current_code")" = "$current_code" ];then
+    current_hash=$(sha256sum "$current_code/runtime-manifest.sha256");current_hash=${current_hash%% *}
+  fi;;
+esac
+if [ "$current_hash" != "$manifest_sha" ];then
+  # Explicit one-time local apply; never enable/disable or replace the controller.
+  sh "$control/update-studio-ui.sh" apply-release "$root" "$revision" "$manifest_sha"
+fi
 runtime_mount=$(docker_local inspect --format '{{range .Mounts}}{{if eq .Destination "/app"}}{{.Source}}|{{.Type}}|{{.RW}}{{end}}{{end}}' library-studio-nas-pilot-studio-1)
 case "$runtime_mount" in "$root/studio-runtime."*"|bind|false") runtime=${runtime_mount%%|*};; *) exit 1;;esac
 [ -d "$runtime" ] && [ ! -L "$runtime" ] && [ "$(readlink -f "$runtime")" = "$runtime" ] || exit 1
