@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -69,6 +70,24 @@ class PlanTests(unittest.TestCase):
     def test_missing_survivor_or_unsynchronized_basename_is_held(self):
         with self.store.db() as db:db.execute("UPDATE works SET archive_filename='' WHERE lrr_id=?",(tool.locator(self.source),))
         self.assertIn('survivor_filename_not_confirmed_sync_first',self.plan()['items'][0]['holds'])
+
+    def test_wrapper_preview_and_invalid_paths_never_start_nas_actions(self):
+        script=Path(__file__).resolve().parents[1]/'deploy/plan-nas-copy-cleanup.sh'
+        result=subprocess.run(['sh',str(script),'preview','/volume1/Example/Books'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Preview only',result.stdout)
+        for path in ['/','/volumeX/Books','/volume1/../Other','/volume1/Books,readonly=false']:
+            self.assertEqual(subprocess.run(['sh',str(script),'preview',path],capture_output=True).returncode,2)
+
+    def test_wrapper_pins_complete_planner_and_read_only_catalog(self):
+        deploy=Path(__file__).resolve().parents[1]/'deploy'
+        script=(deploy/'plan-nas-copy-cleanup.sh').read_text()
+        for name in ['deploy/plan-copy-cleanup.py','deploy/review-library-storage.py','deploy/archive_in_place.py','sources.py']:
+            expected=hashlib.sha256((deploy.parent/name).read_bytes()).hexdigest()+'  '+name
+            self.assertIn(expected,script)
+        self.assertIn('dst=/catalog,readonly',script)
+        self.assertIn('dst=/prior-reports,readonly',script)
+        self.assertIn('--prior-report latest',script)
 
     def test_report_relative_paths_cannot_escape_inputs(self):
         for path in ['../outside.cbz','/absolute.cbz','sub/../outside.cbz','a\\outside.cbz']:
