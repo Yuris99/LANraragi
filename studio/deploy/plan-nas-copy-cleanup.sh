@@ -38,7 +38,7 @@ for relative in deploy/plan-copy-cleanup.py deploy/review-library-storage.py dep
   curl -fsSL --connect-timeout 15 --max-time 60 "$base/$relative" -o "$stage/$relative"
 done
 cat > "$stage/checksums" <<'HASHES'
-286edc2960d23e8a4e2848a90a592f7607a0f4220253f6ead22d629cf9ad0b52  deploy/plan-copy-cleanup.py
+eb9e69601454b00dd46526432a645db0e2d13e856e857ef86f84bac64306db36  deploy/plan-copy-cleanup.py
 767bf44e82fe39d27b242e0f1eab99727ec3c57b438cbdba0c2a116d24d5e155  deploy/review-library-storage.py
 18ec6094fb0bae2840ae351c3e6dbfb1b46944dc121e9c1c56d7c80f58e4f304  deploy/archive_in_place.py
 17cf1e2e8bbf06dbc3695d1a8f61f242a10aa40762018a93530fdb55f7d007ed  sources.py

@@ -1,5 +1,7 @@
 """Catalog-aware cleanup plans use generated archives and temp databases only."""
 import hashlib
+import json
+import sqlite3
 import importlib.util
 from pathlib import Path
 import sys
@@ -7,6 +9,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'deploy'))
 from store import Store
@@ -88,6 +91,62 @@ class PlanTests(unittest.TestCase):
         self.assertIn('dst=/catalog,readonly',script)
         self.assertIn('dst=/prior-reports,readonly',script)
         self.assertIn('--prior-report latest',script)
+
+    def test_cli_error_identifies_phase_and_errno_without_private_names(self):
+        script=Path(__file__).resolve().parents[1]/'deploy/plan-copy-cleanup.py'
+        private=self.root/'private-title-never-print.json'
+        result=subprocess.run([sys.executable,'-B',str(script),'--prior-report',str(private),
+            '--database',self.store.path,'--library-root',str(self.library),'--copies-root',str(self.copies),
+            '--output',str(self.root/'plan.json')],capture_output=True,text=True)
+        self.assertEqual(result.returncode,1)
+        payload=json.loads(result.stdout)
+        self.assertEqual(payload['phase'],'read_prior_report')
+        self.assertEqual(payload['errno'],2)
+        self.assertTrue(payload['media_and_database_unchanged'])
+        self.assertNotIn('private-title',result.stdout+result.stderr)
+        self.assertFalse((self.root/'plan.json').exists())
+
+    def test_error_details_never_echo_sql_or_filenames(self):
+        tool.phase('read_catalog_entries')
+        try:
+            with sqlite3.connect(':memory:') as db:db.execute('SELECT * FROM private_title_never_print')
+        except sqlite3.Error as error:details=tool.failure_details(error)
+        self.assertEqual(details['sqlite_error'],'SQLITE_ERROR')
+        self.assertNotIn('private_title',json.dumps(details))
+        self.assertEqual(tool.failure_details(ValueError('private-title')),{'phase':'read_catalog_entries','error_type':'ValueError'})
+        self.assertEqual(tool.failure_details(ValueError('real_database_required'))['reason'],'real_database_required')
+
+    def test_snapshot_preserves_committed_wal_without_touching_source(self):
+        with sqlite3.connect(self.store.path) as live:
+            live.execute('PRAGMA journal_mode=WAL')
+            live.execute("INSERT INTO settings VALUES('wal-marker','committed')");live.commit()
+            paths=[Path(self.store.path),Path(self.store.path+'-wal'),Path(self.store.path+'-shm')]
+            before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+            with tool.catalog_snapshot(self.store.path,self.root) as snapshot:
+                with sqlite3.connect(snapshot.as_uri()+'?mode=ro',uri=True) as db:
+                    self.assertEqual(db.execute("SELECT value FROM settings WHERE key='wal-marker'").fetchone()[0],'committed')
+            self.assertEqual(before,{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths})
+            self.assertFalse(list(self.root.glob('.catalog-snapshot-*')))
+
+    def test_changing_snapshot_is_rejected_after_bounded_retries(self):
+        with sqlite3.connect(self.store.path) as live:
+            live.execute('PRAGMA journal_mode=WAL');live.execute("INSERT INTO settings VALUES('changing','0')");live.commit()
+            real=tool.copy_catalog_file;writes=[]
+            def changing(parent,name,target,expected):
+                real(parent,name,target,expected)
+                if not name.endswith('-wal'):
+                    writes.append(1);live.execute("UPDATE settings SET value=? WHERE key='changing'",(str(len(writes)),));live.commit()
+            with patch.object(tool,'copy_catalog_file',side_effect=changing):
+                with self.assertRaisesRegex(ValueError,'catalog_changed_during_copy'):
+                    with tool.catalog_snapshot(self.store.path,self.root):pass
+            self.assertEqual(len(writes),3)
+            self.assertFalse(list(self.root.glob('.catalog-snapshot-*')))
+
+    def test_snapshot_rejects_wal_symlink(self):
+        wal=Path(self.store.path+'-wal')
+        self.assertFalse(wal.exists());wal.symlink_to(self.source)
+        with self.assertRaisesRegex(ValueError,'catalog_file_type'):
+            with tool.catalog_snapshot(self.store.path,self.root):pass
 
     def test_report_relative_paths_cannot_escape_inputs(self):
         for path in ['../outside.cbz','/absolute.cbz','sub/../outside.cbz','a\\outside.cbz']:

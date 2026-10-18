@@ -12,3 +12,12 @@ Validation uses generated ZIP/CBZ archives and a temporary Studio database: pair
 
 
 `plan-nas-copy-cleanup.sh preview|plan <approved NAS root>` is the fixed wrapper. Synchronize Studio first to populate archive basenames. It automatically selects the latest NAS-local `copy-review-*.json`, writes a new private plan under the dedicated `review-reports/cleanup-plans` directory and prints distinct-copy/pair/catalog/hold and preservation counts only. A successful plan does not remove anything.217unit/HTTP/deployment tests passed; actual NAS planning and cleanup remain unverified until operator execution. No app runtime or release generation changes are part of this planning-only update.
+
+
+## Read-only SQLite recovery and diagnostic errors
+
+The planner now copies a stable DB+WAL pair into a private0700 temporary directory beneath its dedicated plan output. It checks source file identity/size/timestamps before and after copying, retries a changing catalog at most three times, and rejects links or excessive size. It does not copy SHM or open the source SQLite database for writing. SQLite opens the temporary copy with the committed WAL and validates it before catalog comparison; scratch files are removed afterward. `immutable=1` is not used, since that can silently ignore WAL. Original media and catalog mounts remain RO; the only additional files are temporary private catalog copies in the existing permitted report output.
+
+Failures print a fixed phase, error class, numeric errno or SQLite error name and allowlisted validation reason. Raw exception text, filenames, queries, titles and credentials are never printed. Successful summaries include hold-reason counts to avoid another private-report transfer. These changes cover missing-SHM read-only failures; they do not establish the cause of an earlier generic NAS failure.
+
+Validation:222unit/HTTP/deployment tests passed. `python -B studio/tests/copy_plan_container_smoke.py` also passed in real generated-data containers for hot-WAL and missing-SHM source catalogs mounted RO with network disabled. Snapshot tests check committed-WAL visibility, unchanged source bytes, bounded rejection of a changing catalog and symlink rejection. NAS retry and actual cleanup remain unverified. App runtime/release generation remain unchanged.
