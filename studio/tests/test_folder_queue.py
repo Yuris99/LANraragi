@@ -151,8 +151,12 @@ class FolderQueueDeploymentTests(unittest.TestCase):
     def test_installer_pins_the_fixed_worker_and_complete_runtime_manifest(self):
         deploy=Path(__file__).resolve().parents[1]/'deploy'
         text=(deploy/'install-folder-queue.sh').read_text()
-        self.assertRegex(text,r'(?m)^revision=[0-9a-f]{40}$')
-        self.assertIn('manifest_sha='+hashlib.sha256((deploy/'runtime-manifest.sha256').read_bytes()).hexdigest(),text)
+        # This separately installed reader stays pinned when app-only releases advance.
+        self.assertIn('revision=e328e8fe828cf1288bf728d6ce4954b273a78244',text)
+        pinned=Path(__file__).with_name('fixtures')/'folder-worker-runtime.sha256'
+        self.assertIn('manifest_sha='+hashlib.sha256(pinned.read_bytes()).hexdigest(),text)
+        self.assertEqual({line.split()[1] for line in pinned.read_text().splitlines()},
+            {line.split()[1] for line in (deploy/'runtime-manifest.sha256').read_text().splitlines()})
         self.assertIn('tick_sha='+hashlib.sha256((deploy/'tick-folder-queue.sh').read_bytes()).hexdigest(),text)
 
     def test_preview_has_no_nas_actions_and_rejects_path_escape(self):

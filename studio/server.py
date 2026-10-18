@@ -237,7 +237,12 @@ class Handler(BaseHTTPRequestHandler):
                 has_folders=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_imports'").fetchone()
                 folders=db.execute('SELECT count(*) FROM folder_imports').fetchone()[0] if has_folders else 0
                 pending=db.execute("SELECT count(*) FROM uploads WHERE lrr_id IS NULL AND state='stored'").fetchone()[0]
-            return self.respond({'folder_archives':folders,'pending_archives':pending,'folder_registration':'manual','site_downloads':'not-verified'})
+                counts=db.execute("SELECT count(*),count(lrr_id) FROM works").fetchone()
+                uploaded=db.execute("SELECT count(*) FROM works w WHERE w.lrr_id IN (SELECT lrr_id FROM uploads WHERE lrr_id IS NOT NULL)").fetchone()[0]
+            return self.respond({'folder_archives':folders,'pending_archives':pending,
+                'catalog_works':counts[0],'indexed_archives':counts[1],
+                'uploaded_archives':uploaded,'metadata_only':counts[0]-counts[1],
+                'folder_registration':'optional-copy','site_downloads':'not-verified'})
         if path=='/api/health':
             try:
                 info=self.app.lrr.json('/api/info');connected=True

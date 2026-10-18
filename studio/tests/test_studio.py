@@ -303,6 +303,22 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(result['site_downloads'],'not-verified')
         self.assertNotIn('private',json.dumps(result).lower())
 
+    def test_library_status_counts_catalog_not_old_import_receipts(self):
+        store=self.app.store
+        for index in range(3):
+            store.create_work('Private book',lrr_id=str(index)*40)
+        store.create_work('Private metadata')
+        with store.db() as db:
+            for index in range(2):
+                db.execute("INSERT INTO uploads(sha256,original_name,stored_name,bytes,created,lrr_id,state) VALUES(?,?,?,?,?,?,?)",
+                    (str(index)*64,'Private file.cbz',str(index)*64+'.cbz',1,1,'0'*40,'indexed'))
+        with self.request('/api/library/status') as response:
+            result=json.load(response)
+        self.assertEqual((result['catalog_works'],result['indexed_archives'],result['uploaded_archives'],result['metadata_only']),(4,3,1,1))
+        self.assertEqual(result['folder_archives'],0)
+        self.assertEqual(result['folder_registration'],'optional-copy')
+        self.assertNotIn('private',json.dumps(result).lower())
+
     def test_same_origin_required_for_mutations(self):
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works',{'title':'Example'},origin='https://other.invalid')
         self.assertEqual(error.exception.code,403)

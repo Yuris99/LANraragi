@@ -209,8 +209,12 @@ async function load({ fromRoute = false } = {}) {
 async function refreshLibraryStatus() {
     try {
         const status = await api("/api/library/status");
-        $("#library-status").textContent = status.folder_archives ? `NAS 폴더에서 ${status.folder_archives.toLocaleString()}권 등록됨 · 나머지 폴더는 추가 등록 후 표시됩니다. NAS 자료는 PC에서 다시 업로드할 필요가 없습니다.${status.pending_archives ? ` · 색인 대기 ${status.pending_archives}개` : ""}` : "NAS에 있는 자료는 폴더 등록으로 추가할 수 있습니다. 파일 업로드는 PC 자료를 직접 추가할 때 사용하세요.";
-    } catch { $("#library-status").textContent = "NAS 자료는 폴더 등록으로 추가합니다. 파일 업로드는 선택 사항입니다."; }
+        const counts = [`등록된 파일 ${status.indexed_archives.toLocaleString()}권`];
+        if (status.uploaded_archives) counts.push(`업로드 기록이 연결된 파일 ${status.uploaded_archives.toLocaleString()}권`);
+        if (status.metadata_only) counts.push(`정보만 등록 ${status.metadata_only.toLocaleString()}권`);
+        if (status.pending_archives) counts.push(`업로드 색인 대기 ${status.pending_archives.toLocaleString()}개`);
+        $("#library-status").textContent = `${counts.join(" · ")}. 연결된 NAS의 CBZ는 다시 업로드할 필요가 없습니다. 새 파일이 안 보이면 동기화하세요.`;
+    } catch { $("#library-status").textContent = "라이브러리 상태를 확인하지 못했습니다. 잠시 후 동기화로 다시 확인하세요."; }
 }
 function renderDetail(work) {
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id ? "" : "disabled"}>▷ 읽기</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 파일" : "메타데이터만 등록됨 · 파일을 동기화하면 읽을 수 있습니다."}</p></div></div>
