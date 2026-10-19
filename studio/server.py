@@ -19,6 +19,7 @@ from connectors import fetch_comments, source_candidates
 from sources import parse_source
 from store import Store
 from uploads import Uploads,UploadError
+from editions import VoiceAssets
 
 HERE=Path(__file__).parent
 
@@ -66,6 +67,8 @@ class Studio:
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
         self.sync_lock=threading.Lock();self.upload_cursor='';self.match_lock=threading.Lock()
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
+
+        self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
 
     def sync(self):
         if not self.sync_lock.acquire(blocking=False):
@@ -241,6 +244,15 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(value,dict):raise ValueError('JSON 객체가 필요합니다.')
         return value
 
+    def do_HEAD(self):
+        if not self.authorized():return
+        match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',urllib.parse.urlsplit(self.path).path)
+        if not match:
+            self.send_response(405);self.send_header('Content-Length','0');self.end_headers();return
+        try:self.download_voice(match[1])
+        except Exception:
+            self.send_response(404);self.send_header('Content-Length','0');self.end_headers()
+
     def do_GET(self):
         if not self.authorized():return
         try:self.get()
@@ -251,6 +263,8 @@ class Handler(BaseHTTPRequestHandler):
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
         if path=='/api/folders':return self.respond(store.folder_status())
+        match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',path)
+        if match:return self.download_voice(match[1],q('download')=='1')
         if path=='/api/organization':return self.respond(store.organization_preview(q('q'),int(q('page','1'))))
         if path=='/api/library/status':
             with store.db() as db:
@@ -258,10 +272,12 @@ class Handler(BaseHTTPRequestHandler):
                 folders=db.execute('SELECT count(*) FROM folder_imports').fetchone()[0] if has_folders else 0
                 pending=db.execute("SELECT count(*) FROM uploads WHERE lrr_id IS NULL AND state='stored'").fetchone()[0]
                 counts=db.execute("SELECT count(*),count(lrr_id) FROM works WHERE merged_into IS NULL").fetchone()
+                voiced=db.execute("SELECT count(*) FROM works w WHERE merged_into IS NULL AND EXISTS (SELECT 1 FROM voice_assets a WHERE a.work_id=w.id AND a.kind IN ('audio','video'))").fetchone()[0]
+                files=db.execute("SELECT count(*) FROM works w WHERE merged_into IS NULL AND (lrr_id IS NOT NULL OR EXISTS (SELECT 1 FROM voice_assets a WHERE a.work_id=w.id AND a.kind IN ('audio','video')))").fetchone()[0]
                 uploaded=db.execute("SELECT count(*) FROM works w WHERE w.merged_into IS NULL AND w.lrr_id IN (SELECT lrr_id FROM uploads WHERE lrr_id IS NOT NULL)").fetchone()[0]
             return self.respond({'folder_archives':folders,'pending_archives':pending,
                 'catalog_works':counts[0],'indexed_archives':counts[1],
-                'uploaded_archives':uploaded,'metadata_only':counts[0]-counts[1],
+                'uploaded_archives':uploaded,'metadata_only':counts[0]-files,'voice_editions':voiced,
                 'folder_registration':'optional-copy','site_downloads':'not-verified'})
         if path=='/api/health':
             try:
@@ -322,7 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type',(mimetypes.guess_type(filename)[0] or 'application/octet-stream')+'; charset=utf-8')
         self.send_header('Content-Length',str(len(raw)));self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Referrer-Policy','no-referrer')
-        self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers();self.wfile.write(raw)
 
     def download_upload(self,sha):
@@ -344,6 +360,33 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Length',str(end-start+1));self.send_header('Accept-Ranges','bytes')
             if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
             self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+            if self.command=='HEAD':return
+            stream.seek(start);remaining=end-start+1
+            while remaining:
+                block=stream.read(min(256*1024,remaining))
+                if not block:break
+                self.wfile.write(block);remaining-=len(block)
+
+    def download_voice(self,asset_id,download=False):
+        row,stream=self.app.voice.open(asset_id)
+        with stream:
+            size=row['bytes'];start=0;end=size-1;status=200
+            value=self.headers.get('Range')
+            if value:
+                match=re.fullmatch(r'bytes=(\d*)-(\d*)',value)
+                if not match or not any(match.groups()):
+                    self.send_response(416);self.send_header('Content-Range',f'bytes */{size}');self.send_header('Content-Length','0');self.end_headers();return
+                if match[1]:start=int(match[1]);end=min(end,int(match[2])) if match[2] else end
+                else:start=max(0,size-int(match[2]))
+                if not 0<=start<=end<size:
+                    self.send_response(416);self.send_header('Content-Range',f'bytes */{size}');self.send_header('Content-Length','0');self.end_headers();return
+                status=206
+            self.send_response(status);self.send_header('Content-Type',row['mime'])
+            if download:self.send_header('Content-Disposition',"attachment; filename=voice"+row['extension']+"; filename*=UTF-8''"+urllib.parse.quote(row['name'],safe=''))
+            self.send_header('Content-Length',str(end-start+1));self.send_header('Accept-Ranges','bytes')
+            if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+            self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+            if self.command=='HEAD':return
             stream.seek(start);remaining=end-start+1
             while remaining:
                 block=stream.read(min(256*1024,remaining))
@@ -357,6 +400,15 @@ class Handler(BaseHTTPRequestHandler):
             parsed=urllib.parse.urlsplit(origin)
             if parsed.netloc!=self.headers.get('Host') or parsed.scheme not in ('http','https'):
                 return self.respond({'error':'다른 사이트의 요청은 허용하지 않습니다.'},403)
+        voice_match=re.fullmatch('/api/works/([0-9a-f]{32})/voice/upload',urllib.parse.urlsplit(self.path).path)
+        if voice_match:
+            try:
+                if self.headers.get('Transfer-Encoding'):return self.respond({'error':'Content-Length가 필요합니다.'},411)
+                if self.headers.get_content_type()!='application/octet-stream':return self.respond({'error':'파일 본문 형식을 확인하세요.'},415)
+                values=urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                self.connection.settimeout(30)
+                return self.respond(self.app.voice.receive(voice_match[1],self.rfile,int(self.headers.get('Content-Length','0')),values.get('filename',[''])[0]),201)
+            except Exception as error:return self.respond({'error':public_error(error)},404 if isinstance(error,KeyError) else 400)
         if urllib.parse.urlsplit(self.path).path=='/api/uploads':
             try:
                 if self.headers.get('Transfer-Encoding'):raise UploadError('Content-Length가 있는 파일 요청이 필요합니다.',411)
@@ -377,6 +429,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/visual/index':
+            if set(data)!={'items'}:raise ValueError('표지 지문 목록만 지정하세요.')
+            return self.respond(store.index_visual(data['items']))
+        if path=='/api/visual/search':
+            if set(data)!={'fingerprint'}:raise ValueError('이미지 지문만 지정하세요.')
+            return self.respond(store.visual_search(data['fingerprint']))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/edition',path)
+        if match:return self.respond(store.configure_edition(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/edition/group',path)
+        if match:
+            if set(data)!={'reference'}:raise ValueError('다른 판본 번호만 지정하세요.')
+            return self.respond(store.group_edition(match[1],data['reference']))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/edition/ungroup',path)
+        if match:
+            if data:raise ValueError('추가 필드를 지정하지 마세요.')
+            return self.respond(store.ungroup_edition(match[1]))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/voice/([0-9a-f]{32})/(progress|cues)',path)
+        if match:
+            key='position' if match[3]=='progress' else 'cues'
+            if set(data)!={key}:raise ValueError('재생 설정 필드를 확인하세요.')
+            return self.respond(store.save_voice_progress(match[1],match[2],data[key]) if key=='position' else store.save_voice_cues(match[1],match[2],data[key]))
         if path=='/api/organization/artists/all':
             if data!={'scope':'library'}:raise ValueError('전체 라이브러리 범위를 지정하세요.')
             return self.respond(store.apply_all_filename_artists())

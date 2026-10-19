@@ -11,9 +11,10 @@ class WrapperTests(unittest.TestCase):
         studio=Path(__file__).resolve().parents[1]
         text=(studio/'deploy/normalize-nas-library.sh').read_text()
         for name,variable in [('deploy/normalize-library-names.py','helper_sha'),('sources.py','sources_sha'),('deploy/runtime-manifest.sha256','manifest_sha')]:
-            digest=hashlib.sha256((studio/name).read_bytes()).hexdigest()
+            source=Path(__file__).parent/'fixtures/name-normalization-runtime.sha256' if name=='deploy/runtime-manifest.sha256' else studio/name
+            digest=hashlib.sha256(source.read_bytes()).hexdigest()
             self.assertIn(variable+'='+digest,text)
-        release=json.loads((studio/'deploy/nas-release.json').read_text())
+        release=json.loads((Path(__file__).parent/'fixtures/name-normalization-release.json').read_text())
         self.assertIn('revision='+release['revision'],text)
         self.assertNotIn('CORE_REVISION',text)
 

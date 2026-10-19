@@ -184,8 +184,10 @@ function applySettings() {
     $("#card-size").value = settings.size; $("#page-size").value = String(settings.limit); $("#read-direction").value = settings.direction;
 }
 function sources(work) { return work.sources.map((s) => `<span class="source-pill ${s.provider}">${providerName[s.provider]} · ${esc(s.external_id)}</span>`).join(""); }
+function workCoverURL(work) { return work.cover_asset_id ? `/api/voice/assets/${work.cover_asset_id}` : work.lrr_id ? `/api/media/${work.lrr_id}/thumbnail` : null; }
 function cover(work) {
-    return `<div class="cover">${work.lrr_id ? `<img src="/api/media/${work.lrr_id}/thumbnail" loading="lazy" decoding="async" alt="${esc(work.title)} 표지">` : `<div class="placeholder"><span>▤</span><small>METADATA ONLY</small></div>`}<span class="pages">${work.pages} P</span>${work.favorite ? `<span class="favorite-star">★</span>` : ""}</div>`;
+    const thumbnail = workCoverURL(work); const editionKind = (work.edition_summary || work.edition)?.kind || "comic";
+    return `<div class="cover">${thumbnail ? `<img src="${thumbnail}" loading="lazy" decoding="async" alt="${esc(work.title)} 표지">` : `<div class="placeholder"><span>▤</span><small>${editionKind === "comic" ? "METADATA ONLY" : "VOICE COMIC"}</small></div>`}<span class="pages">${editionKind === "comic" ? work.pages + " P" : editionKind === "voice_video" ? "보이스 · 영상" : "보이스 · 음성"}</span>${work.favorite ? `<span class="favorite-star">★</span>` : ""}</div>`;
 }
 let requestNumber = 0;
 async function load({ fromRoute = false } = {}) {
@@ -198,7 +200,7 @@ async function load({ fromRoute = false } = {}) {
     result.items.forEach(cacheWork);
     $("#total").textContent = `${result.total.toLocaleString()} 작품`;
     selectedWorks.clear();
-    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" tabindex="0" role="button" aria-label="${esc(work.title)} 상세 보기"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.title)} 선택"></label>${cover(work)}<div><h3>${esc(work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div></div><div class="card-sources">${sources(work)}</div></article>`).join("");
+    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" tabindex="0" role="button" aria-label="${esc(work.title)} 상세 보기"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.title)} 선택"></label>${cover(work)}<div><h3>${esc(work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
     updateSelection();
     $("#empty").hidden = result.items.length > 0;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
@@ -211,17 +213,20 @@ async function refreshLibraryStatus() {
         const status = await api("/api/library/status");
         const counts = [`등록된 파일 ${status.indexed_archives.toLocaleString()}권`];
         if (status.uploaded_archives) counts.push(`업로드 기록이 연결된 파일 ${status.uploaded_archives.toLocaleString()}권`);
+        if (status.voice_editions) counts.push(`보이스코믹 파일 ${status.voice_editions}판본`);
         if (status.metadata_only) counts.push(`정보만 등록 ${status.metadata_only.toLocaleString()}권`);
         if (status.pending_archives) counts.push(`업로드 색인 대기 ${status.pending_archives.toLocaleString()}개`);
         $("#library-status").textContent = `${counts.join(" · ")}. 연결된 NAS의 CBZ는 다시 업로드할 필요가 없습니다. 새 파일이 안 보이면 동기화하세요.`;
     } catch { $("#library-status").textContent = "라이브러리 상태를 확인하지 못했습니다. 잠시 후 동기화로 다시 확인하세요."; }
 }
 function renderDetail(work) {
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id ? "" : "disabled"}>▷ 읽기</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 파일" : "메타데이터만 등록됨 · 파일을 동기화하면 읽을 수 있습니다."}</p></div></div>
+    pauseVoicePlayers();
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section"><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3>${work.sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><button class="quiet" data-fetch="${s.id}">태그 가져오기</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></div><small>${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`}
     <details class="detail-section"><summary>출처 연결 · 태그·댓글 가져오기</summary><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="https://…"></label><label>원본 태그<input name="tags" placeholder="쉼표로 구분 (선택)"></label><label>댓글 JSON (선택)<textarea name="comments" placeholder='[{"id":"1","author":"작성자","text":"댓글","posted_at":"2026-01-01"}]'></textarea></label><p class="muted">사이트별 정보를 따로 보존합니다. nHentai 공개 댓글 API 수집기는 실사이트 미검증입니다. E-Hentai·Hitomi 댓글은 JSON 가져오기를 사용하세요. 로그인·접근 제한은 우회하지 않습니다.</p><button class="primary">출처 저장</button></form></details></section>`;
+    renderEdition(work);
     if (!$("#detail").open) $("#detail").showModal();
 }
 function jobDetails(job) {
@@ -242,6 +247,10 @@ function pageUrl(url, id) {
     return `/api/media/${id}/page${parsed.search}`;
 }
 function readWork() {
+    if (state.detail?.edition?.kind !== "comic") {
+        const player = $(state.detail?.edition?.kind === "voice_video" ? "#detail-content video" : "#detail-content audio");
+        if (player) { player.scrollIntoView({block:"center"}); return player.play(); }
+    }
     if (state.detail) return navigateRoute({ kind: "reader", id: state.detail.id, page: pendingReader?.id === state.detail.id ? pendingReader.page : Math.max(1, state.detail.progress || 1) });
 }
 function renderPage() {
@@ -296,7 +305,7 @@ document.addEventListener("submit", guard(async (event) => {
         if (!Number.isInteger(page) || page < 1 || page > state.reader.pages.length) throw new Error("이동할 쪽 번호를 확인하세요.");
         await navigateRoute({ kind: "reader", id: state.reader.work.id, page });
     }
-    if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
+    if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); await api(`/api/works/${work.id}/edition`, {kind:data.kind || "comic",language:data.language || "",label:data.label || ""}); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
     if (form.id === "source-form") { const value = { url: data.url }; if (data.tags) value.tags = data.tags; if (data.comments) value.comments = JSON.parse(data.comments); await api(`/api/works/${state.detail.id}/sources`, value); await showDetail(state.detail.id); await load(); }
     if (form.id === "download-form") {
         $("#download-submit").disabled = true;
@@ -589,3 +598,146 @@ $("#organize-items").addEventListener("click", guard(async event => {
         await renderOrganization(); await load();
     }
 }));
+
+const voicePositions = new Map(), voiceSaves = new Map();
+let visualIndexCancelled = false;
+function saveVoice(element, force = false) {
+    if (!element.dataset.asset || !Number.isFinite(element.currentTime)) return;
+    const id = element.dataset.asset, position = element.ended ? 0 : element.currentTime;
+    voicePositions.set(id, position);
+    if (!force && Date.now() - Number(element.dataset.savedAt || 0) < 5000) return;
+    element.dataset.savedAt = String(Date.now());
+    const previous = voiceSaves.get(id) || Promise.resolve();
+    voiceSaves.set(id, previous.catch(() => {}).then(() => api(`/api/works/${element.dataset.work}/voice/${id}/progress`, { position })).catch(error => toast(error.message)));
+}
+function pauseVoicePlayers() {
+    document.querySelectorAll('#detail-content audio, #detail-content video').forEach(element => { saveVoice(element, true); element.pause(); });
+}
+$('#detail').addEventListener('close', pauseVoicePlayers);
+window.addEventListener('pagehide', pauseVoicePlayers);
+function renderEdition(work) {
+    const e = work.edition;
+    if (!e) return;
+    const kinds = {comic:'만화',voice_video:'보이스코믹 · 영상',voice_pages:'보이스코믹 · 만화+음성'};
+    const section = document.createElement('section'); section.className = 'detail-section edition-section';
+    section.innerHTML = `<h3>판본 · 보이스코믹</h3>${workCoverURL(work) ? '<div class="form-actions"><button class="quiet search-this-cover">이 표지로 비슷한 작품 찾기</button><button class="quiet save-this-cover">외부 검색용 표지 저장</button></div>' : ""}<p>${esc(kinds[e.kind])} · ${esc(e.language || '언어 미등록')} · ${esc(e.label || '판본 이름 미등록')}</p><div class="edition-siblings">${e.siblings.map(item => `<button class="quiet" data-edition-go="${item.id}" ${item.id === work.id ? 'disabled' : ''}>${esc(item.language || kinds[item.kind])} · ${esc(item.label || item.title)} · L${item.local_number}</button>`).join('') || '<p class="muted">이 판본은 아직 다른 판본과 묶지 않았습니다.</p>'}</div><details><summary>판본 정보 · 같은 작품 연결</summary><form class="edition-config"><label>형태<select name="kind">${Object.entries(kinds).map(([key,value]) => `<option value="${key}" ${e.kind === key ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label>언어<input name="language" maxlength="200" value="${esc(e.language)}"></label><label>판본 이름<input name="label" maxlength="200" value="${esc(e.label)}" placeholder="원본 · 번역팀 · 보이스판"></label><label>번역자·번역팀<input name="translator" maxlength="200" value="${esc(e.translator)}"></label><label>함께 재생할 만화 번호<input name="comic_reference" placeholder="이 판본에 만화가 있으면 비워두세요. 다른 판본이면 L번호" value="${esc(e.comic_work_id ? (e.comic_work_id === work.id ? '' : 'L' + e.comic_local_number) : '')}"></label><p class="muted">음성형은 이 판본의 만화 또는 직접 지정한 만화 판본을 사용합니다. 페이지 연결 시간은 음성별로 저장합니다.</p><button class="quiet">판본 정보 저장</button></form><form class="edition-group"><label>같은 작품의 다른 판본 번호<input name="reference" required placeholder="L번호 · 연결된 출처 번호"></label><button class="quiet">같은 작품으로 묶기</button></form><button type="button" class="quiet edition-ungroup">이 판본을 묶음에서 분리</button><p class="muted">파일·출처·댓글·읽기 기록은 판본마다 보존됩니다. 번호만 같다고 자동으로 묶지 않습니다. 같은 출처 URL은 원래 연결한 판본에 유지하고 다른 판본은 위에서 이동하세요.</p></details><form class="voice-upload"><label>영상·음성·표지 첨부<input type="file" name="files" accept=".mp4,.webm,.mp3,.m4a,.wav,.flac,.ogg,.jpg,.jpeg,.png,.webp" multiple required></label><p class="muted">전용 Studio 저장소에 첨부합니다. 만화 파일은 기존 CBZ 등록을 사용하세요. 영상·음성 코덱은 브라우저 지원 범위에서 재생하며 자동 변환하지 않습니다.</p><button class="quiet">선택 파일 첨부</button><p class="voice-upload-status" role="status"></p></form><div class="voice-assets">${e.assets.map(asset => `<div class="voice-track" data-track="${asset.id}"><h4>${esc(asset.name)}</h4>${asset.kind === 'cover' ? '<span class="muted">표지 이미지</span>' : `<${asset.kind === 'video' ? 'video' : 'audio'} controls playsinline preload="metadata" data-asset="${asset.id}" data-work="${work.id}" src="/api/voice/assets/${asset.id}"></${asset.kind === 'video' ? 'video' : 'audio'}><label>재생 속도<select class="voice-speed">${[0.75,1,1.25,1.5,2].map(rate => `<option value="${rate}" ${rate===1?'selected':''}>${rate}배</option>`).join('')}</select></label><p class="voice-status muted" role="status">이어 듣기 ${Math.floor(asset.position)}초</p>`}<a class="quiet" href="/api/voice/assets/${asset.id}?download=1" download>파일 다운로드</a>${asset.kind === 'audio' && e.kind === 'voice_pages' ? `<div class="voice-comic"><p class="voice-page-label" role="status"></p><img class="voice-page" alt="보이스코믹 페이지" hidden><div class="form-actions"><button type="button" class="quiet voice-pages-retry">만화 페이지 다시 불러오기</button><button type="button" class="quiet voice-cue-prev">이전 페이지</button><button type="button" class="quiet voice-cue-next">다음 페이지</button></div><details><summary>페이지별 음성 시작 시간</summary><form class="voice-cues"><label>쪽=초 (한 줄에 하나)<textarea name="cues" placeholder="1=0&#10;2=12.5">${asset.cues.map(cue => `${cue.page}=${cue.second}`).join('\n')}</textarea></label><button class="quiet">페이지 연결 저장</button></form></details></div>` : ''}</div>`).join('')}</div>`;
+    $('#detail-content').append(section);
+    if (workCoverURL(work)) {
+        section.querySelector('.search-this-cover').onclick = guard(async () => { const response = await fetch(workCoverURL(work)); if (!response.ok) throw new Error('표지를 읽을 수 없습니다.'); $('#visual-dialog').showModal(); await runVisualSearch(await response.blob()); });
+        section.querySelector('.save-this-cover').onclick = guard(async () => {
+            const response = await fetch(workCoverURL(work)); if (!response.ok) throw new Error('표지를 읽을 수 없습니다.');
+            const blob = await response.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
+            link.href = url; link.download = 'cover.' + ({'image/png':'png','image/webp':'webp','image/jpeg':'jpg'}[blob.type] || 'img'); link.click(); setTimeout(() => URL.revokeObjectURL(url),30000);
+            $('#visual-dialog').showModal(); toast('저장한 표지를 외부 검색 사이트에서 직접 선택하세요.');
+        });
+    }
+    section.querySelector('.edition-config').onsubmit = guard(async event => { event.preventDefault(); await api(`/api/works/${work.id}/edition`,Object.fromEntries(new FormData(event.target))); await showDetail(work.id); await load(); });
+    section.querySelector('.edition-group').onsubmit = guard(async event => { event.preventDefault(); await api(`/api/works/${work.id}/edition/group`,Object.fromEntries(new FormData(event.target))); await showDetail(work.id); });
+    section.querySelector('.edition-ungroup').onclick = guard(async () => { await api(`/api/works/${work.id}/edition/ungroup`,{}); await showDetail(work.id); });
+    section.querySelectorAll('[data-edition-go]').forEach(button => { button.onclick = guard(() => showDetail(button.dataset.editionGo)); });
+    section.querySelector('.voice-upload').onsubmit = guard(async event => {
+        event.preventDefault(); const form = event.target, files = [...form.querySelector('input').files], button = form.querySelector('button'), status = form.querySelector('.voice-upload-status');
+        if (files.length > 20) throw new Error('한 번에 최대 20개 파일을 첨부하세요.');
+        button.disabled = true;
+        try {
+            for (const [index,file] of files.entries()) {
+                status.textContent = `${index+1}/${files.length} 첨부 중…`;
+                const response = await fetch(`/api/works/${work.id}/voice/upload?filename=${encodeURIComponent(file.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
+                const result = await response.json(); if (!response.ok) throw new Error(result.error || '첨부 실패');
+            }
+            await showDetail(work.id); await load(); toast('파일을 첨부했습니다.');
+        } finally { button.disabled = false; }
+    });
+    for (const asset of e.assets) {
+        const track = section.querySelector(`[data-track="${asset.id}"]`), player = track.querySelector('audio,video');
+        if (!player) continue;
+        player.addEventListener('loadedmetadata', () => { const position = voicePositions.get(asset.id) ?? asset.position; if (position > 0 && Number.isFinite(player.duration)) player.currentTime = Math.min(position, Math.max(0,player.duration-0.05)); });
+        player.addEventListener('timeupdate', () => saveVoice(player));
+        for (const event of ['pause','seeked','ended']) player.addEventListener(event, () => saveVoice(player,true));
+        player.addEventListener('play', () => section.querySelectorAll('audio,video').forEach(other => { if (other !== player) other.pause(); }));
+        player.addEventListener('error', () => { track.querySelector('.voice-status').textContent = '이 브라우저에서 재생하지 못했습니다. 코덱과 파일 상태를 확인하거나 다운로드하세요.'; });
+        track.querySelector('.voice-speed').onchange = event => { player.playbackRate = Number(event.target.value); };
+        if (asset.kind !== 'audio' || e.kind !== 'voice_pages') continue;
+        let pages = [], lastPage = 0;
+        const renderCue = () => {
+            const cue = [...asset.cues].reverse().find(cue => cue.second <= player.currentTime);
+            if (!pages.length) return;
+            if (!cue) { lastPage=0; track.querySelector('.voice-page').hidden=true; track.querySelector('.voice-page-label').textContent='이 시간에 연결된 페이지가 없습니다.'; return; }
+            if (cue.page>pages.length) { track.querySelector('.voice-page-label').textContent = '연결한 페이지가 만화 범위를 벗어납니다. 시간표를 수정하세요.'; return; }
+            if (lastPage === cue.page) return;
+            lastPage = cue.page; const image = track.querySelector('.voice-page');
+            image.src = pageUrl(pages[cue.page-1],e.comic_lrr_id); image.hidden = false;
+            track.querySelector('.voice-page-label').textContent = `${cue.page} / ${pages.length} 페이지`;
+        };
+        const refreshPages = async () => {
+            if (!e.comic_lrr_id) { track.querySelector('.voice-page-label').textContent='먼저 만화 판본을 연결하세요.'; return; }
+            track.querySelector('.voice-page-label').textContent='만화 페이지 준비 중…';
+            try {
+                const value = await api(`/api/media/${e.comic_lrr_id}/files`); pages = Array.isArray(value.pages) ? value.pages : [];
+                track.querySelector('.voice-page-label').textContent = pages.length ? `${pages.length}페이지 준비됨 · 페이지별 시작 시간을 등록하세요.` : '페이지를 준비하고 있습니다. 잠시 후 다시 불러오세요.';
+                lastPage=0; renderCue();
+            } catch (error) { track.querySelector('.voice-page-label').textContent = error.message; }
+        };
+        track.querySelector('.voice-pages-retry').onclick = refreshPages;
+        refreshPages();
+        player.addEventListener('timeupdate', renderCue); player.addEventListener('seeked', renderCue);
+        track.querySelector('.voice-cues').onsubmit = guard(async event => {
+            event.preventDefault(); const text = new FormData(event.target).get('cues').trim();
+            const cues = text ? text.split(/\r?\n/).map(line => { const match = /^\s*(\d+)\s*=\s*(\d+(?:\.\d+)?)\s*$/.exec(line); if (!match) throw new Error('쪽=초 형식으로 입력하세요.'); return {page:Number(match[1]),second:Number(match[2])}; }) : [];
+            await api(`/api/works/${work.id}/voice/${asset.id}/cues`,{cues}); await showDetail(work.id);
+        });
+        for (const [selector,direction] of [['.voice-cue-prev',-1],['.voice-cue-next',1]]) track.querySelector(selector).onclick = () => {
+            if (!asset.cues.length) return;
+            let index = asset.cues.findLastIndex(cue => cue.second <= player.currentTime);
+            index = Math.max(0,Math.min(asset.cues.length-1,index+direction)); player.currentTime = asset.cues[index].second; renderCue();
+        };
+    }
+}
+
+async function imageFingerprint(source) {
+    const image = await createImageBitmap(source);
+    try {
+        if (image.width * image.height > 40000000) throw new Error('이미지 해상도가 너무 큽니다. 작은 사본을 사용하세요.');
+        const canvas = document.createElement('canvas'); canvas.width = 9; canvas.height = 8;
+        const context = canvas.getContext('2d',{willReadFrequently:true}); context.fillStyle = '#fff'; context.fillRect(0,0,9,8); context.drawImage(image,0,0,9,8);
+        const pixels = context.getImageData(0,0,9,8).data;
+        const luminance = index => pixels[index*4]*0.299 + pixels[index*4+1]*0.587 + pixels[index*4+2]*0.114;
+        let hash = 0n;
+        for (let y=0;y<8;y++) for (let x=0;x<8;x++) hash = (hash<<1n) | (luminance(y*9+x)>luminance(y*9+x+1) ? 1n : 0n);
+        return hash.toString(16).padStart(16,'0');
+    } finally { image.close(); }
+}
+$('#visual-open').onclick = () => $('#visual-dialog').showModal();
+$('#visual-index-stop').onclick = () => { visualIndexCancelled = true; };
+$('#visual-index').onclick = guard(async () => {
+    const button = $('#visual-index'), status = $('#visual-index-status'); button.disabled = true;
+    let indexed = 0, skipped = 0; visualIndexCancelled = false; $('#visual-index-stop').hidden = false;
+    try {
+        for (let page=1;page<=834;page++) {
+            const result = await api(`/api/works?page=${page}&limit=120&sort=added&direction=asc`), items=[];
+            if (result.total>100000) throw new Error('표지 색인 범위를 초과했습니다.');
+            for (const work of result.items) {
+                if (visualIndexCancelled) break;
+                const url = workCoverURL(work);
+                if (!url) continue;
+                try { const response = await fetch(url,{cache:'reload'}); if (!response.ok) throw new Error('표지 확인 실패'); if (Number(response.headers.get('Content-Length'))>10*1024*1024) { await response.body.cancel(); throw new Error('표지 크기 초과'); } const blob = await response.blob(); if (blob.size>10*1024*1024) throw new Error('표지 크기 초과'); items.push({work_id:work.id,fingerprint:await imageFingerprint(blob)}); }
+                catch { skipped++; }
+                status.textContent = `표지 ${indexed+items.length}개 처리 · 실패 ${skipped}개`;
+            }
+            if (items.length) { await api('/api/visual/index',{items}); indexed += items.length; }
+            if (visualIndexCancelled || page*120>=result.total) break;
+        }
+        status.textContent = `${indexed}개 표지 색인 ${visualIndexCancelled ? '중지됨' : '완료'} · 실패 ${skipped}개. 표지가 바뀌면 다시 갱신하세요.`;
+    } finally { button.disabled = false; $('#visual-index-stop').hidden = true; }
+});
+async function runVisualSearch(blob) {
+    if (blob.size>10*1024*1024) throw new Error('10MiB 이하 이미지를 사용하세요.');
+    const result = await api('/api/visual/search',{fingerprint:await imageFingerprint(blob)});
+    $('#visual-results').innerHTML = `<p class="muted">색인 ${result.indexed}개 · 비슷한 표지 후보 ${result.items.length}개. 지문 거리 0이 가장 비슷하며 같은 작품이라는 증거는 아닙니다.</p>` + result.items.map(item => `<button class="visual-result quiet" data-visual-work="${item.work.id}">${cover(item.work)}<span>${esc(item.work.title)} · 거리 ${item.distance}</span></button>`).join('');
+    $('#visual-results').querySelectorAll('[data-visual-work]').forEach(button => { button.onclick = guard(async () => { $('#visual-dialog').close(); await showDetail(button.dataset.visualWork); }); });
+}
+$('#visual-file').onchange = guard(async event => {
+    const file = event.target.files[0]; if (!file) return;
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>10*1024*1024) throw new Error('10MiB 이하 JPG·PNG·WebP 이미지를 선택하세요.');
+    await runVisualSearch(file);
+});

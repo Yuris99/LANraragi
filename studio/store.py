@@ -14,7 +14,10 @@ def uid():
     return uuid.uuid4().hex
 
 
-class Store:
+from editions import EditionCatalog, SCHEMA as EDITION_SCHEMA
+
+
+class Store(EditionCatalog):
     def __init__(self, path):
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -76,6 +79,7 @@ class Store:
                 old_work_id TEXT NOT NULL REFERENCES works(id),work_id TEXT NOT NULL REFERENCES works(id),
                 state TEXT NOT NULL,details TEXT NOT NULL,created REAL NOT NULL);
             ''')
+            db.executescript(EDITION_SCHEMA)
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
@@ -158,6 +162,9 @@ class Store:
             result['all_tags'] = list(dict.fromkeys(result['tags'] + result['user_tags'] + [
                 t for s in result['sources'] for t in s['tags']]))
             result['short_id']=self.short_identity(result)
+            result['edition']=self.edition_details(result)
+            result['cover_asset_id']=result['edition'].get('cover_asset_id')
+            result['edition_summary']={k:result['edition'][k] for k in ('kind','language','label','translator','group_id')}
             return result
 
     def list_works(self, query='', sort='added', descending=True, page=1, limit=48,
@@ -211,6 +218,11 @@ class Store:
                 work['all_tags']=list(dict.fromkeys(work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']]))
                 work['short_id']=self.short_identity(work)
                 items.append(work)
+            if items:
+                meta={r['work_id']:dict(r) for r in db.execute('SELECT * FROM editions WHERE work_id IN ('+placeholders+')',list(sources))}
+                for work in items:
+                    work['edition_summary']={k:meta.get(work['id'],{}).get(k,v) for k,v in {'kind':'comic','language':'','label':'','translator':'','group_id':None}.items()}
+                    work['cover_asset_id']=meta.get(work['id'],{}).get('cover_asset_id')
         return dict(items=items,total=total,page=page,limit=limit)
 
     @staticmethod
@@ -427,6 +439,7 @@ class Store:
     @staticmethod
     def consolidate_copy(db, old_id, survivor_id, sha, copy_lrr_id, details):
         """Called only by NAS-local executor after full file/backend verification."""
+        if db.execute('SELECT 1 FROM editions WHERE work_id IN (?,?)',(old_id,survivor_id)).fetchone() or db.execute('SELECT 1 FROM voice_assets WHERE work_id IN (?,?)',(old_id,survivor_id)).fetchone():raise ValueError('edition_metadata_requires_review')
         previous=db.execute('SELECT * FROM copy_retirements WHERE sha256=?',(sha,)).fetchone()
         if previous:
             if previous['old_work_id']!=old_id or previous['work_id']!=survivor_id:raise ValueError('retirement_identity_conflict')

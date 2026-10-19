@@ -89,7 +89,9 @@ class OperationsTests(unittest.TestCase):
         work=store.create_work('Synthetic book',tags=['local:tag'])
         store.upsert_source(work['id'],{'url':'https://nhentai.net/g/123/','tags':['source:tag']})
         store.upsert_source(work['id'],{'url':'https://hitomi.la/galleries/123.html'})
-        self.assertEqual(store.list_works()['items'][0],store.get_work(work['id']))
+        detail=store.get_work(work['id']);edition=detail.pop('edition')
+        self.assertEqual(store.list_works()['items'][0],detail)
+        self.assertEqual(detail['edition_summary']['kind'],edition['kind'])
 
 
 class GalleryEngineTests(unittest.TestCase):
