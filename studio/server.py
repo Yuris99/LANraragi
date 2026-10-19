@@ -20,6 +20,7 @@ from sources import parse_source
 from store import Store
 from uploads import Uploads,UploadError
 from editions import VoiceAssets
+from site_sessions import LoginClient
 
 HERE=Path(__file__).parent
 
@@ -69,6 +70,7 @@ class Studio:
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
         self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
+        self.login=LoginClient(config_root=Path(store.path).parent)
 
     def sync(self):
         if not self.sync_lock.acquire(blocking=False):
@@ -156,7 +158,9 @@ class Studio:
                                       '이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 엔진 작업자를 연결하세요.')
                     continue
                 self.store.report(job['id'],job['lease'],'running','원격 다운로드 제출 중',{'submission':'pending'})
-                response=self.lrr.json('/api/download_url','POST',{'url':job['url']})
+                # The OpenAPI endpoint accepts query parameters or multipart,
+                # not application/x-www-form-urlencoded request bodies.
+                response=self.lrr.json('/api/download_url?'+urllib.parse.urlencode({'url':job['url']}),'POST')
                 remote_id=str(response['job'])
                 self.store.report(job['id'],job['lease'],'running','서버 작업 등록 완료',{'remote_job':remote_id})
                 while not self.stop.wait(2):
@@ -174,6 +178,45 @@ class Studio:
             except Exception as error:
                 try:self.store.report(job['id'],job['lease'],'failed',public_error(error))
                 except ValueError:pass
+
+    def command_index_loop(self):
+        # Only completed NAS attempts; never import PC files or scan NAS originals.
+        while not self.stop.wait(10):
+            try:
+                jobs=[j for j in self.store.jobs() if j['target']=='nas' and j['engine']=='command'
+                      and j['state']=='complete' and not json.loads(j['result']).get('catalog_indexed')
+                      and not json.loads(j['result']).get('catalog_review_required')]
+                if not jobs:continue
+                archives=self.lrr.json('/api/archives')
+                for job in jobs:
+                    result=json.loads(job['result']);directory=result.get('directory','')
+                    if not re.fullmatch(job['id']+r'-[0-9a-f]{16}',directory):continue
+                    source=parse_source(job['url']);expected=source['provider']+'-'+source['external_id']
+                    reported=result.get('archives',[])
+                    if not isinstance(reported,list) or len(reported)>10:continue
+                    proofs=[p for p in reported if isinstance(p,dict) and p.get('file')==expected+'.cbz'
+                            and re.fullmatch('[0-9a-f]{64}',str(p.get('sha256',''))) and type(p.get('bytes')) is int and 0<p['bytes']<=2*1024**3]
+                    if len(proofs)!=1:continue
+                    proof=proofs[0]
+                    for item in archives:
+                        if not isinstance(item,dict) or item.get('filename') not in (expected,expected+'.cbz'):continue
+                        if not re.fullmatch('[0-9a-f]{40}',str(item.get('arcid',''))):continue
+                        digest=hashlib.sha256();received=0
+                        with self.lrr.open('/api/archives/'+item['arcid']+'/download') as response:
+                            while block:=response.read(256*1024):
+                                received+=len(block)
+                                if received>proof['bytes']:break
+                                digest.update(block)
+                        if received!=proof['bytes'] or digest.hexdigest()!=proof['sha256']:continue
+                        metadata=self.lrr.json('/api/archives/'+item['arcid']+'/metadata')
+                        try:self.store.index_command_archive(job['id'],metadata,proof['sha256'])
+                        except ValueError:
+                            # Do not repeatedly hash a conflicting file or merge editions.
+                            result['catalog_review_required']=True
+                            with self.store.db() as db:
+                                db.execute('UPDATE jobs SET result=?,message=? WHERE id=?',
+                                    (json.dumps(result),'파일 저장 완료 · 보관함 연결은 직접 확인하세요.',job['id']))
+            except Exception:pass  # Saved output remains intact; retry after backend recovery.
 
 
 def public_error(error):
@@ -262,6 +305,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        if path=='/api/site-connections':return self.respond(self.app.login.call({'op':'status'}))
+        if path=='/api/downloads/status':return self.respond({'command_workers':store.worker_status(),'site_verified':False})
         if path=='/api/folders':return self.respond(store.folder_status())
         match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',path)
         if match:return self.download_voice(match[1],q('download')=='1')
@@ -429,6 +474,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/site-connections':
+            if len(json.dumps(data).encode())>16384:raise ValueError('로그인 요청 크기를 확인하세요.')
+            return self.respond(self.app.login.call(data))
         if path=='/api/visual/index':
             if set(data)!={'items'}:raise ValueError('표지 지문 목록만 지정하세요.')
             return self.respond(store.index_visual(data['items']))
@@ -507,10 +555,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({'error':'Worker token required'},403)
             if path=='/api/worker/claim':
                 if scope!='*' and data.get('target')!=scope:return self.respond({'error':'Worker target mismatch'},403)
+                store.worker_seen(data.get('target'))
                 return self.respond(store.claim(data.get('target'),'command'))
             match=re.fullmatch('/api/worker/([0-9a-f]{32})/report',path)
             if match:
                 store.report(match[1],data.get('lease'),data.get('state'),data.get('message',''),data.get('result'),worker_target=scope)
+                store.worker_seen(store.job(match[1])['target'])
                 return self.respond({'success':True})
         return self.respond({'error':'찾을 수 없습니다.'},404)
 
@@ -530,6 +580,7 @@ if __name__=='__main__':
     host=os.environ.get('STUDIO_HOST','127.0.0.1');port=int(os.environ.get('STUDIO_PORT','43120'))
     server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1')
     threading.Thread(target=app.nas_loop,daemon=True).start()
+    threading.Thread(target=app.command_index_loop,daemon=True).start()
     if os.environ.get('STUDIO_IMPORT_DIR'):
         from importer import Importer
         importer=Importer(app,os.environ['STUDIO_IMPORT_DIR'])

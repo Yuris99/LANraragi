@@ -5,7 +5,7 @@ COPY studio/requirements-worker.txt ./
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
     pip install --no-cache-dir -r requirements-worker.txt
-COPY studio/worker.py studio/gallery_engine.py studio/sources.py ./
+COPY studio/worker.py studio/gallery_engine.py studio/sources.py studio/site_sessions.py ./
 RUN chmod -R a+rX /app && useradd --uid 9001 --create-home studio && mkdir /downloads && chown studio /downloads
 USER studio
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 STUDIO_TARGET=nas STUDIO_OUTPUT=/downloads

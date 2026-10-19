@@ -87,7 +87,9 @@ def run_job(job, command, root, report, heartbeat_interval=20):
         (output/'studio-manifest.json').write_text(json.dumps(files,ensure_ascii=False,indent=2),encoding='utf-8')
         stop.set();heartbeat_thread.join()
         if heartbeat_errors:raise RuntimeError('Worker heartbeat failed')
-        report('complete','파일 생성 및 SHA-256 기록 완료',{'files':len(files),'bytes':sum(x['bytes'] for x in files),'directory':output.name})
+        archives=[x for x in files if Path(x['file']).suffix.lower()=='.cbz']
+        report('complete','파일 생성 및 SHA-256 기록 완료',{'files':len(files),'bytes':sum(x['bytes'] for x in files),'directory':output.name,
+                                                         'archives':archives[:10]})
     finally:
         stop.set()
         heartbeat_thread.join()

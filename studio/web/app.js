@@ -354,7 +354,15 @@ $("#detail").addEventListener("click", guard(async (e) => {
 document.addEventListener("submit", guard(async (e) => { if (e.target.id === "work-form") { const data = Object.fromEntries(new FormData(e.target)); await api(`/api/works/${state.detail.id}`, { ...data, title_locked: true }); await showDetail(state.detail.id); await load(); } }));
 $("#sync").onclick = guard(sync); $("#empty-sync").onclick = guard(sync);
 $("#add").onclick = () => $("#editor").showModal();
-$("#queue").onclick = $("#download-open").onclick = () => $("#download-dialog").showModal();
+$("#queue").onclick = $("#download-open").onclick = guard(async () => {
+    $("#download-dialog").showModal();
+    const status = await api('/api/downloads/status');
+    const target = $('#download-form [name="target"]').value;
+    $('#download-support').textContent = status.command_workers[target]
+        ? '외부 작업자 연결됨 · 사이트별 실제 접근·다운로드 성공은 아직 미검증입니다.'
+        : '외부 작업자가 연결되지 않았습니다. 서버 플러그인은 지원하는 URL만 처리하며, 로그인 세션은 외부 작업자에서 사용합니다.';
+    if (status.command_workers[target]) $('#download-form [name="engine"]').value = 'command';
+});
 let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
@@ -766,3 +774,96 @@ $('#visual-file').onchange = guard(async event => {
     if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>10*1024*1024) throw new Error('10MiB 이하 JPG·PNG·WebP 이미지를 선택하세요.');
     await runVisualSearch(file);
 });
+
+// Credentials travel only to the operator-configured NAS login service. Neither
+// typed text nor session cookies are stored in the catalog/localStorage.
+let loginSession = null, loginTimer = null, loginBusy = false;
+const connectionStateName = { not_configured: '로그인 서비스 설치 필요', not_saved: '저장된 세션 없음', saved_unverified: '세션 저장됨 · 실제 접근 미검증', unavailable: '세션 만료 또는 파일 확인 필요' };
+function clearLoginPreview() {
+    clearTimeout(loginTimer); loginSession = null;
+    $('#login-controls').hidden = true; $('#login-screen').removeAttribute('src'); $('#login-text').value = '';
+}
+function renderLoginFrame(frame) {
+    if (!$('#connections-dialog').open) return;
+    loginSession = frame.session;
+    $('#login-controls').hidden = false;
+    $('#login-screen').src = frame.image;
+    $('#login-location').textContent = frame.location;
+    $('#login-restriction').hidden = !frame.restricted_request;
+}
+async function connectionStatus() {
+    const status = await api('/api/site-connections');
+    $('#connections-status').textContent = status.configured ? 'NAS 로그인 서비스 연결됨 · 실제 사이트 지원은 별도 검증합니다.' : 'NAS 로그인 서비스가 아직 설치되지 않았습니다. 다운로드 엔진과 전용 세션 저장 공간을 추가해야 합니다.';
+    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
+    if (status.active) {
+        loginSession = status.active.session;
+        await loginOperation({ op: 'frame' });
+    } else clearLoginPreview();
+}
+function scheduleLoginFrame() {
+    clearTimeout(loginTimer);
+    if (loginSession && $('#connections-dialog').open) loginTimer = setTimeout(() => {
+        if (loginBusy) { scheduleLoginFrame(); return; }
+        guard(() => loginOperation({ op: 'frame' }))();
+    }, 2000);
+}
+async function loginOperation(operation) {
+    if (loginBusy) return;
+    loginBusy = true; clearTimeout(loginTimer);
+    $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = true);
+    try {
+        const result = await api('/api/site-connections', { ...operation, session: loginSession });
+        if (result.image) renderLoginFrame(result);
+        if (operation.op === 'save' || operation.op === 'cancel') {
+            clearLoginPreview();
+            if (operation.op === 'save') toast('세션을 NAS에 저장했습니다. 실제 접근 성공은 아직 미검증입니다.');
+        }
+    } catch (error) {
+        clearTimeout(loginTimer); throw error;
+    } finally {
+        loginBusy = false;
+        $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = false);
+    }
+    scheduleLoginFrame();
+}
+$('#connections-open').onclick = guard(async () => { $('#connections-dialog').showModal(); await connectionStatus(); });
+$('#connections-refresh').onclick = guard(connectionStatus);
+$('#connections-dialog').addEventListener('close', () => {
+    clearTimeout(loginTimer); $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
+});
+$('#connections-sites').onclick = guard(async event => {
+    const button = event.target.closest('button');
+    if (!button || loginBusy) return;
+    if (button.dataset.siteStart) {
+        loginBusy = true; button.disabled = true;
+        try {
+            renderLoginFrame(await api('/api/site-connections', { op: 'start', provider: button.dataset.siteStart }));
+            scheduleLoginFrame();
+        } finally { loginBusy = false; button.disabled = false; }
+    }
+    if (button.dataset.siteForget) {
+        if (!confirm('이 사이트의 NAS 저장 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.')) return;
+        await api('/api/site-connections', { op: 'forget', provider: button.dataset.siteForget });
+        await connectionStatus();
+    }
+});
+$('#login-screen').onclick = guard(async event => {
+    if (loginBusy || !loginSession) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    await loginOperation({ op: 'click', x: Math.min(999, Math.max(0, (event.clientX - box.left) * 1000 / box.width)), y: Math.min(699, Math.max(0, (event.clientY - box.top) * 700 / box.height)) });
+    $('#login-text').focus();
+});
+$('#login-text-form').onsubmit = guard(async event => {
+    event.preventDefault(); if (loginBusy || !loginSession) return;
+    const text = $('#login-text').value; $('#login-text').value = '';
+    if (text) await loginOperation({ op: 'text', text });
+});
+$('#login-controls').addEventListener('click', guard(async event => {
+    const button = event.target.closest('button');
+    if (!button || loginBusy) return;
+    if (button.dataset.loginKey) await loginOperation({ op: 'key', key: button.dataset.loginKey });
+    if (button.dataset.loginScroll) await loginOperation({ op: 'scroll', delta: Number(button.dataset.loginScroll) });
+}));
+$('#login-visit').onclick = guard(() => loginOperation({ op: 'visit' }));
+$('#login-save').onclick = guard(async () => { await loginOperation({ op: 'save' }); await connectionStatus(); });
+$('#login-cancel').onclick = guard(async () => { await loginOperation({ op: 'cancel' }); await connectionStatus(); });

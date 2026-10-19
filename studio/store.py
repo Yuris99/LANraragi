@@ -539,10 +539,14 @@ class Store(EditionCatalog):
         if work_id:self.get_work(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            candidates=db.execute("SELECT * FROM jobs WHERE target=? AND engine=? AND state IN ('queued','running')",(target,engine)).fetchall()
+            candidates=db.execute("SELECT * FROM jobs WHERE target=? AND state IN ('queued','running','failed','blocked')",(target,)).fetchall()
             for existing in candidates:
                 identity=parse_source(existing['url'])
-                if (identity['provider'],identity['external_id'])==(source['provider'],source['external_id']):return dict(existing)
+                if (identity['provider'],identity['external_id'])!=(source['provider'],source['external_id']):continue
+                remote=json.loads(existing['result'])
+                if existing['state'] in ('queued','running'):return dict(existing)
+                if existing['engine']=='lanraragi' and (remote.get('remote_job') or remote.get('submission')=='pending'):
+                    raise ValueError('기존 서버 작업의 접수 여부를 먼저 확인하세요. 다른 엔진으로도 중복 제출하지 않았습니다.')
             job_id=uid();now=time.time()
             db.execute('INSERT INTO jobs(id,work_id,url,target,engine,state,created,updated) VALUES(?,?,?,?,?,?,?,?)',
                        (job_id,work_id,source['url'],target,engine,'queued',now,now))
@@ -601,6 +605,42 @@ class Store(EditionCatalog):
         self.expire_jobs()
         with self.db() as db:
             return [dict(x) for x in db.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 200')]
+
+    def worker_seen(self,target):
+        if target not in ('nas','pc'):raise ValueError('잘못된 작업 대상입니다.')
+        with self.db() as db:
+            db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',('command_worker_seen_'+target,str(time.time())))
+
+    def worker_status(self):
+        with self.db() as db:
+            rows=dict(db.execute("SELECT key,value FROM settings WHERE key IN ('command_worker_seen_nas','command_worker_seen_pc')"))
+        return {target:0<=time.time()-float(rows.get('command_worker_seen_'+target,'0'))<60 for target in ('nas','pc')}
+
+    def index_command_archive(self,job_id,metadata,verified_sha):
+        """Link only the exact completed attempt, never equal cross-site numbers."""
+        job=self.job(job_id);result=json.loads(job['result']);source=parse_source(job['url'])
+        arcid=metadata.get('arcid','');directory=result.get('directory','')
+        expected=source['provider']+'-'+source['external_id']
+        proofs=result.get('archives',[])
+        if job['target']!='nas' or job['engine']!='command' or job['state']!='complete' or not re.fullmatch(job_id+r'-[0-9a-f]{16}',directory) or metadata.get('filename') not in (expected,expected+'.cbz') or not re.fullmatch('[0-9a-f]{40}',arcid) or not re.fullmatch('[0-9a-f]{64}',verified_sha) or not any(p.get('file')==expected+'.cbz' and p.get('sha256')==verified_sha for p in proofs if isinstance(p,dict)):
+            raise ValueError('다운로드 결과와 색인 파일의 연결을 확인하세요.')
+        with self.db() as db:
+            owner=db.execute('SELECT work_id FROM sources WHERE provider=? AND external_id=?',(source['provider'],source['external_id'])).fetchone()
+            work_id=owner[0] if owner else job['work_id']
+            if work_id:
+                work=db.execute('SELECT id,lrr_id FROM works WHERE id=? AND merged_into IS NULL',(work_id,)).fetchone()
+                other=db.execute('SELECT id FROM works WHERE lrr_id=?',(arcid,)).fetchone()
+                if not work or work['lrr_id'] not in (None,arcid) or other and other[0]!=work_id:
+                    raise ValueError('기존 파일 또는 다른 판본과의 연결은 직접 확인하세요.')
+                db.execute('UPDATE works SET lrr_id=? WHERE id=?',(arcid,work_id))
+        self.sync_lrr([metadata])
+        with self.db() as db:work_id=db.execute('SELECT id FROM works WHERE lrr_id=?',(arcid,)).fetchone()[0]
+        self.upsert_source(work_id,{'url':source['url']})
+        result.update(catalog_work_id=work_id,catalog_indexed=True)
+        with self.db() as db:
+            db.execute('UPDATE jobs SET result=?,message=? WHERE id=? AND state=?',
+                       (json.dumps(result),'다운로드 및 보관함 연결 완료',job_id,'complete'))
+        return work_id
 
     def claim(self, target, engine):
         if target not in ('nas','pc') or engine not in ('lanraragi','command'):

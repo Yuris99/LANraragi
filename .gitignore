@@ -30,5 +30,6 @@ studio/.env.*
 
 # Required worker build recipe; contains no credentials.
 !studio/Dockerfile.worker
+!studio/Dockerfile.login
 
 **/__pycache__/

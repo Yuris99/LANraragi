@@ -1,6 +1,7 @@
 """Generated-only edition identity, media storage and authenticated streaming tests."""
 import base64
 import io
+import http.client
 import json
 import os
 from pathlib import Path
@@ -204,8 +205,16 @@ class MediaHTTPTests(unittest.TestCase):
             self.assertEqual(error.exception.code,403 if 'Authorization' in headers else 401)
         with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/visual/search',{'fingerprint':'0'*16},headers={'Origin':'https://other.invalid'})
         self.assertEqual(error.exception.code,403)
-        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/works/'+self.work['id']+'/voice/upload?filename=voice.wav',audio_bytes(),headers={'Transfer-Encoding':'chunked'})
-        self.assertEqual(error.exception.code,411)
+        # Check rejection at the headers, without racing a large body write
+        # against the server intentionally closing an unsupported request.
+        connection=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=10)
+        try:
+            connection.putrequest('POST','/api/works/'+self.work['id']+'/voice/upload?filename=voice.wav')
+            connection.putheader('Authorization','Basic '+base64.b64encode(b'admin:synthetic-editions').decode())
+            connection.putheader('Content-Type','application/octet-stream')
+            connection.putheader('Transfer-Encoding','chunked');connection.endheaders()
+            self.assertEqual(connection.getresponse().status,411)
+        finally:connection.close()
 
     def test_voice_only_file_is_not_reported_as_metadata_only(self):
         self.upload()
