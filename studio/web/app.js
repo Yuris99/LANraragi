@@ -13,7 +13,32 @@ if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailBlur = false;
 const providerName = { ehentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
 const statusName = { queued: "대기 중", running: "진행 중", complete: "완료", failed: "실패", blocked: "확인 필요" };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (s) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
-function toast(message) { const el = $("#toast"); el.textContent = message; el.hidden = false; clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.hidden = true; }, 5500); }
+// Modal dialogs live above normal z-index layers. Keep notices in the active
+// dialog, and use a manual popover to avoid clipping in scrolling dialogs.
+const toastDialogs = [];
+function placeToast() {
+    const el = $("#toast");
+    for (const dialog of document.querySelectorAll("dialog[open]")) {
+        if (!toastDialogs.includes(dialog)) toastDialogs.push(dialog);
+    }
+    for (let i = toastDialogs.length - 1; i >= 0; i--) {
+        if (!toastDialogs[i].open) toastDialogs.splice(i, 1);
+    }
+    const parent = toastDialogs.at(-1) || document.body;
+    if (typeof el.hidePopover === "function" && el.matches(":popover-open")) el.hidePopover();
+    if (el.parentElement !== parent) parent.append(el);
+    if (!el.hidden && typeof el.showPopover === "function") el.showPopover();
+}
+new MutationObserver(placeToast).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["open"] });
+function toast(message) {
+    const el = $("#toast");
+    el.textContent = message; el.hidden = false; placeToast();
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => {
+        if (typeof el.hidePopover === "function" && el.matches(":popover-open")) el.hidePopover();
+        el.hidden = true;
+    }, 5500);
+}
 async function api(path, data) {
     const response = await fetch(path, data === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
     const value = await response.json();
