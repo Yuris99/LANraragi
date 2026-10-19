@@ -13,6 +13,12 @@
 `service-controller.sha256` SHA-256, `install`이다. `preview`는 변경하지 않는다.
 설치 스크립트와 커밋·해시는 배포 담당자가 함께 제공한다.
 
+실사용 진입점은 고정 커밋의 `enable-service-channel.sh EXISTING_APP_ROOT`이다.
+이 스크립트가 위 설치기·매니페스트를 고정 커밋과 해시로 확인한다. 설치 후
+업데이트가 활성화돼 있으면 첫 조회를 백그라운드로 시작한다. SSH 창을 닫아도
+진행되며 `first_tick=started`는 완료를 뜻하지 않는다. 최초 조회 로그는 컨트롤러
+전용 폴더의 `first-services.log`다. 로컬 비활성 설정은 강제로 바꾸지 않는다.
+
 설치기는 기존 컨트롤러·설정 해시와 잠금을 확인하고, 기존 `poll.sh`와 해시를
 `before-service-channel`에 보관한다. 기존 앱 실행기는 `poll-app-legacy.sh`로
 보존한다. 새 디스패처와 서비스 실행기·파서·레시피 8개 파일을 검증하고
