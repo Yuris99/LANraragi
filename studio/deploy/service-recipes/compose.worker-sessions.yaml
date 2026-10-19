@@ -1,0 +1,34 @@
+# Optional companion to the separate compose.login.yaml project.
+# Does not enable ExHentai or prove actual site support.
+services:
+  worker:
+    profiles: [downloads]
+    image: ${STUDIO_WORKER_IMAGE:?Set a tested immutable session-aware worker image}
+    platform: linux/amd64
+    user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    environment:
+      HOME: /tmp
+      STUDIO_SESSION_DIR: /sessions
+      STUDIO_SERVER: http://studio:8090
+      STUDIO_WORKER_TOKEN: ${STUDIO_NAS_WORKER_TOKEN:?Required}
+      STUDIO_TARGET: nas
+      STUDIO_OUTPUT: /downloads
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1},studio"
+      no_proxy: "${no_proxy:-${NO_PROXY:-localhost,127.0.0.1}},studio"
+    volumes:
+      - login-sessions:/sessions:ro
+      - type: bind
+        source: ${STUDIO_DOWNLOADS:?Verified dedicated app downloads directory}
+        target: /downloads
+        bind: {create_host_path: false}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    read_only: true
+    mem_limit: 384m
+    pids_limit: 64
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [app]
+    depends_on:
+      login-init: {condition: service_completed_successfully}

@@ -1,0 +1,53 @@
+# Candidate only. Review locally before adding new containers/volumes.
+# No host ports, Docker socket, existing original paths, or browser CDP port.
+# Separate Compose project; attach only to the existing dedicated app network.
+services:
+  login-init:
+    image: ${STUDIO_LOGIN_IMAGE:?Set a tested immutable login image}
+    user: "0:0"
+    entrypoint: ["python", "/app/init_login.py"]
+    environment:
+      STUDIO_UID: ${STUDIO_UID:?Required}
+      STUDIO_GID: ${STUDIO_GID:?Required}
+    volumes:
+      - login-key:/volumes/key
+      - login-sessions:/volumes/sessions
+      - studio-data:/studio-data
+    network_mode: none
+    restart: "no"
+  site-login:
+    image: ${STUDIO_LOGIN_IMAGE:?Required}
+    platform: linux/amd64
+    user: "${STUDIO_UID:?Required}:${STUDIO_GID:?Required}"
+    environment:
+      HOME: /tmp
+      STUDIO_SESSION_DIR: /sessions
+      STUDIO_LOGIN_TOKEN_FILE: /run/studio-login/token
+    volumes:
+      - login-key:/run/studio-login:ro
+      - login-sessions:/sessions
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m,mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    shm_size: 128m
+    pids_limit: 128
+    depends_on:
+      login-init: {condition: service_completed_successfully}
+    networks:
+      app:
+        aliases: [site-login]
+    restart: unless-stopped
+
+volumes:
+  login-key:
+  login-sessions:
+  studio-data:
+    external: true
+    name: ${STUDIO_DATA_VOLUME:?Verified existing dedicated data volume}
+networks:
+  app:
+    external: true
+    name: ${STUDIO_APP_NETWORK:?Verified existing app network}

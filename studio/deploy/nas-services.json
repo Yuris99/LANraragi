@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "enabled": true,
+  "generation": 1,
+  "revision": "99d3e2d629e130f1c85cea39d6641d3f97ca0449",
+  "worker": true,
+  "files": {
+    "login_service.py": "ddc61e19e7b7fc7c88888140b8f295adfafc0a96f1de1c3b87a362acdc2088ec",
+    "site_sessions.py": "abeadf7aa1887b65ce8694aaf2ff0021f002d891dd78ef433319480b7fb05b09",
+    "init_login.py": "801ae821b624d73885cb172e35f9fff417f918c3ade77743798d5d2be39d14de",
+    "worker.py": "2f35e9fc5f60f46802da909ac348cf3e9b507c877b8fa35755e4ba64cf2c34a7",
+    "gallery_engine.py": "7e2982446972ced2a0dfb34411048a6c1959dade81a3ac35e2cefae0a4319bd9",
+    "sources.py": "eda5f8d87d7e9310619baf97ea71527078195f9c268fe102cb9025ebae62306f",
+    "requirements-worker.txt": "45dfca10f7fd5302b14847c51e516f2ec5bb7ba68581a37deb124fae71963be5"
+  }
+}

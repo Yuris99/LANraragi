@@ -5,7 +5,7 @@ set -eu
 umask 077
 [ "$#" -eq 5 ] || { printf 'Use: install-site-login.sh preview|apply-login|start-worker|status APP_ROOT APP_PROJECT LOGIN_IMAGE WORKER_IMAGE\n' >&2;exit 2; }
 mode=$1;root=$2;project=$3;login_image=$4;worker_image=$5
-case "$mode" in preview|apply-login|start-worker|status) ;; *) exit 2;;esac
+case "$mode" in preview|apply-login|update-login|start-worker|status) ;; *) exit 2;;esac
 case "$root" in /volume*/docker/*) ;; *) printf 'Use the existing dedicated app root.\n' >&2;exit 2;;esac
 [ -d "$root" ] && [ ! -L "$root" ] && [ "$(readlink -f "$root")" = "$root" ] || exit 2
 case "$project" in ''|*[!a-zA-Z0-9_-]*) exit 2;;esac
@@ -39,7 +39,7 @@ printf 'Browser: non-root, one window, 10-minute limit, 1GiB memory, no host por
 printf 'Base Compose, deployment controller, DB, original media, Stash/NMLO and NAS ACL are not changed.\n'
 [ "$mode" != preview ] || { printf 'preview=complete; nas_changes=none\n';exit 0; }
 if [ ! -e "$destination" ];then
-  [ "$mode" = apply-login ] || { printf 'Install login first.\n' >&2;exit 1; }
+  case "$mode" in apply-login|update-login) ;; *) printf 'Install login first.\n' >&2;exit 1;;esac
   mkdir "$destination";chmod 700 "$destination"
   cp "$source_dir/compose.login.yaml" "$source_dir/compose.worker-sessions.yaml" "$destination/"
   printf 'STUDIO_LOGIN_IMAGE=%s\nSTUDIO_WORKER_IMAGE=%s\nSTUDIO_DATA_VOLUME=%s\nSTUDIO_APP_NETWORK=%s\n' "$login_image" "$worker_image" "$volume" "$network" > "$destination/.env.images"
@@ -50,6 +50,35 @@ fi
 cmp "$source_dir/compose.login.yaml" "$destination/compose.login.yaml" >/dev/null
 cmp "$source_dir/compose.worker-sessions.yaml" "$destination/compose.worker-sessions.yaml" >/dev/null
 compose() { docker_local compose --env-file "$root/.env.nas" --env-file "$destination/.env.images" -p "$project-login" -f "$destination/compose.login.yaml" -f "$destination/compose.worker-sessions.yaml" "$@"; }
+if [ "$mode" = update-login ];then
+  cp "$destination/.env.images" "$destination/.env.images.previous"
+  cp "$destination/installation.sha256" "$destination/installation.sha256.previous"
+  printf 'STUDIO_LOGIN_IMAGE=%s\nSTUDIO_WORKER_IMAGE=%s\nSTUDIO_DATA_VOLUME=%s\nSTUDIO_APP_NETWORK=%s\n' "$login_image" "$worker_image" "$volume" "$network" > "$destination/.env.images.new"
+  mv "$destination/.env.images.new" "$destination/.env.images"
+  (cd "$destination" && sha256sum compose.login.yaml compose.worker-sessions.yaml .env.images > installation.sha256)
+  rollback_images() {
+    code=$?
+    if [ "$code" -ne 0 ];then
+      cp "$destination/.env.images.previous" "$destination/.env.images"
+      cp "$destination/installation.sha256.previous" "$destination/installation.sha256"
+      compose up -d login-init site-login || true
+      printf 'login_update=failed; previous images restored; inspect local logs\n' >&2
+    fi
+    exit "$code"
+  }
+  trap rollback_images EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM HUP
+  compose up -d login-init site-login
+  ready=no
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20;do
+    if docker_local exec "$container" python -c 'from site_sessions import LoginClient; assert LoginClient(config_root="/data").call({"op":"status"})["configured"]' >/dev/null 2>&1;then ready=yes;break;fi
+    sleep 2
+  done
+  [ "$ready" = yes ]
+  printf 'login_update=healthy; existing sessions and keys retained\n'
+  exit 0
+fi
 case "$mode" in
   apply-login)
     compose up -d login-init site-login

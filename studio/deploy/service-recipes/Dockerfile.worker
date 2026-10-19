@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim
+WORKDIR /app
+COPY studio/requirements-worker.txt ./
+RUN \
+    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
+    pip install --no-cache-dir -r requirements-worker.txt
+COPY studio/worker.py studio/gallery_engine.py studio/sources.py studio/site_sessions.py ./
+RUN chmod -R a+rX /app && useradd --uid 9001 --create-home studio && mkdir /downloads && chown studio /downloads
+USER studio
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 STUDIO_TARGET=nas STUDIO_OUTPUT=/downloads
+ENV STUDIO_DOWNLOAD_COMMAND='["python","/app/gallery_engine.py","--url","{url}","--output","{output}"]'
+CMD ["python","worker.py"]

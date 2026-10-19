@@ -21,6 +21,8 @@ LANraragi의 `/api/download_url` 명세는 쿼리 또는 multipart 본문을 받
 
 ## NAS 설치안
 
+기존 앱 자동 업데이트 채널을 사용한다면 [서비스 배포 채널](deploy/SERVICE_CHANNEL.ko.md)을 한 번 연결하는 방식이 우선입니다. 이후 NAS가 이미지 빌드·로그인 설치·작업자 시작을 처리하므로 아래 수동 이미지 전달은 필요하지 않습니다. 기존 앱 전용 채널만으로는 호스트 실행기를 교체할 수 없습니다.
+
 현재 Studio 코드 업데이트와 새 서비스 설치는 별도입니다. 자동 앱 업데이트만으로 새 컨테이너·권한·마운트를 추가하지 않습니다.
 
 새 구성은 `compose.login.yaml`과 선택적인 `compose.worker-sessions.yaml`을 사용한 **별도 Compose 프로젝트**입니다.

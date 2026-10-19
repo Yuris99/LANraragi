@@ -101,6 +101,21 @@ package_images(root,parse_source(a.url))
         print('phase=base_start',flush=True)
         command(base+['up','-d'])
         wait(lambda:command(docker+['inspect','--format','{{.State.Health.Status}}',project+'-studio-1']).stdout.strip()=='healthy')
+        print('phase=fixed_service_installer_and_update',flush=True)
+        # Only NAS path/host root identity are fixture adapters. Exercise the
+        # actual installer against real, dedicated Docker volumes and services.
+        install_source=temporary/'installer/studio';(install_source/'deploy').mkdir(parents=True)
+        for name in ('compose.login.yaml','compose.worker-sessions.yaml'):
+            shutil.copy(repo/'studio'/name,install_source/name)
+        helper=(repo/'studio/deploy/install-site-login.sh').read_text()
+        helper=helper.replace('/volume*/docker/*)',str(temporary)+')')
+        helper=helper.replace('[ "$(id -u)" -eq 0 ]','[ "$(id -u)" -eq '+str(os.getuid())+' ]')
+        installer=install_source/'deploy/install-site-login.sh';installer.write_text(helper)
+        before=command(docker+['inspect','--format','{{.Id}}|{{.State.StartedAt}}',project+'-studio-1']).stdout
+        command(['sh',str(installer),'apply-login',str(temporary),project,login,worker])
+        wait(lambda:request('/api/site-connections').get('configured'))
+        command(['sh',str(installer),'update-login',str(temporary),project,login,worker])
+        assert command(docker+['inspect','--format','{{.Id}}|{{.State.StartedAt}}',project+'-studio-1']).stdout==before
         print('phase=login_start',flush=True)
         command(side+['up','-d','login-init','site-login'])
         wait(lambda:request('/api/site-connections').get('configured'))

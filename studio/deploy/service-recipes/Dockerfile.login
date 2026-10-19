@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim-bookworm
+WORKDIR /app
+RUN \
+    studio_ca_bundle=/etc/ssl/certs/ca-certificates.crt; \
+    if [ -f /run/secrets/proxy_ca ]; then studio_ca_bundle=/run/secrets/proxy_ca; fi; \
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
+    apt-get -o Acquire::https::CaInfo="$studio_ca_bundle" update && apt-get -o Acquire::https::CaInfo="$studio_ca_bundle" install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+RUN \
+    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
+    pip install --no-cache-dir playwright==1.62.0
+COPY studio/login_service.py studio/site_sessions.py studio/init_login.py ./
+RUN chmod -R a+rX /app && useradd --uid 9001 --create-home studio
+USER studio
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp STUDIO_SESSION_DIR=/sessions STUDIO_LOGIN_TOKEN_FILE=/run/studio-login/token
+CMD ["python","login_service.py"]
