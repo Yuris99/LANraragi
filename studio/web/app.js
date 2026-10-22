@@ -482,7 +482,7 @@ $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () =
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
 applySettings();
 applyRoute(); guard(showJobs)();
-guard(async () => { const health = await api("/api/health"); $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
+guard(async () => { const health = await api("/api/health"); $("#studio-version").textContent = Number.isInteger(health.studio_update) ? `Studio 업데이트 ${health.studio_update}` : "Studio 버전 표시 업데이트 대기"; $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
 setInterval(guard(async () => { if (state.view === "jobs" && !document.hidden) await showJobs(); }), 5000);
 
 let uploadBusy = false;

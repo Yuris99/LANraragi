@@ -25,6 +25,8 @@ from editions import VoiceAssets
 from site_sessions import LoginClient
 
 HERE=Path(__file__).parent
+# Keep aligned with the next Studio app deployment generation.
+STUDIO_UPDATE=20
 
 
 class LRR:
@@ -394,7 +396,7 @@ class Handler(BaseHTTPRequestHandler):
                 info=self.app.lrr.json('/api/info');connected=True
             except Exception:info={};connected=False
             return self.respond(dict(status='ok',lanraragi_connected=connected,
-                                     version=info.get('version'),targets=['nas','pc'],
+                                     version=info.get('version'),studio_update=STUDIO_UPDATE,targets=['nas','pc'],
                                      comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'html-unverified-live','hitomi':'unsupported'},metadata_fetch='direct-eh-hitomi-unverified-live',
                                      command_workers='operator-configured',uploads_enabled=self.app.uploads.root is not None,
                                      max_upload_bytes=self.app.uploads.max_bytes))
