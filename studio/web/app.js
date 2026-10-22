@@ -833,13 +833,37 @@ function renderLoginFrame(frame) {
         ? `로그인 사이트가 HTTP ${frame.response_status}을 반환했습니다. 사이트가 접근을 거부하거나 오류가 난 상태일 수 있습니다.`
         : frame.browser_mode === 'desktop' ? '일반 Chromium 원격 화면입니다. 사이트 인증과 로그인은 화면에서 직접 진행하세요.' : 'NAS 브라우저 화면이 열렸습니다. 아래 화면의 입력란을 선택해 로그인하세요.';
 }
+function sessionRequestNote(request) {
+    if (!request) return ' · 최근 정보 조회 기록 없음';
+    const mode = {no_matching_cookies:'요청 주소에 적용되는 쿠키 없음', not_sent:'요청하지 않음', saved_session:'저장 세션 사용', anonymous:'비로그인 요청', unusable_session:'저장 세션 사용 불가'}[request.mode] || '상태 확인 필요';
+    const outcome = {ok:'응답 수신 · 로그인 유효성 미확인', session_required:'세션 재등록 필요', access_required:'사이트 추가 인증·접근 제한', unavailable:'네트워크·서버 연결 실패', not_found:'항목 없음', invalid_response:'응답 형식 오류', response_limit:'응답 크기 초과'}[request.status] || '확인 필요';
+    return ` · 최근 조회: ${mode} / ${outcome}${request.http_status ? ` (HTTP ${request.http_status})` : ''}`;
+}
+$('#session-import-form').onsubmit = guard(async event => {
+    event.preventDefault();
+    if (loginBusy) return;
+    const input = $('#session-import-file'), file = input.files[0];
+    if (!file) throw new Error('세션 파일을 선택하세요.');
+    if (file.size > 131072) { input.value = ''; throw new Error('세션 파일은 128 KiB 이하여야 합니다.'); }
+    loginBusy = true; $('#session-import-submit').disabled = true;
+    let content = '';
+    try {
+        content = await file.text(); input.value = '';
+        await api('/api/site-connections', {op:'import-session', provider:$('#session-import-provider').value, content});
+        content = '';
+        toast('계정 세션을 NAS에 저장했습니다. 사이트 접근은 자동 연결 작업에서 확인합니다.');
+        await connectionStatus();
+    } finally { content = ''; input.value = ''; loginBusy = false; $('#session-import-submit').disabled = false; }
+});
 async function connectionStatus() {
     const status = await api('/api/site-connections');
     const desktopMissing = status.browser_mode === 'desktop' && !status.desktop_available;
     if (status.browser_mode === 'desktop') $('#login-mode-note').textContent = '일반 Chromium 원격 화면입니다. 사람 인증과 로그인은 직접 진행합니다. 계정 세션 저장은 명시적으로 선택할 때만 수행하며 사람 인증 쿠키는 다운로드 작업자에 전달하지 않습니다. 실제 사이트 지원은 별도 확인이 필요합니다.';
     $('#connections-status').textContent = status.configured ? 'NAS 로그인 서비스 연결됨 · 실제 사이트 지원은 별도 검증합니다.' : 'NAS 로그인 서비스가 아직 설치되지 않았습니다. 다운로드 엔진과 전용 세션 저장 공간을 추가해야 합니다.';
     if (desktopMissing) $('#connections-status').textContent = '일반 브라우저 실행 패키지가 아직 설치되지 않았습니다. NAS 전용 브라우저 구성 연결이 필요합니다.';
-    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
+    $('#session-import-submit').disabled = !status.configured || !status.session_import;
+    $('#session-import-note').textContent = status.session_import ? '등록 후 자동 연결 작업이 다시 확인합니다. 저장 성공과 사이트 접근 성공은 별도로 표시합니다.' : '로그인 서비스의 세션 등록 기능 업데이트를 기다립니다.';
+    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}${esc(sessionRequestNote(s.last_request))}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
     if (status.active) {
         loginSession = status.active.session;
         await loginOperation({ op: 'frame' });
@@ -884,7 +908,7 @@ async function loginOperation(operation) {
 $('#connections-open').onclick = guard(async () => { $('#connections-dialog').showModal(); await connectionStatus(); });
 $('#connections-refresh').onclick = guard(connectionStatus);
 $('#connections-dialog').addEventListener('close', () => {
-    clearTimeout(loginTimer); $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
+    clearTimeout(loginTimer); $('#session-import-file').value = ''; $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
 });
 $('#connections-sites').onclick = guard(async event => {
     const button = event.target.closest('button');

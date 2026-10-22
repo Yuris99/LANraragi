@@ -51,7 +51,7 @@ class LoginBrowser:
 
     def status(self):
         self.expire()
-        return {'configured':True,'source_documents':True,'sites':[self.vault.status(k) for k in SITES],
+        return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
                 'active':{'provider':self.provider,'session':self.session} if self.session else None}
 
     def route(self, route):
@@ -131,11 +131,14 @@ class LoginBrowser:
         if not isinstance(data,dict): raise ValueError('잘못된 로그인 요청입니다.')
         op=data.get('op'); schemas={
             'status':set(),'start':{'provider'},'frame':{'session'},'cancel':{'session'},
-            'save':{'session'},'forget':{'provider'},'click':{'session','x','y'},
+            'save':{'session'},'forget':{'provider'},'import-session':{'provider','content'},'click':{'session','x','y'},
             'text':{'session','text'},'key':{'session','key'},'scroll':{'session','delta'},'visit':{'session'}}
         if op not in schemas or set(data)!=(schemas[op]|{'op'}): raise ValueError('잘못된 로그인 요청입니다.')
         self.expire()
         if op=='status': return self.status()
+        if op=='import-session':
+            if self.provider==data['provider']: self.close()
+            return self.vault.import_file(data['provider'],data['content'])
         if op=='start': return self.start(data['provider'])
         if op=='forget':
             site(data['provider'])
@@ -299,7 +302,7 @@ class DesktopBrowser(LoginBrowser):
     def call(self, data):
         if not isinstance(data,dict):raise ValueError('잘못된 로그인 요청입니다.')
         op=data.get('op')
-        if op in ('status','start','forget'):return super().call(data)
+        if op in ('status','start','forget','import-session'):return super().call(data)
         schemas={'frame':set(),'cancel':set(),'save':set(),'visit':set(),'click':{'x','y'},
                  'text':{'text'},'key':{'key'},'scroll':{'delta'},'desktop-session':{'cookies'}}
         if op not in schemas or set(data)!=(schemas[op]|{'op','session'}):raise ValueError('잘못된 로그인 요청입니다.')
@@ -384,6 +387,7 @@ def make_login_server(host,port,actor,token):
             if self.path!='/rpc': return self.respond({'error':'not_found'},404)
             if self.headers.get('Transfer-Encoding') or self.headers.get_content_type()!='application/json':
                 return self.respond({'error':'invalid_request'},400)
+            data={}
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0<length<=262144: raise ValueError('요청 크기를 확인하세요.')
@@ -392,7 +396,7 @@ def make_login_server(host,port,actor,token):
             except LoginFailure as error:
                 self.respond({'error':str(error) if str(error) in LOGIN_ERRORS else 'login_browser_unavailable'},503)
             except ValueError:
-                self.respond({'error':'invalid_login_operation'},400)
+                self.respond({'error':'invalid_session_file' if isinstance(data,dict) and data.get('op')=='import-session' else 'invalid_login_operation'},400)
             except Exception:
                 self.respond({'error':'login_browser_unavailable'},503)
     return ThreadingHTTPServer((host,port),Handler)

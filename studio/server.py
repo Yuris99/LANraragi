@@ -580,7 +580,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(store.import_metadata(match[1],parse_html(data['url'],data['html'])))
         if path=='/api/site-connections':
             if data.get('op')=='source-document':raise ValueError('내부 정보 조회는 로그인 화면 API에서 사용할 수 없습니다.')
-            if len(json.dumps(data).encode())>16384:raise ValueError('로그인 요청 크기를 확인하세요.')
+            if len(json.dumps(data).encode())>(200000 if data.get('op')=='import-session' else 16384):raise ValueError('로그인 요청 크기를 확인하세요.')
             return self.respond(self.app.login.call(data))
         if path=='/api/visual/index':
             if set(data)!={'items'}:raise ValueError('표지 지문 목록만 지정하세요.')

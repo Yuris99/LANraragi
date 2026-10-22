@@ -55,7 +55,7 @@ def session_provider(url):
     raise ValueError('지원하지 않는 세션 출처입니다.')
 
 
-def source_document(vault,url,offset=0):
+def _source_document(vault,url,offset=0,trace=None):
     """Fixed read-only metadata routes; account cookies never leave this service."""
     if not isinstance(url,str) or len(url)>2048 or any(c in url for c in '\r\n\x00'):
         raise ValueError('invalid_source_url')
@@ -91,6 +91,8 @@ def source_document(vault,url,offset=0):
     headers={'User-Agent':'LibraryStudio/0.1','Accept':'text/html,text/javascript,application/json,application/octet-stream'}
     if index:headers['Range']=f'bytes={offset*4}-{offset*4+31}'
     request=urllib.request.Request(url,headers=headers)
+    jar.add_cookie_header(request)
+    if trace is not None:trace['mode']='saved_session' if request.has_header('Cookie') else 'no_matching_cookies' if cookies else 'anonymous'
     try:
         with urllib.request.build_opener(NoRedirect(),urllib.request.HTTPCookieProcessor(jar)).open(request,timeout=20) as response:
             if index:
@@ -113,8 +115,22 @@ def source_document(vault,url,offset=0):
     except (OSError,UnicodeError):return {'status':'unavailable'}
 
 
+def source_document(vault,url,offset=0):
+    # Diagnostics contain no URL, response body, cookie names or values.
+    host=urllib.parse.urlsplit(url).hostname if isinstance(url,str) else None
+    provider={'e-hentai.org':'ehentai','exhentai.org':'exhentai',
+              'ltn.gold-usergeneratedcontent.net':'hitomi'}.get(host)
+    trace={'mode':'not_sent'}
+    result=_source_document(vault,url,offset,trace)
+    if provider:
+        vault.last_requests[provider]={'mode':trace['mode'],'status':result['status'],
+            'http_status':result.get('http_status'),'at':int(time.time())}
+    return result
+
+
 class CookieVault:
     def __init__(self, root, readonly=False):
+        self.last_requests = {}
         self.root = Path(root)
         if not readonly: self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = self.root.lstat()
@@ -127,6 +143,49 @@ class CookieVault:
     def path(self, name):
         site(name)
         return self.root / (name + '.cookies')
+
+    def import_file(self, name, content):
+        """Explicit user export only; no browser extraction or challenge transfer."""
+        if name not in ('ehentai','exhentai'):
+            raise ValueError('E-Hentai 또는 ExHentai를 선택하세요.')
+        if not isinstance(content,str) or len(content.encode('utf-8'))>131072:
+            raise ValueError('세션 파일은 128 KiB 이하여야 합니다.')
+        cookies=[]
+        try:
+            raw=content.lstrip('\ufeff').strip()
+            if raw.startswith('['):
+                values=json.loads(raw)
+                if not isinstance(values,list) or len(values)>500:raise ValueError()
+            else:
+                values=[]
+                if not raw.startswith('# Netscape HTTP Cookie File'):raise ValueError()
+                for line in raw.splitlines():
+                    if not line or (line.startswith('#') and not line.startswith('#HttpOnly_')):continue
+                    fields=line.removeprefix('#HttpOnly_').split('\t')
+                    if len(fields)!=7 or fields[1] not in ('TRUE','FALSE') or fields[3] not in ('TRUE','FALSE'):raise ValueError()
+                    domain,_,path,secure,expiry,key,value=fields
+                    values.append({'domain':domain,'path':path,'secure':secure=='TRUE',
+                        'expires':int(expiry) if expiry else -1,'name':key,'value':value,
+                        'httpOnly':line.startswith('#HttpOnly_')})
+                if len(values)>500:raise ValueError()
+            for item in values:
+                if not isinstance(item,dict):raise ValueError()
+                if not allowed_domain(name,item.get('domain','')):raise ValueError()
+                # Only normal account authentication cookies, never anti-bot clearance.
+                if item.get('name') not in ('ipb_member_id','ipb_pass_hash','igneous'):continue
+                if not isinstance(item.get('value'),str) or not item['value']:raise ValueError()
+                expiry=item.get('expirationDate',item.get('expires',-1))
+                if type(expiry) not in (int,float) or not math.isfinite(expiry) or (expiry>0 and expiry<=time.time()):raise ValueError()
+                cookies.append({**item,'expires':expiry})
+            names={c['name'] for c in cookies}
+            if not {'ipb_member_id','ipb_pass_hash'}<=names:raise ValueError()
+            target='https://exhentai.org/' if name=='exhentai' else 'https://e-hentai.org/'
+            if not {'ipb_member_id','ipb_pass_hash'}<={c['name'] for c in cookies if c['domain'].lstrip('.').lower()==urllib.parse.urlsplit(target).hostname}:raise ValueError()
+            result=self.save(name,cookies)
+        except (ValueError,TypeError,KeyError,OverflowError):
+            raise ValueError('사이트 전용 JSON 배열 또는 Netscape 세션 파일을 확인하세요. 유효한 계정 로그인 쿠키가 필요합니다.') from None
+        self.last_requests.pop(name,None)
+        return result
 
     def save(self, name, cookies):
         if self.readonly: raise ValueError('읽기 전용 세션입니다.')
@@ -188,10 +247,11 @@ class CookieVault:
         except OSError:revision=''
         return {'provider':name,'name':site(name)['name'],'state':state,'cookie_count':count,'session_revision':revision,
                 'login_available':bool(site(name)['login']),'site_verified':False,
-                'download_enabled':name != 'exhentai'}
+                'download_enabled':name != 'exhentai','last_request':self.last_requests.get(name)}
 
     def forget(self, name):
         if self.readonly: raise ValueError('읽기 전용 세션입니다.')
+        self.last_requests.pop(name,None)
         try: self.path(name).unlink()
         except FileNotFoundError: pass
         return self.status(name)
@@ -263,6 +323,7 @@ class LoginClient:
         except urllib.error.HTTPError as error:
             # Never return the upstream response or URL: it may include credentials.
             messages={
+                'invalid_session_file':'세션 파일을 등록하지 못했습니다. 선택한 사이트의 JSON 배열 또는 Netscape 파일이며, 로그인 쿠키가 유효한지 확인하세요. 기존 세션은 보존됩니다.',
                 'browser_start_failed':'NAS 브라우저를 시작하지 못했습니다. 브라우저 실행·메모리 상태를 확인해야 합니다.',
                 'login_site_timeout':'NAS에서 로그인 사이트의 응답을 기다리다 시간 제한에 도달했습니다.',
                 'login_site_unreachable':'NAS 브라우저가 로그인 사이트에 연결하지 못했습니다. 사이트 접근 또는 페이지 이동 제한을 확인해야 합니다.',
