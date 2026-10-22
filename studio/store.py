@@ -8,6 +8,7 @@ import time
 import uuid
 from pathlib import Path
 from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name
+from metadata import canonical_tag, visible_tag
 
 
 def uid():
@@ -87,7 +88,7 @@ class Store(EditionCatalog):
             if 'archive_filename' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN archive_filename TEXT NOT NULL DEFAULT ''")
             if 'artist_locked' not in work_columns:db.execute("ALTER TABLE works ADD COLUMN artist_locked INTEGER NOT NULL DEFAULT 0")
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
-            for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'")]:
+            for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'"),('metadata',"TEXT NOT NULL DEFAULT '{}'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
             db.execute('''INSERT INTO work_numbers(work_id)
                 SELECT w.id FROM works w WHERE NOT EXISTS
@@ -96,6 +97,8 @@ class Store(EditionCatalog):
     @contextlib.contextmanager
     def db(self):
         db = sqlite3.connect(self.path, timeout=20)
+        db.create_function('studio_tag',1,canonical_tag,deterministic=True)
+        db.create_function('visible_tag',1,visible_tag,deterministic=True)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:
@@ -117,7 +120,7 @@ class Store(EditionCatalog):
     @staticmethod
     def source_row(row):
         result = dict(row)
-        for key in ('tags', 'comments'):
+        for key in ('tags', 'comments', 'metadata'):
             result[key] = json.loads(result[key])
         return result
 
@@ -159,8 +162,8 @@ class Store(EditionCatalog):
             result['user_tags'] = [r[0] for r in db.execute('SELECT tag FROM user_tags WHERE work_id=? ORDER BY tag',(work_id,))]
             result['sources'] = [self.source_row(s) for s in db.execute(
                 'SELECT * FROM sources WHERE work_id=? ORDER BY provider,external_id', (work_id,))]
-            result['all_tags'] = list(dict.fromkeys(result['tags'] + result['user_tags'] + [
-                t for s in result['sources'] for t in s['tags']]))
+            result['all_tags'] = list(dict.fromkeys(canonical_tag(t) for t in result['tags'] + result['user_tags'] + [
+                t for s in result['sources'] for t in s['tags']] if visible_tag(t)))
             result['short_id']=self.short_identity(result)
             result['edition']=self.edition_details(result)
             result['cover_asset_id']=result['edition'].get('cover_asset_id')
@@ -181,15 +184,20 @@ class Store(EditionCatalog):
             where.append("(title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND (s.external_id LIKE ? ESCAPE '\\' OR s.tags LIKE ? ESCAPE '\\'))) ")
             where[-1]="("+where[-1]+" OR EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag LIKE ? ESCAPE '\\'))"
             args += [term] * 6
+            if ':' in query:
+                normalized=canonical_tag(query)
+                normalized='%'+normalized.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+                where[-1]="("+where[-1]+" OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE studio_tag(t.value) LIKE ? ESCAPE '\\') OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND studio_tag(t.value) LIKE ? ESCAPE '\\'))"
+                args.extend([normalized,normalized])
         if tag:
             where.append("EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)")
             args.append(tag)
         if all_tag:
             if not isinstance(all_tag,str) or len(all_tag)>300:raise ValueError('태그 길이를 확인하세요.')
-            where.append('''(EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)
-                OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE t.value=?)
-                OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND t.value=?))''')
-            args.extend([all_tag]*3)
+            where.append('''(EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND studio_tag(u.tag)=?)
+                OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE studio_tag(t.value)=?)
+                OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND studio_tag(t.value)=?))''')
+            args.extend([canonical_tag(all_tag)]*3)
         if provider:
             where.append('EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider=?)')
             args.append(provider)
@@ -215,7 +223,7 @@ class Store(EditionCatalog):
             for row in rows:
                 work=self.work_row(row);work['sources']=sources[row['id']]
                 work['user_tags']=user_tags[row['id']]
-                work['all_tags']=list(dict.fromkeys(work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']]))
+                work['all_tags']=list(dict.fromkeys(canonical_tag(tag) for tag in work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']] if visible_tag(tag)))
                 work['short_id']=self.short_identity(work)
                 items.append(work)
             if items:
@@ -256,13 +264,15 @@ class Store(EditionCatalog):
 
     def library_tags(self,query=''):
         if not isinstance(query,str) or len(query)>300:raise ValueError('태그 검색어가 너무 깁니다.')
+        query=canonical_tag(query)
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
-            rows=db.execute('''SELECT tag,count(*) AS count FROM (
+            rows=db.execute('''SELECT studio_tag(tag) AS tag,count(DISTINCT work_id) AS count FROM (
                 SELECT u.work_id,u.tag FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL UNION
                 SELECT w.id,t.value FROM works w,json_each(w.tags) t WHERE w.merged_into IS NULL UNION
-                SELECT s.work_id,t.value FROM sources s,json_each(s.tags) t)
-                WHERE tag LIKE ? ESCAPE ? GROUP BY tag ORDER BY count DESC,tag LIMIT 100''',(term,'\\')).fetchall()
+                SELECT s.work_id,t.value FROM sources s JOIN works w ON w.id=s.work_id,json_each(s.tags) t WHERE w.merged_into IS NULL)
+                WHERE visible_tag(tag) AND studio_tag(tag) LIKE ? ESCAPE ? GROUP BY studio_tag(tag)
+                ORDER BY count DESC,tag LIMIT 100''',(term,'\\')).fetchall()
         return [dict(row) for row in rows]
 
     def rename_user_tag(self,source,target):
@@ -341,6 +351,21 @@ class Store(EditionCatalog):
         artist=data.get('artist_if_empty','')
         if not isinstance(artist,str) or len(artist)>500:raise ValueError('작가 형식을 확인하세요.')
         artist=artist.strip()
+        metadata=data.get('metadata')
+        if metadata is not None and (not isinstance(metadata,dict) or len(json.dumps(metadata).encode())>256*1024):
+            raise ValueError('출처 메타데이터 형식을 확인하세요.')
+        if metadata is not None:
+            allowed={'provider','external_id','url','title','tags','raw_tags','artists','languages','collector','pages','comments','title_original','title_localized'}
+            if set(metadata)-allowed or any(metadata.get(key)!=identity[key] for key in ('provider','external_id','url')):
+                raise ValueError('출처 메타데이터의 번호·URL을 확인하세요.')
+            if not isinstance(metadata.get('title'),str) or not 0<len(metadata['title'])<=2000:
+                raise ValueError('출처 제목 형식을 확인하세요.')
+            for key in ('tags','raw_tags','artists','languages'):
+                if not isinstance(metadata.get(key),list):raise ValueError('출처 메타데이터 목록을 확인하세요.')
+                tags_list(metadata[key])
+            comments_list(metadata.get('comments',[]))
+            if metadata.get('pages') is not None and (type(metadata['pages']) is not int or not 1<=metadata['pages']<=100000):
+                raise ValueError('출처 페이지 수를 확인하세요.')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             existing = db.execute('SELECT * FROM sources WHERE provider=? AND external_id=?',
@@ -362,7 +387,20 @@ class Store(EditionCatalog):
                         fetched,data.get('status','manual')))
             if artist:
                 db.execute("UPDATE works SET artist=?,artist_locked=1 WHERE id=? AND artist='' AND artist_locked=0 AND merged_into IS NULL",(artist,work_id))
+            if metadata is not None:
+                db.execute('UPDATE sources SET metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),source_id))
         return self.get_work(work_id)
+
+    def import_metadata(self,work_id,metadata,remote=False):
+        # Source title never overwrites the user's catalog title or edition.
+        self.upsert_source(work_id,{'url':metadata['url'],'tags':metadata['tags'],
+            'metadata':metadata,'artist_if_empty':', '.join(metadata['artists'])[:500],
+            'status':'fetched' if remote else 'manual'})
+        work=self.get_work(work_id)
+        source=next(s for s in work['sources'] if s['url']==metadata['url'])
+        if metadata.get('comments'):
+            self.apply_comments(work['id'],source['id'],{'status':'fetched','comments':metadata['comments'],'fetched_at':time.time()})
+        return self.get_work(work['id'])
 
     def begin_comment_fetch(self, work_id, source_id):
         work_id=self.get_work(work_id)['id']

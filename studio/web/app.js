@@ -11,6 +11,8 @@ delete settings.thumbnailMosaic;
 // Keep old original-view bookmarks usable; normal visits use the saved choice.
 if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailBlur = false;
 const providerName = { ehentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
+const visibleTag = (tag) => !/^(date_added|timestamp|source):/i.test(tag);
+const sourceMatchCandidates = new Map();
 const statusName = { queued: "대기 중", running: "진행 중", complete: "완료", failed: "실패", blocked: "확인 필요" };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (s) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[s]));
 // Modal dialogs live above normal z-index layers. Keep notices in the active
@@ -249,8 +251,8 @@ function renderDetail(work) {
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
-    <section class="detail-section"><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3>${work.sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><button class="quiet" data-fetch="${s.id}">태그 가져오기</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></div><small>${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`}
-    <details class="detail-section"><summary>출처 연결 · 태그·댓글 가져오기</summary><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="https://…"></label><label>원본 태그<input name="tags" placeholder="쉼표로 구분 (선택)"></label><label>댓글 JSON (선택)<textarea name="comments" placeholder='[{"id":"1","author":"작성자","text":"댓글","posted_at":"2026-01-01"}]'></textarea></label><p class="muted">사이트별 정보를 따로 보존합니다. nHentai 공개 댓글 API 수집기는 실사이트 미검증입니다. E-Hentai·Hitomi 댓글은 JSON 가져오기를 사용하세요. 로그인·접근 제한은 우회하지 않습니다.</p><button class="primary">출처 저장</button></form></details></section>`;
+    <section class="detail-section"><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3>${work.sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button>${["hitomi","ehentai"].includes(s.provider) ? `<button class="quiet" data-counterpart="${s.id}">다른 사이트 후보 찾기·자동 연결</button>` : ""}<button class="quiet" data-comments="${s.id}">댓글 갱신</button></div><small>${s.metadata?.title ? `출처 제목: ${esc(s.metadata.title)} · ` : ""}${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.filter(visibleTag).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`}
+    <details class="detail-section"><summary>출처 연결 · 태그·댓글 가져오기</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="https://…"></label><label>원본 태그<input name="tags" placeholder="쉼표로 구분 (선택)"></label><label>댓글 JSON (선택)<textarea name="comments" placeholder='[{"id":"1","author":"작성자","text":"댓글","posted_at":"2026-01-01"}]'></textarea></label><p class="muted">사이트별 정보를 따로 보존합니다. nHentai 공개 댓글 API 수집기는 실사이트 미검증입니다. E-Hentai 댓글은 HTML에 포함된 항목을 가져올 수 있습니다. Hitomi 댓글 수집은 지원하지 않습니다. 로그인·접근 제한은 우회하지 않습니다.</p><button class="primary">출처 저장</button></form></details></section>`;
     renderEdition(work);
     if (!$("#detail").open) $("#detail").showModal();
 }
@@ -306,6 +308,29 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.id) await showDetail(button.dataset.id);
     if (button.dataset.rating) { await api(`/api/works/${state.detail.id}`, { rating: Number(button.dataset.rating) }); await showDetail(state.detail.id); }
     if (button.dataset.fetch) { button.disabled = true; try { await api(`/api/works/${state.detail.id}/sources/${button.dataset.fetch}/fetch`, {}); await showDetail(state.detail.id); toast("출처 태그를 갱신했습니다."); } finally { button.disabled = false; } }
+    if (button.id === "metadata-preview") {
+        const form = $("#html-metadata-form"), snapshot = {url:form.elements.url.value,html:form.elements.html.value};
+        const value = await api('/api/metadata/preview', snapshot);
+        if (!form.isConnected || form.elements.url.value !== snapshot.url || form.elements.html.value !== snapshot.html) return;
+        $("#metadata-preview-result").textContent = `${value.title} · ${value.artists.join(', ')} · ${value.languages.join(', ')} · 태그 ${value.tags.length} · 댓글 ${value.comments.length}`;
+        $("#metadata-save").disabled = false;
+    }
+    if (button.dataset.counterpart) {
+        const workId = state.detail.id; button.disabled = true;
+        try {
+            const value = await api(`/api/works/${workId}/counterparts`, {source_id:button.dataset.counterpart,automatic:true});
+            if (state.detail?.id !== workId) return;
+            if (value.connected) { await showDetail(workId); await load(); toast('엄격한 비교 조건을 충족한 출처를 연결했습니다.'); }
+            sourceMatchCandidates.set(workId, value.items);
+            $("#counterpart-results").innerHTML = `<p>${esc(value.message)} · 조회 상태: ${esc(value.status)}</p>` + value.items.map((item,index) => `<div class="source-row"><b>${esc(providerName[item.metadata.provider])} #${esc(item.metadata.external_id)}</b><p>${esc(item.metadata.title)} · ${esc(item.metadata.artists.join(', '))} · ${esc(item.metadata.languages.join(', '))}</p><small>제목 유사도 ${Math.round(item.comparison.title_similarity*100)}% · 작가 ${item.comparison.artist_match ? '일치' : '미확인'} · 페이지 ${item.comparison.page_match ? '일치' : '미확인'}</small><button type="button" class="quiet" data-counterpart-select="${index}">같은 판본인지 확인 후 연결</button></div>`).join('');
+        } finally { button.disabled = false; }
+    }
+    if (button.dataset.counterpartSelect !== undefined) {
+        const item = sourceMatchCandidates.get(state.detail.id)?.[Number(button.dataset.counterpartSelect)];
+        if (!item) return;
+        await api(`/api/works/${state.detail.id}/sources`, {url:item.metadata.url,tags:item.metadata.tags,metadata:item.metadata,artist_if_empty:item.metadata.artists.join(', ').slice(0,500)});
+        await showDetail(state.detail.id); await load(); toast('선택한 출처 정보를 연결했습니다.');
+    }
     if (button.dataset.comments) { button.disabled = true; try { const result = await api(`/api/works/${state.detail.id}/sources/${button.dataset.comments}/comments/fetch`, {}); await showDetail(state.detail.id); toast(result.message); } finally { button.disabled = false; } }
     if (button.dataset.retry) { await api(`/api/jobs/${button.dataset.retry}/retry`, {}); await showJobs(); }
     if (button.dataset.userFilter) { state.tag = button.dataset.userFilter; state.allTag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
@@ -332,6 +357,12 @@ document.addEventListener("submit", guard(async (event) => {
     }
     if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); await api(`/api/works/${work.id}/edition`, {kind:data.kind || "comic",language:data.language || "",label:data.label || ""}); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
     if (form.id === "source-form") { const value = { url: data.url }; if (data.tags) value.tags = data.tags; if (data.comments) value.comments = JSON.parse(data.comments); await api(`/api/works/${state.detail.id}/sources`, value); await showDetail(state.detail.id); await load(); }
+    if (form.id === "html-metadata-form") {
+        if ($("#metadata-save").disabled) return;
+        $("#metadata-save").disabled = true;
+        await api(`/api/works/${state.detail.id}/metadata`, {url:data.url,html:data.html});
+        await showDetail(state.detail.id); await load(); toast('HTML의 작품 정보·태그·댓글을 출처에 연결했습니다.');
+    }
     if (form.id === "download-form") {
         $("#download-submit").disabled = true;
         try {
@@ -405,7 +436,26 @@ $("#read-direction").onchange = (e) => { settings.direction = e.target.value; sa
 $("#layout").onclick = () => { settings.layout = settings.layout === "list" ? "grid" : "list"; saveSettings(); };
 $("#direction").onclick = guard(async () => { state.direction = state.direction === "desc" ? "asc" : "desc"; $("#direction").textContent = state.direction === "desc" ? "↓" : "↑"; await load(); });
 $("#sort").onchange = guard(async (e) => { state.sort = e.target.value; state.page = 1; await load(); });
-$("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => { state.tag = ""; state.query = $("#search").value; state.page = 1; await load(); }), 250); };
+$("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
+    const query = $("#search").value;
+    state.tag = ""; state.query = query; state.page = 1; await load();
+    const tags = await api('/api/library/tags?q=' + encodeURIComponent(query));
+    if ($("#search").value === query) $("#library-tag-suggestions").innerHTML = tags.slice(0,20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
+}), 250); };
+document.addEventListener('input', event => {
+    if (event.target.closest('#html-metadata-form')) {
+        $("#metadata-save").disabled = true; $("#metadata-preview-result").textContent = '';
+    }
+});
+document.addEventListener('change', guard(async event => {
+    if (event.target.id !== 'metadata-file') return;
+    const file = event.target.files[0]; if (!file) return;
+    if (file.size > 2*1024*1024) throw new Error('HTML 파일은 최대 2MiB입니다.');
+    const form = event.target.closest('form'), html = await file.text();
+    if (!form.isConnected) return;
+    form.elements.html.value = html; $("#metadata-save").disabled = true;
+    $("#metadata-preview-result").textContent = '파일을 읽었습니다. 원본 URL을 입력하고 추출 미리보기를 누르세요.';
+}));
 $("#previous").onclick = guard(async () => { state.page -= 1; await load(); }); $("#next").onclick = guard(async () => { state.page += 1; await load(); });
 $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () => turnPage(1);
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
@@ -521,42 +571,6 @@ $("#upload-files").onchange = (event) => chooseUploadFiles(event.target.files);
 $("#upload-folder").onchange = (event) => chooseUploadFiles(event.target.files);
 $("#upload-drop").ondragover = (event) => { event.preventDefault(); };
 $("#upload-drop").ondrop = (event) => { event.preventDefault(); chooseUploadFiles(event.dataTransfer.files); };
-
-let folderRequestKey = null, folderRequestSelection = null, folderBusy = false;
-const folderCompleted = new Set();
-async function refreshFolders() {
-    const value = await api('/api/folders');
-    const active = value.jobs.some((job) => ['queued', 'running'].includes(job.state));
-    $('#folder-worker-status').textContent = value.connected ? 'NAS 폴더 작업자 연결됨 · 한 번에10권 · 동시 작업1개' : value.configured ? '작업자 응답을 기다립니다. 예약 작업이 다시 연결되면 이어집니다.' : 'NAS 폴더 작업자가 아직 연결되지 않았습니다. 최초 연결을 마치면 여기서 가져올 수 있습니다.';
-    $('#folder-start').disabled = !value.connected || active || folderBusy;
-    for (const checkbox of $('#folder-collections').querySelectorAll('input')) checkbox.disabled = active || folderBusy || !value.collections.includes(checkbox.value);
-    $('#folder-jobs').innerHTML = value.jobs.map((job) => `<section class="detail-section"><h3>${esc(({ queued: '대기 중', running: '가져오는 중', complete: '완료', failed: '확인 필요', cancelled: '취소됨' })[job.state] || job.state)} · ${job.imported}권 추가</h3><p>${esc(job.collections.join(', '))} · 최대${job.limit_count}권 · ${job.scanned}개 폴더 검사 · 기존${job.skipped}개 건너뜀 · 문제${job.errors}개</p><progress max="10" value="${job.imported}"></progress><p class="muted">${esc(job.message)}</p>${job.state === 'queued' ? `<button type="button" class="quiet" data-folder-cancel="${job.id}">대기 취소</button>` : ''}</section>`).join('') || '<p class="muted">아직 가져오기 요청이 없습니다.</p>';
-    const finished = value.jobs.filter((job) => job.state === 'complete' && !folderCompleted.has(job.id));
-    if (finished.length) {
-        finished.forEach((job) => folderCompleted.add(job.id));
-        await api('/api/uploads/sync', {}).catch(() => {});
-        if (state.view !== 'jobs') await load();
-    }
-}
-$('#folder-open').onclick = guard(async () => { $('#folder-dialog').showModal(); await refreshFolders(); });
-$('#folder-refresh').onclick = guard(async () => { await api('/api/uploads/sync', {}).catch(() => {}); await refreshFolders(); if (state.view !== 'jobs') await load(); });
-$('#folder-start').onclick = guard(async () => {
-    if (folderBusy) return;
-    const collections = [...$('#folder-collections').querySelectorAll('input:checked')].map((input) => input.value);
-    if (!collections.length) return toast('가져올 하위 폴더를 선택하세요.');
-    // Keep the same idempotency key on a lost response; changing selection starts
-    // a new intent. A duplicate click cannot create a second10-book request.
-    const selection = JSON.stringify(collections);
-    if (!folderRequestKey || folderRequestSelection !== selection) folderRequestKey = crypto.randomUUID().replaceAll('-', '');
-    folderRequestSelection = selection; folderBusy = true; $('#folder-start').disabled = true;
-    try {
-        await api('/api/folders', { collections, request_key: folderRequestKey });
-        folderRequestKey = null; await refreshFolders(); toast('최대10권 가져오기를 요청했습니다.');
-    } finally { folderBusy = false; await refreshFolders(); }
-});
-$('#folder-jobs').onclick = guard(async (event) => { const button = event.target.closest('[data-folder-cancel]'); if (button) { await api('/api/folders/' + button.dataset.folderCancel + '/cancel', {}); await refreshFolders(); } });
-setInterval(() => { if ($('#folder-dialog').open && !document.hidden) refreshFolders().catch((error) => { $('#folder-worker-status').textContent = error.message; $('#folder-start').disabled = true; }); }, 2500);
-
 
 let organizePage = 1, organizeQuery = "", organizeBusy = false;
 const organizeCandidates = new Map();

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from connectors import fetch_comments, source_candidates
 from sources import parse_source
+from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates
 from store import Store
 from uploads import Uploads,UploadError
 from editions import VoiceAssets
@@ -126,6 +127,12 @@ class Studio:
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
+        if source['provider'] in ('hitomi','ehentai'):
+            if not self.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
+            try:
+                self.store.begin_matching(work_id)
+                return self.store.import_metadata(work_id,direct_metadata(source['url']),remote=True)
+            finally:self.match_lock.release()
         if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
         plugins=self.lrr.json('/api/plugins/metadata')
         namespace={'ehentai':'ehplugin','hitomi':'hitomiplugin','nhentai':'nhplugin'}[source['provider']]
@@ -142,8 +149,12 @@ class Studio:
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
-        if source['provider']=='nhentai':self.store.begin_comment_fetch(work_id,source_id)
-        result=fetch_comments(source['url'])
+        if source['provider'] in ('nhentai','ehentai'):self.store.begin_comment_fetch(work_id,source_id)
+        if source['provider']=='ehentai':
+            metadata=direct_metadata(source['url'])
+            result={'status':'fetched','comments':metadata['comments'],'fetched_at':time.time(),
+                    'message':'응답 HTML에 포함된 댓글을 갱신했습니다. 기존 댓글은 보존합니다.'}
+        else:result=fetch_comments(source['url'])
         self.store.apply_comments(work_id,source_id,result)
         return {'status':result['status'],'message':result['message']}
 
@@ -330,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:info={};connected=False
             return self.respond(dict(status='ok',lanraragi_connected=connected,
                                      version=info.get('version'),targets=['nas','pc'],
-                                     comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'unsupported','hitomi':'unsupported'},metadata_fetch='installed-plugins',
+                                     comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'html-unverified-live','hitomi':'unsupported'},metadata_fetch='direct-eh-hitomi-unverified-live',
                                      command_workers='operator-configured',uploads_enabled=self.app.uploads.root is not None,
                                      max_upload_bytes=self.app.uploads.max_bytes))
         if path=='/api/uploads':return self.respond({'items':self.app.uploads.list(),'enabled':self.app.uploads.root is not None,'max_bytes':self.app.uploads.max_bytes})
@@ -474,6 +485,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/metadata/preview':
+            if set(data)!={'url','html'}:raise ValueError('출처 URL과 HTML만 지정하세요.')
+            return self.respond(parse_html(data['url'],data['html']))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/counterparts',path)
+        if match:
+            if set(data)!={'source_id','automatic'} or type(data['automatic']) is not bool:
+                raise ValueError('기준 출처와 자동 연결 여부를 지정하세요.')
+            work=store.get_work(match[1])
+            source=next((s for s in work['sources'] if s['id']==data['source_id']),None)
+            if not source or source['provider'] not in ('hitomi','ehentai'):raise ValueError('E-Hentai 또는 Hitomi 기준 출처를 선택하세요.')
+            if not self.app.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
+            try:
+                store.begin_matching(work['id'])
+                metadata=source['metadata']
+                if not metadata:
+                    metadata=direct_metadata(source['url'])
+                    store.import_metadata(work['id'],metadata,remote=True)
+                result=counterpart_candidates(metadata)
+                result['connected']=False
+                eligible=[item for item in result['items'] if item['comparison']['automatic_eligible']]
+                if data['automatic'] and len(eligible)==1 and result['status']=='checked':
+                    try:
+                        store.import_metadata(work['id'],eligible[0]['metadata'],remote=True)
+                        result['connected']=True
+                    except ValueError:
+                        result['message']='다른 작품에 이미 연결됐거나 판본 확인이 필요합니다. 자동 연결하지 않았습니다.'
+                return self.respond(result)
+            finally:self.app.match_lock.release()
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/metadata',path)
+        if match:
+            if set(data)!={'url','html'}:raise ValueError('출처 URL과 HTML만 지정하세요.')
+            return self.respond(store.import_metadata(match[1],parse_html(data['url'],data['html'])))
         if path=='/api/site-connections':
             if len(json.dumps(data).encode())>16384:raise ValueError('로그인 요청 크기를 확인하세요.')
             return self.respond(self.app.login.call(data))
@@ -529,7 +572,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({'items':source_candidates(data['number'])})
             finally:self.app.match_lock.release()
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
-        if match:return self.respond(store.upsert_source(match[1],data))
+        if match:
+            if data.get('metadata') is not None:
+                # Validate identity and bounded fields before importing comments.
+                # This is a user-confirmed snapshot, never marked live-verified.
+                store.upsert_source(match[1],data)
+                return self.respond(store.import_metadata(match[1],data['metadata']))
+            return self.respond(store.upsert_source(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)
         if match:return self.respond(self.app.fetch_metadata(match[1],match[2]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/comments/fetch',path)
