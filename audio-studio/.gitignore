@@ -1,0 +1,6 @@
+data/
+media/*
+!media/.gitkeep
+__pycache__/
+tests/__pycache__/
+test-results/

@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Audio Studio · 동인음성 서재</title><link rel="stylesheet" href="/style.css"><script src="/app.js?v=1" defer></script></head>
+<body>
+<header><div><span class="eyebrow">LANraragi Studio / AUDIO</span><h1>소리로 이어지는 서재</h1><p>하나의 원작, 각자의 판본. 출처와 기록을 함께 보관하세요.</p></div><a href="/api/export" download="audio-studio-catalog.json">목록 내보내기 ↗</a></header>
+<main>
+<section class="toolbar"><label for="search">서재 검색</label><input id="search" type="search" placeholder="원작, 판본, 출처 ID, 제작진 검색"><span id="count"></span></section>
+<p id="status" role="status" aria-live="polite"></p>
+<div class="layout"><section aria-label="원작 목록" id="library"></section>
+<aside><section class="panel"><span class="eyebrow">01 / ORIGINAL</span><h2>원작 만들기</h2><p>제목이 같아도 새 원작으로 등록됩니다.</p><form id="work-form"><label>원작 제목<input name="title" required maxlength="1000"></label><button>원작 등록</button></form></section>
+<section class="panel"><span class="eyebrow">02 / EDITION</span><h2>판본 연결하기</h2><p>연결할 원작을 직접 선택하세요.</p><form id="edition-form"><label>원작<select name="work_id" id="work-select" required></select></label><label>판본 제목<input name="title" required maxlength="1000"></label><div class="pair"><label>유형<select name="kind"><option value="audio">음성판</option><option value="voice_comic">보이스코믹</option><option value="comic">만화</option><option value="translation">번역본</option></select></label><label>언어<input name="language" placeholder="ja / ko" maxlength="100"></label></div><label>제작진 JSON<textarea name="credits" rows="2" placeholder='{"circle":"서클명","voice":["성우명"]}'>{}</textarea></label><button>선택한 원작에 판본 등록</button></form></section></aside></div>
+<section id="detail" class="panel" hidden aria-label="판본 상세"></section>
+</main>
+<footer id="player-bar"><div><span class="eyebrow">NOW PLAYING</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="previous" aria-label="이전 트랙">이전</button><audio id="audio" controls preload="metadata"></audio><button id="next" aria-label="다음 트랙">다음</button><label>재생 속도<select id="speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></footer>
+</body></html>
