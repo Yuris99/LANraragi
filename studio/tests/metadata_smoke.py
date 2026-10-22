@@ -36,7 +36,7 @@ def main():
                 page.locator('.card').first.wait_for()
                 assert page.locator('#folder-open').count()==0
                 page.locator('.card').first.click()
-                page.get_by_text('출처 연결 · 태그·댓글 가져오기',exact=True).click()
+                page.get_by_text('저장한 HTML 가져오기 (선택)',exact=True).click()
                 form=page.locator('#html-metadata-form')
                 form.locator('[name=url]').fill(H)
                 (root/'generated.html').write_text(hitomi_html())

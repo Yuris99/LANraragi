@@ -28,7 +28,6 @@ def main():
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
                 page.goto('http://127.0.0.1:'+str(server.server_port))
                 page.locator('.card').first.click()
-                page.get_by_text('출처 연결 · 태그·댓글 가져오기',exact=True).click()
                 form=page.locator('#source-form');form.locator('[name=url]').fill(H)
                 form.locator('button.primary').click()
                 page.locator('#auto-source-state').get_by_text('ExHentai: 연결됨',exact=False).wait_for(timeout=60000)
