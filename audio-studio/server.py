@@ -31,6 +31,48 @@ def media_path(root, relative, extensions=None):
     return candidate
 
 
+def local_files(root, limit=2000):
+    """Bounded, read-only picker for the explicitly configured media directory."""
+    root = Path(root).resolve()
+    items, visited, truncated = [], 0, False
+    allowed = AUDIO_EXTENSIONS | {'.srt', '.vtt'}
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        visited += 1
+        if visited > 2000:
+            truncated = True
+            break
+        parent = Path(directory)
+        safe_dirs = []
+        for name in dirs:
+            directory_path = parent/name
+            try:
+                if (not directory_path.is_symlink()
+                        and not getattr(directory_path, 'is_junction', lambda: False)()
+                        and directory_path.resolve().is_relative_to(root)):
+                    safe_dirs.append(name)
+            except (OSError, RuntimeError):
+                continue
+        dirs[:] = sorted(safe_dirs)
+        for name in sorted(files):
+            path = parent/name
+            if path.suffix.lower() not in allowed:
+                continue
+            try:
+                resolved = path.resolve()
+                if not resolved.is_relative_to(root) or not resolved.is_file():
+                    continue
+                kind = 'subtitle' if path.suffix.lower() in {'.srt', '.vtt'} else 'video' if path.suffix.lower() in {'.mp4', '.webm'} else 'audio'
+                items.append({'relative_path': path.relative_to(root).as_posix(), 'kind': kind, 'bytes': resolved.stat().st_size})
+            except (OSError, RuntimeError):
+                continue
+            if len(items) >= limit:
+                truncated = True
+                break
+        if truncated:
+            break
+    return {'items': sorted(items, key=lambda item: item['relative_path'].casefold()), 'truncated': truncated}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'AudioStudio/0.1'
 
@@ -114,6 +156,8 @@ class Handler(BaseHTTPRequestHandler):
         store = self.server.catalog
         if path == '/api/health':
             return self.reply({'status': 'ok', 'service': 'audio-studio', 'schema': 1, 'upstream_access': False})
+        if path == '/api/local-files':
+            return self.reply(local_files(self.server.media_root))
         if path in ('/api/works', '/api/export'):
             query = parse_qs(parsed.query).get('q', [''])[0] if path == '/api/works' else ''
             return self.reply({'schema': 1, 'works': store.works(query)})
@@ -129,13 +173,13 @@ class Handler(BaseHTTPRequestHandler):
             subtitle = store.subtitle(match[1])
             file = media_path(self.server.media_root, subtitle['relative_path'], {'.srt', '.vtt'})
             return self.reply({'cues': read_subtitles(file)})
-        asset = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/player.css': 'player.css', '/player.js': 'player.js', '/player-core.js': 'player-core.js'}.get(path)
+        asset = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/player.css': 'player.css', '/player.js': 'player.js', '/player-core.js': 'player-core.js', '/library-core.js': 'library-core.js'}.get(path)
         if not asset:
             return self.reply({'error': '찾을 수 없습니다.'}, 404)
         raw = (HERE / 'web' / asset).read_bytes()
         self.send_response(200)
         # Windows registry associations may label .js as text/plain, which nosniff blocks.
-        content_types = {'index.html': 'text/html', 'app.js': 'text/javascript', 'style.css': 'text/css', 'player.css': 'text/css', 'player.js': 'text/javascript', 'player-core.js': 'text/javascript'}
+        content_types = {'index.html': 'text/html', 'app.js': 'text/javascript', 'style.css': 'text/css', 'player.css': 'text/css', 'player.js': 'text/javascript', 'player-core.js': 'text/javascript', 'library-core.js': 'text/javascript'}
         self.send_header('Content-Type', content_types[asset] + '; charset=utf-8')
         self.send_header('Content-Length', str(len(raw)))
         self.send_header('X-Content-Type-Options', 'nosniff')

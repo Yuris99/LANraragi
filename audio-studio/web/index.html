@@ -1,17 +1,33 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Audio Studio · 동인음성 서재</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/player.css"><script src="/player-core.js" defer></script><script src="/player.js" defer></script><script src="/app.js?v=2" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Library Studio · Audio</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/player.css"><script src="/library-core.js" defer></script><script src="/player-core.js" defer></script><script src="/player.js" defer></script><script src="/app.js?v=3" defer></script></head>
 <body>
-<header><div><span class="eyebrow">LANraragi Studio / AUDIO</span><h1>소리로 이어지는 서재</h1><p>하나의 원작, 각자의 판본. 출처와 기록을 함께 보관하세요.</p></div><a href="/api/export" download="audio-studio-catalog.json">목록 내보내기 ↗</a></header>
-<main>
-<section class="toolbar"><label for="search">서재 검색</label><input id="search" type="search" placeholder="원작, 판본, 출처 ID, 제작진 검색"><span id="count"></span></section>
-<p id="status" role="status" aria-live="polite"></p>
-<div class="layout"><section aria-label="원작 목록" id="library"></section>
-<aside><section class="panel"><span class="eyebrow">01 / ORIGINAL</span><h2>원작 만들기</h2><p>RJ 코드는 직접 확인해서 등록합니다. 제목이 같아도 자동 병합하지 않습니다.</p><form id="work-form"><label>원작 제목<input name="title" required maxlength="1000"></label><label>RJ 코드 (선택)<input name="rj_code" placeholder="RJ01234567" pattern="RJ[0-9]{6,12}" maxlength="14"></label><button>원작 등록</button></form></section>
-<section class="panel"><span class="eyebrow">02 / EDITION</span><h2>판본 연결하기</h2><p>연결할 원작을 직접 선택하세요.</p><form id="edition-form"><label>원작<select name="work_id" id="work-select" required></select></label><label>판본 제목<input name="title" required maxlength="1000"></label><div class="pair"><label>유형<select name="kind"><option value="audio">음성판</option><option value="voice_comic">보이스코믹</option><option value="comic">만화</option><option value="translation">번역본</option></select></label><label>언어<input name="language" placeholder="ja / ko" maxlength="100"></label></div><label>제작진 JSON<textarea name="credits" rows="2" placeholder='{"circle":"서클명","voice":["성우명"]}'>{}</textarea></label><button>선택한 원작에 판본 등록</button></form></section></aside></div>
-<section id="detail" class="panel" hidden aria-label="판본 상세"></section>
+<aside class="sidebar">
+  <a class="brand" href="#"><span class="brand-icon" aria-hidden="true">▥</span><span>Library <b>Studio</b><small>AUDIO COLLECTION</small></span></a>
+  <div class="nav-label">라이브러리 <span class="audio-label">AUDIO</span></div>
+  <nav aria-label="음성 보관함"><button class="nav-item active" data-filter="all"><span aria-hidden="true">▦</span>전체 보관함</button><button class="nav-item" data-filter="resume"><span aria-hidden="true">◷</span>이어듣기</button></nav>
+  <div class="nav-label">감상 버전</div>
+  <nav aria-label="버전 분류"><button class="nav-item" data-filter="audio"><span class="dot original"></span>원본 음성</button><button class="nav-item" data-filter="subtitles"><span class="dot translated"></span>번역 자막</button><button class="nav-item" data-filter="video"><span class="dot video-dot"></span>영상</button></nav>
+  <div class="sidebar-bottom"><a class="nav-item" href="/api/export" download="audio-library.json"><span aria-hidden="true">↗</span>보관함 내보내기</a><div class="connection"><span class="dot" id="connection-dot"></span><div id="connection-text">서버 확인 중<small>개인 음성 라이브러리</small></div></div></div>
+</aside>
+<main id="app-main">
+  <header class="topbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="제목, RJ 코드, 서클로 검색" aria-label="라이브러리 검색"><kbd>/</kbd></label><button id="add-work" class="primary">＋ 작품 추가</button></header>
+  <section id="library-view">
+    <div class="page-heading"><div><div class="eyebrow">MY LIBRARY / AUDIO</div><h1 id="page-title">전체 보관함</h1><p id="page-description">원본 음성부터 자막 영상까지, 작품별로 모아 감상하세요.</p></div><span class="count-badge" id="count">0 작품</span></div>
+    <div class="toolbar"><div class="chips" aria-label="보관함 필터"><button class="chip selected" data-filter="all" aria-pressed="true">전체</button><button class="chip" data-filter="resume" aria-pressed="false">이어듣기</button><button class="chip" data-filter="subtitles" aria-pressed="false">번역 자막</button><button class="chip" data-filter="video" aria-pressed="false">영상</button></div><div class="sort-controls"><label class="sr-only" for="sort">정렬</label><select id="sort"><option value="added">추가한 날짜</option><option value="title">제목순</option><option value="rj">RJ 코드순</option></select><button id="layout" class="icon-button" aria-label="목록 보기로 전환" title="목록 보기로 전환">☷</button></div></div>
+    <section id="library" class="grid" aria-label="작품 목록" aria-live="polite"></section>
+    <nav id="pagination" class="pagination" aria-label="보관함 페이지" hidden><button id="previous-page" class="quiet">← 이전</button><span id="page-number"></span><button id="next-page" class="quiet">다음 →</button></nav>
+  </section>
+  <section id="work-view" hidden aria-label="작품 감상"><div class="work-navigation"><button id="back-library" class="quiet">← 보관함</button><button id="manage-work" class="quiet">작품 관리</button></div><div id="detail"></div></section>
+  <div class="page-footer">Library Studio <span>Audio · 하나의 원작, 여러 감상 버전</span></div>
 </main>
-<footer id="player-bar"><div><span class="eyebrow">NOW PLAYING</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="reopen-player">플레이어 열기</button></footer>
+<dialog id="manager" aria-labelledby="manager-title"><div class="dialog-heading"><div><div class="eyebrow">LIBRARY MANAGEMENT</div><h2 id="manager-title">작품 추가</h2></div><button id="close-manager" class="icon-button" aria-label="작품 관리 닫기">×</button></div><div class="manager-tabs"><button class="chip selected" data-panel="new-work">새 작품</button><button class="chip" data-panel="new-edition">버전 추가</button><button class="chip" data-panel="edition-settings">파일·출처 관리</button></div><p id="manager-status" role="status" hidden></p>
+  <section id="new-work" class="manager-panel"><p class="muted">먼저 작품을 등록하고, 그 아래에 보유한 음성·영상 버전을 추가합니다.</p><form id="work-form"><label>작품 제목<input name="title" required maxlength="1000" placeholder="작품 제목"></label><label>RJ 코드 (선택)<input name="rj_code" placeholder="RJ01234567" pattern="RJ[0-9]{6,12}" maxlength="14"></label><p class="form-hint">번호나 제목이 같아도 자동으로 합치지 않습니다.</p><button class="primary">등록하고 버전 추가 →</button></form></section>
+  <section id="new-edition" class="manager-panel" hidden><form id="edition-form"><label>연결할 작품<select name="work_id" id="work-select" required></select></label><label>버전 이름<input name="title" required maxlength="1000" placeholder="예: 한국어 자막판"></label><div class="pair"><label>미디어<select name="media_type"><option value="audio">음성</option><option value="video">영상</option></select></label><label>번역<select name="translation"><option value="none">번역 없음</option><option value="subtitles">별도 번역 자막</option><option value="embedded">자막이 합성된 영상</option></select></label></div><label>언어<select name="language"><option value="ja">일본어</option><option value="ko">한국어</option><option value="en">영어</option><option value="">미지정</option></select></label><label>서클·제작자 (선택)<input name="circle" maxlength="500" placeholder="서클명"></label><p class="form-hint">버전을 등록한 다음 이 서버에 연결된 파일과 자막을 고릅니다.</p><button class="primary">버전 등록하고 파일 연결 →</button></form></section>
+  <section id="edition-settings" class="manager-panel" hidden><label>관리할 버전<select id="manage-edition-select"></select></label><div id="manage-content"></div></section>
+</dialog>
+<div id="status" role="status" aria-live="polite" hidden></div>
+<footer id="player-bar" hidden><div><span class="eyebrow">NOW PLAYING</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="reopen-player" class="primary">플레이어 열기</button></footer>
 <section id="cinema" role="dialog" aria-modal="true" aria-label="전체 화면 감상 플레이어" hidden>
   <div class="cinema-header"><button id="close-player" aria-label="플레이어 닫기">닫기</button><strong id="player-title">트랙 선택</strong><button id="fullscreen">전체 화면</button><button id="hide-controls">조작부 숨기기</button></div>
   <div class="screen"><video id="media" playsinline preload="metadata"></video><div id="caption" aria-live="off"></div></div>

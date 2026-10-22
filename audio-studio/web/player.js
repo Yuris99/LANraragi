@@ -21,7 +21,7 @@
   }
   const safe = action => Promise.resolve().then(action).catch(error => note(error.message));
   function backgroundInert(value) {
-    for (const node of document.querySelectorAll('body > header,body > main,body > footer')) node.inert = value;
+    for (const node of document.querySelectorAll('body > aside,body > header,body > main,body > footer')) node.inert = value;
   }
   function persist() { try { localStorage.setItem('audio-player-preferences', JSON.stringify(preferences)); } catch (_) { /* Optional preferences. */ } }
   function settings() {
@@ -139,16 +139,21 @@
     try { await stage.requestFullscreen(); }
     catch (_) { note('화면 채우기 모드입니다. 전체 화면 버튼으로 다시 시도할 수 있습니다.'); }
   }
-  function open(list, track) {
+  function open(list, track, options = {}) {
     if (!list.length) return;
     returnFocus = document.activeElement;
     stage.hidden = false; document.body.classList.add('cinema-open');
     backgroundInert(true);
+    if (options.mode === 'all' || options.mode === 'single') {
+      preferences.mode = options.mode;
+      $('play-mode').value = options.mode;
+      persist();
+    }
     $('close-player').focus();
     // Fill the page without changing the user's browser/window mode.
     // Native fullscreen is requested only by the dedicated fullscreen button.
     tracks = [...list];
-    return select(track, true);
+    return select(track, !options.fromStart);
   }
   async function close() {
     media.pause();

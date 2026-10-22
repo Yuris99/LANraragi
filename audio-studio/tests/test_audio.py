@@ -278,6 +278,27 @@ class HTTPTests(unittest.TestCase):
             container.server_close()
             thread.join(5)
 
+    def test_read_only_file_picker_is_scoped_and_filters_secrets(self):
+        from server import local_files
+        (self.media/'caption.ko.srt').write_text('1\n00:00:00,000 --> 00:00:01,000\ncaption', encoding='utf-8')
+        (self.media/'.env').write_text('not media', encoding='utf-8')
+        (self.media/'private.db').write_text('not media', encoding='utf-8')
+        outside = self.root/'outside.wav'
+        outside.write_bytes(self.raw)
+        try:
+            (self.media/'outside-link.wav').symlink_to(outside)
+        except OSError:
+            pass
+        code,_,raw = self.request('/api/local-files')
+        self.assertEqual(code,200)
+        items = json.loads(raw)['items']
+        self.assertEqual({i['relative_path'] for i in items},{'caption.ko.srt','test.wav'})
+        self.assertEqual({i['kind'] for i in items},{'audio','subtitle'})
+        self.assertTrue(local_files(self.media,limit=1)['truncated'])
+        self.assertEqual((self.media/'test.wav').read_bytes(),self.raw)
+        self.server.password='picker-test-only'
+        self.assertEqual(self.request('/api/local-files')[0],401)
+
 
 if __name__ == '__main__':
     unittest.main()

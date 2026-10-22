@@ -148,7 +148,10 @@ print(json.dumps({p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in roo
                 cues = api(f"/api/subtitles/{sub['id']}")['cues']
                 assert cues[0]['start'] == 0 and '합성' in cues[0]['text']
                 checked_subtitles += 1
-    for asset in ('/', '/player.js', '/player-core.js', '/player.css'):
+    available = api('/api/local-files')['items']
+    assert any(item['relative_path']=='synthetic-demo-v1/01-tone.wav' and item['kind']=='audio' for item in available)
+    assert any(item['relative_path']=='synthetic-demo-v1/sample.ko.srt' and item['kind']=='subtitle' for item in available)
+    for asset in ('/', '/app.js', '/library-core.js', '/player.js', '/player-core.js', '/player.css'):
         assert request(asset)[0] == 200
     export = api('/api/export')
     assert any(w['id'] == work['id'] for w in export['works'])
