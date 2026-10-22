@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 from unittest.mock import patch
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -28,15 +29,22 @@ FORM='''<!doctype html><title>Generated login fixture</title><form action="/synt
 
 def main():
     with tempfile.TemporaryDirectory() as temporary,patch.dict(os.environ,{'STUDIO_PASSWORD':'generated-studio-admin'}):
-        root=Path(temporary);vault=CookieVault(root/'sessions');submitted=[]
+        root=Path(temporary);vault=CookieVault(root/'sessions');submitted=[];deny_page=[False];verification_requests=[]
         def fixture(route):
+            if route.request.url.startswith('https://challenges.cloudflare.com/'):
+                verification_requests.append(True)
+                route.fulfill(status=200,content_type='application/javascript',body='/* generated verification dependency fixture */');return
+            if deny_page[0]:
+                route.fulfill(status=403,content_type='text/html',body='<h1>Generated access denied</h1>');return
             if route.request.method=='POST':
                 submitted.append(route.request.post_data)
                 assert route.request.post_data=='user=generated-user&password=generated-password'
                 route.fulfill(status=200,content_type='text/html',headers={
                     'Set-Cookie':'fixture_session=generated-cookie; Domain=.e-hentai.org; Path=/; Secure; HttpOnly'},
                     body='<title>Generated authenticated page</title><p>Fixture login complete</p>')
-            else: route.fulfill(status=200,content_type='text/html',body=FORM)
+            else:
+                time.sleep(2)
+                route.fulfill(status=200,content_type='text/html',body=FORM+'<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script><img src="https://unrelated.example/pixel?generated-private-value">')
         actor=BrowserActor(vault,fixture)
         token='generated-only-service-'+'a'*48
         key=root/'service.key';key.write_text(token);key.chmod(0o600)
@@ -56,7 +64,11 @@ def main():
                 page.goto(base)
                 page.locator('#connections-open').click()
                 page.locator('[data-site-start="ehentai"]').click()
+                page.wait_for_function('()=>document.querySelector("#connections-status").textContent.includes("여는 중")')
                 page.wait_for_function('()=>document.querySelector("#login-screen").naturalWidth===1000')
+                assert '일부 외부 요소' in page.locator('#login-restriction').inner_text()
+                assert 'generated-private-value' not in page.content()
+                assert verification_requests
                 def input_at(y,text):
                     page.wait_for_function('()=>!document.querySelector("#login-text").disabled')
                     scale=page.locator('#login-screen').bounding_box()['width']/1000
@@ -92,6 +104,11 @@ def main():
                 page.locator('[data-site-forget="ehentai"]').click()
                 page.wait_for_function('()=>document.querySelector("[data-site-forget=ehentai]").disabled')
                 assert not vault.path('ehentai').exists()
+                deny_page[0]=True
+                page.locator('[data-site-start="ehentai"]').click()
+                page.wait_for_function('()=>document.querySelector("#connections-status").textContent.includes("HTTP 403")')
+                assert page.locator('#login-controls').is_visible()
+                page.locator('#login-cancel').click()
                 assert not errors,errors
                 browser.close()
             print('site_login_browser=passed; real_Studio_RPC_Chromium; explicit_login_save; domain_scoped_cookie; engine_snapshot; forget; desktop_mobile; no_real_site_or_account; nas_changed=false')

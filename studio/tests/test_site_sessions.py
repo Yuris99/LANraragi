@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import urllib.error
@@ -17,7 +18,7 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from site_sessions import CookieVault,LoginClient,allowed_domain
 from gallery_engine import cookie_snapshot
-from login_service import LoginBrowser,make_login_server
+from login_service import LoginBrowser,LoginFailure,make_login_server
 from server import LRR,Studio,make_server
 from store import Store
 from init_login import initialize
@@ -95,11 +96,29 @@ class SessionTests(unittest.TestCase):
         with self.assertRaises(ValueError):browser.call({'op':'text','session':'bad','text':'generated'})
         self.assertIsNone(browser.browser)
         class Route:
-            request=type('Request',(),{'url':'https://wrong.example/private'})()
+            request=type('Request',(),{'url':'https://wrong.example/private','is_navigation_request':lambda self:False})()
             def abort(self):self.aborted=True
             def continue_(self):raise AssertionError('Unrelated request escaped')
         route=Route();browser.provider='ehentai';browser.route(route)
         self.assertTrue(route.aborted)
+
+    def test_official_verification_resource_allowed_without_expanding_navigation(self):
+        accepted=[];browser=LoginBrowser(self.vault,lambda route:accepted.append(route.request.url))
+        browser.provider='ehentai';main=object()
+        browser.page=SimpleNamespace(url='https://forums.e-hentai.org/index.php',main_frame=main)
+        def request(url,navigate=False,frame=main):
+            result=SimpleNamespace(request=SimpleNamespace(url=url,frame=frame,is_navigation_request=lambda:navigate),aborted=False)
+            result.abort=lambda:setattr(result,'aborted',True)
+            browser.route(result);return result
+        self.assertFalse(request('https://challenges.cloudflare.com/turnstile/v0/api.js').aborted)
+        self.assertFalse(request('https://challenges.cloudflare.com/widget',True,object()).aborted)
+        for url in ('https://challenges.cloudflare.com/widget','https://challenges.cloudflare.com.evil.example/x',
+                    'http://challenges.cloudflare.com/x','https://challenges.cloudflare.com:444/x'):
+            self.assertTrue(request(url,True).aborted)
+        self.assertTrue(browser.blocked_navigation)
+        self.assertEqual(len(accepted),2)
+        browser.page.url='https://unrelated.example/'
+        self.assertTrue(request('https://challenges.cloudflare.com/widget').aborted)
 
     def test_client_rejects_unsafe_endpoint_and_no_backend_is_honest(self):
         for url in ('file:///etc/passwd','http://user:password@host','http://host/path'):
@@ -148,6 +167,25 @@ class SessionHTTPTests(unittest.TestCase):
         request=urllib.request.Request(self.client.url+'/rpc',data=b'{"op":"status"}',headers={'Content-Type':'application/json'})
         with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(request)
         self.assertEqual(error.exception.code,401)
+
+    def test_specific_timeout_and_unknown_error_redaction(self):
+        failure=urllib.error.HTTPError('http://generated',503,'unavailable',{},io.BytesIO(b'{"error":"login_site_timeout"}'))
+        with patch('urllib.request.OpenerDirector.open',side_effect=failure):
+            with self.assertRaisesRegex(ValueError,'시간 제한'):self.client.call({'op':'start','provider':'ehentai'})
+        failure=urllib.error.HTTPError('http://generated',503,'secret',{},io.BytesIO(b'{"error":"generated-secret"}'))
+        with patch('urllib.request.OpenerDirector.open',side_effect=failure):
+            with self.assertRaises(ValueError) as result:self.client.call({'op':'start','provider':'ehentai'})
+        self.assertNotIn('generated-secret',str(result.exception))
+
+    def test_gateway_preserves_safe_browser_failure(self):
+        class Actor:
+            def call(self,data):raise LoginFailure('browser_start_failed')
+        gateway=make_login_server('127.0.0.1',0,Actor(),self.token)
+        thread=threading.Thread(target=gateway.serve_forever,daemon=True);thread.start()
+        try:
+            client=LoginClient('http://127.0.0.1:'+str(gateway.server_port),str(self.key))
+            with self.assertRaisesRegex(ValueError,'시작하지 못했습니다'):client.call({'op':'start','provider':'ehentai'})
+        finally:gateway.shutdown();gateway.server_close();thread.join(timeout=3)
 
     def test_studio_requires_admin_same_origin_and_never_accepts_worker_for_login(self):
         with patch.dict(os.environ,{'STUDIO_PASSWORD':'generated-admin','STUDIO_NAS_WORKER_TOKEN':'generated-nas'}):

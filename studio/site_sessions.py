@@ -194,6 +194,18 @@ class LoginClient:
                 return json.loads(raw)
         except urllib.error.HTTPError as error:
             # Never return the upstream response or URL: it may include credentials.
+            messages={
+                'browser_start_failed':'NAS 브라우저를 시작하지 못했습니다. 브라우저 실행·메모리 상태를 확인해야 합니다.',
+                'login_site_timeout':'NAS에서 로그인 사이트의 응답을 기다리다 시간 제한에 도달했습니다.',
+                'login_site_unreachable':'NAS 브라우저가 로그인 사이트에 연결하지 못했습니다. 사이트 접근 또는 페이지 이동 제한을 확인해야 합니다.',
+                'login_preview_failed':'로그인 페이지는 열었지만 NAS 브라우저 화면을 생성하지 못했습니다.',
+            }
+            try:
+                raw=error.read(1025)
+                code=json.loads(raw).get('error') if len(raw)<=1024 else None
+                message=messages.get(code) if isinstance(code,str) else None
+            except (ValueError,AttributeError,OSError):message=None
+            if message:raise ValueError(message) from None
             raise ValueError('로그인 서비스가 요청을 처리하지 못했습니다. 연결 상태를 확인하세요.') from None
         except (urllib.error.URLError,OSError,TimeoutError):
             raise ValueError('NAS 로그인 서비스에 연결할 수 없습니다.') from None

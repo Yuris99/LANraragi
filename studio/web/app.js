@@ -39,8 +39,8 @@ function toast(message) {
         el.hidden = true;
     }, 5500);
 }
-async function api(path, data) {
-    const response = await fetch(path, data === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+async function api(path, data, options = {}) {
+    const response = await fetch(path, { ...(data === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }), ...options });
     const value = await response.json();
     if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
     return value;
@@ -790,6 +790,12 @@ function renderLoginFrame(frame) {
     $('#login-screen').src = frame.image;
     $('#login-location').textContent = frame.location;
     $('#login-restriction').hidden = !frame.restricted_request;
+    $('#login-restriction').textContent = frame.blocked_navigation
+        ? '허용 범위 밖으로 이동하려는 요청이 차단됐습니다. 로그인 진행이 안 되면 취소하고 이 상태를 알려주세요.'
+        : '일부 외부 요소 요청이 차단됐습니다. 이 안내만으로 로그인 실패를 뜻하지 않습니다. 입력란이 보이면 로그인할 수 있습니다.';
+    $('#connections-status').textContent = frame.response_status >= 400
+        ? `로그인 사이트가 HTTP ${frame.response_status}을 반환했습니다. 사이트가 접근을 거부하거나 오류가 난 상태일 수 있습니다.`
+        : 'NAS 브라우저 화면이 열렸습니다. 아래 화면의 입력란을 선택해 로그인하세요.';
 }
 async function connectionStatus() {
     const status = await api('/api/site-connections');
@@ -836,10 +842,23 @@ $('#connections-sites').onclick = guard(async event => {
     if (!button || loginBusy) return;
     if (button.dataset.siteStart) {
         loginBusy = true; button.disabled = true;
+        const began = Date.now(), originalLabel = button.textContent;
+        const progress = () => { $('#connections-status').textContent = `NAS 브라우저에서 로그인 화면을 여는 중… ${Math.floor((Date.now() - began) / 1000)}초`; };
+        progress(); button.textContent = '여는 중…';
+        const timer = setInterval(progress, 1000);
+        const controller = new AbortController();
+        const deadline = setTimeout(() => controller.abort(), 50000);
         try {
-            renderLoginFrame(await api('/api/site-connections', { op: 'start', provider: button.dataset.siteStart }));
+            const frame = await api('/api/site-connections', { op: 'start', provider: button.dataset.siteStart }, { signal: controller.signal });
+            clearInterval(timer);
+            renderLoginFrame(frame);
             scheduleLoginFrame();
-        } finally { loginBusy = false; button.disabled = false; }
+        } catch (error) {
+            clearInterval(timer);
+            const message = error.name === 'AbortError' ? '로그인 화면 열기가 시간 제한을 넘었습니다. 상태 새로고침으로 창이 열렸는지 확인하세요.' : error.message;
+            $('#connections-status').textContent = message;
+            throw new Error(message);
+        } finally { clearInterval(timer); clearTimeout(deadline); loginBusy = false; button.disabled = false; button.textContent = originalLabel; }
     }
     if (button.dataset.siteForget) {
         if (!confirm('이 사이트의 NAS 저장 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.')) return;

@@ -24,7 +24,8 @@ class RequestTests(unittest.TestCase):
     def test_valid_and_every_source_hash(self):
         self.assertEqual(release.parse(json.dumps(self.request)), self.request)
         for name, digest in self.request["files"].items():
-            self.assertEqual(hashlib.sha256((DEPLOY.parent / name).read_bytes()).hexdigest(), digest)
+            source=subprocess.check_output(['git','show',self.request['revision']+':studio/'+name],cwd=DEPLOY)
+            self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
 
     def test_arbitrary_commands_paths_and_duplicate_fields_rejected(self):
         for field, value in (("command", "sh"), ("image", "unreviewed"), ("root", "/other")):
@@ -67,7 +68,9 @@ class ControllerTests(unittest.TestCase):
         (self.control / "configs.sha256").write_text(hashlib.sha256(b'generated').hexdigest()+'  fixture.config\n')
         self.freeze()
         request = json.loads((DEPLOY / "nas-services.json").read_text())
-        for name in release.FILES:shutil.copy(DEPLOY.parent / name, self.remote / name)
+        for name in release.FILES:
+            source=subprocess.check_output(['git','show',request['revision']+':studio/'+name],cwd=DEPLOY)
+            (self.remote/name).write_bytes(source)
         (self.remote / "nas-services.json").write_text(json.dumps(request))
         self.write_tool("curl", '''import os,pathlib,sys
 r=pathlib.Path(os.environ['TEST_ROOT']); args=sys.argv[1:]

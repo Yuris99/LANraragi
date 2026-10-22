@@ -20,6 +20,11 @@ from site_sessions import CookieVault, SITES, allowed_domain, site, read_service
 
 
 KEYS = {'Tab','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'}
+LOGIN_ERRORS = {'browser_start_failed','login_site_timeout','login_site_unreachable','login_preview_failed'}
+
+
+class LoginFailure(ValueError):
+    pass
 
 
 class LoginBrowser:
@@ -27,6 +32,7 @@ class LoginBrowser:
         self.vault=vault; self.route_fixture=route_fixture
         self.pw=None; self.browser=None; self.context=None; self.page=None
         self.provider=None; self.session=None; self.deadline=0; self.denied=False
+        self.blocked_navigation=False; self.response_status=None
 
     def close(self):
         try:
@@ -46,8 +52,21 @@ class LoginBrowser:
 
     def route(self, route):
         parsed=urlsplit(route.request.url)
-        if parsed.scheme != 'https' or parsed.port not in (None,443) or parsed.username or parsed.password or not allowed_domain(self.provider,parsed.hostname or ''):
-            self.denied=True; route.abort(); return
+        navigation=route.request.is_navigation_request()
+        main_navigation=navigation and route.request.frame==self.page.main_frame if self.page else navigation
+        # Official verification dependency, not a destination or a bypass.
+        # Keep top-level browsing restricted to the selected site's family.
+        current=urlsplit(self.page.url) if self.page else None
+        verification=(parsed.hostname=='challenges.cloudflare.com' and not main_navigation
+                      and current is not None and current.scheme=='https'
+                      and allowed_domain(self.provider,current.hostname or ''))
+        if parsed.scheme != 'https' or parsed.port not in (None,443) or parsed.username or parsed.password or not (allowed_domain(self.provider,parsed.hostname or '') or verification):
+            self.denied=True
+            try:
+                if main_navigation:
+                    self.blocked_navigation=True
+            except AttributeError: pass
+            route.abort(); return
         if self.route_fixture: self.route_fixture(route)
         else: route.continue_()
 
@@ -55,14 +74,16 @@ class LoginBrowser:
         self.expire(); configuration=site(provider)
         if not configuration['login']: raise ValueError('이 출처에는 지원하는 로그인 화면이 없습니다.')
         if self.session: raise ValueError('열린 로그인 창을 먼저 저장하거나 취소하세요.')
-        from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
         self.provider=provider; self.session=secrets.token_hex(16); self.denied=False
+        self.blocked_navigation=False; self.response_status=None
         self.deadline=time.monotonic()+600
+        phase='browser'
         try:
             self.pw=sync_playwright().start()
             proxy=os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY')
             launch={'executable_path':os.environ.get('STUDIO_CHROMIUM','/usr/bin/chromium'),
-                    'headless':True,'args':['--no-sandbox','--disable-dev-shm-usage']}
+                    'headless':True,'timeout':15000,'args':['--no-sandbox','--disable-dev-shm-usage']}
             if proxy: launch['proxy']={'server':proxy}
             self.browser=self.pw.chromium.launch(**launch)
             self.context=self.browser.new_context(viewport={'width':1000,'height':700},
@@ -82,11 +103,16 @@ class LoginBrowser:
             self.context.route_web_socket('**/*',lambda websocket:websocket.close())
             self.page=self.context.new_page()
             self.context.on('page',lambda page:page.close() if page!=self.page else None)
-            self.page.goto(configuration['login'],wait_until='domcontentloaded',timeout=25000)
+            phase='site'
+            response=self.page.goto(configuration['login'],wait_until='domcontentloaded',timeout=15000)
+            self.response_status=response.status if response else None
+            phase='preview'
             return self.frame()
-        except Exception:
+        except Exception as error:
+            code=('browser_start_failed' if phase=='browser' else 'login_preview_failed' if phase=='preview'
+                  else 'login_site_timeout' if isinstance(error,BrowserTimeout) else 'login_site_unreachable')
             self.close()
-            raise ValueError('로그인 화면을 열지 못했습니다. 사이트 접근·브라우저 상태를 확인하세요.') from None
+            raise LoginFailure(code) from None
 
     def frame(self):
         parsed=urlsplit(self.page.url)
@@ -94,7 +120,8 @@ class LoginBrowser:
         return {'session':self.session,'provider':self.provider,'width':1000,'height':700,
                 'location':parsed.scheme+'://'+parsed.netloc+parsed.path,
                 'restricted_request':self.denied,
-                'image':'data:image/png;base64,'+base64.b64encode(self.page.screenshot(type='png',timeout=8000)).decode()}
+                'blocked_navigation':self.blocked_navigation,'response_status':self.response_status,
+                'image':'data:image/png;base64,'+base64.b64encode(self.page.screenshot(type='png',timeout=5000)).decode()}
 
     def call(self, data):
         if not isinstance(data,dict): raise ValueError('잘못된 로그인 요청입니다.')
@@ -120,7 +147,8 @@ class LoginBrowser:
         if op=='visit':
             url={'ehentai':'https://e-hentai.org/','exhentai':'https://exhentai.org/',
                  'nhentai':'https://nhentai.net/'}[self.provider]
-            self.page.goto(url,wait_until='domcontentloaded',timeout=25000)
+            response=self.page.goto(url,wait_until='domcontentloaded',timeout=15000)
+            self.response_status=response.status if response else None
             return self.frame()
         if op=='click':
             if any(type(data[k]) not in (float,int) or not math.isfinite(data[k]) for k in ('x','y')) or not (0<=data['x']<1000 and 0<=data['y']<700):
@@ -179,6 +207,8 @@ def make_login_server(host,port,actor,token):
                 if not 0<length<=16384: raise ValueError('요청 크기를 확인하세요.')
                 data=json.loads(self.rfile.read(length));result=actor.call(data)
                 self.respond(result)
+            except LoginFailure as error:
+                self.respond({'error':str(error) if str(error) in LOGIN_ERRORS else 'login_browser_unavailable'},503)
             except ValueError:
                 self.respond({'error':'invalid_login_operation'},400)
             except Exception:
