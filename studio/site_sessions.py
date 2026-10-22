@@ -39,6 +39,11 @@ def allowed_domain(name, domain):
     return any(domain == base or domain.endswith('.' + base) for base in site(name)['domains'])
 
 
+def account_cookie(name):
+    """Do not transfer browser-specific security challenge clearance to engines."""
+    return isinstance(name,str) and not name.lower().startswith(('cf_', '__cf'))
+
+
 def session_provider(url):
     host = urllib.parse.urlsplit(url).hostname
     if host == 'exhentai.org': return 'exhentai'
@@ -71,6 +76,7 @@ class CookieVault:
         for c in cookies:
             domain = c.get('domain', '')
             if not allowed_domain(name, domain): continue
+            if not account_cookie(c.get('name', '')): continue
             path, key, value = c.get('path', '/'), c.get('name', ''), c.get('value', '')
             if not all(isinstance(v, str) and not any(x in v for x in '\t\r\n\x00') for v in (domain,path,key,value)):
                 raise ValueError('잘못된 쿠키 항목입니다.')
@@ -110,7 +116,7 @@ class CookieVault:
         jar = http.cookiejar.MozillaCookieJar()
         jar._really_load(io.StringIO(raw.decode()), str(self.path(name)), True, False)
         # Discard unrelated domains even if a local administrator edited the file.
-        cookies = [c for c in jar if allowed_domain(name,c.domain) and not c.is_expired()]
+        cookies = [c for c in jar if allowed_domain(name,c.domain) and account_cookie(c.name) and not c.is_expired()]
         if not cookies: raise ValueError('세션이 만료됐습니다. 다시 로그인하세요.')
         return cookies
 

@@ -12,6 +12,10 @@ import math
 import os
 from pathlib import Path
 import secrets
+import shutil
+import signal
+import subprocess
+import tempfile
 import threading
 import time
 from urllib.parse import urlsplit
@@ -167,11 +171,181 @@ class LoginBrowser:
         return {'accepted':True}
 
 
+class DesktopBrowser(LoginBrowser):
+    """Ordinary visible Chromium, manually controlled through X11 only.
+
+    No browser debugging port, browser automation framework or challenge solver.
+    A small extension reads provider account cookies only after explicit Save.
+    The temporary browser profile, display and extension are destroyed on close.
+    """
+    def __init__(self, vault, bridge_token=None, bridge_url='http://127.0.0.1:8091/rpc'):
+        super().__init__(vault)
+        self.bridge_token=bridge_token;self.bridge_url=bridge_url
+        self.processes=[];self.directory=None;self.env=None;self.window=None
+        self.saving_until=0;self.saved=False
+
+    def available(self):
+        return all(shutil.which(tool) for tool in ('Xvfb','xauth','xdotool','scrot')) and bool(shutil.which(os.environ.get('STUDIO_CHROMIUM','chromium')))
+
+    def run(self, args, **kwargs):
+        return subprocess.run(args,env=self.env,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                              timeout=kwargs.pop('timeout',5),check=True,**kwargs).stdout
+
+    def status(self):
+        value=super().status();value.update(browser_mode='desktop',desktop_available=self.available())
+        return value
+
+    def close(self):
+        for process in reversed(self.processes):
+            if process.poll() is None:
+                try:os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=3)
+                except (ProcessLookupError,subprocess.TimeoutExpired):
+                    try:os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=2)
+                    except (ProcessLookupError,subprocess.TimeoutExpired):pass
+        self.processes=[]
+        if self.directory:self.directory.cleanup()
+        self.directory=self.env=self.window=None
+        self.provider=self.session=None;self.deadline=0;self.saving_until=0;self.saved=False
+
+    def extension(self, directory):
+        token=self.bridge_token or read_service_token(os.environ['STUDIO_LOGIN_TOKEN_FILE'])
+        config={'token':token,'url':self.bridge_url,'session':self.session,'domains':list(site(self.provider)['domains'])}
+        manifest={'manifest_version':3,'name':'Studio account session save','version':'1.0',
+                  'permissions':['cookies'],'host_permissions':['https://*.e-hentai.org/*','https://exhentai.org/*',
+                  'https://*.nhentai.net/*','http://127.0.0.1/*'],
+                  'background':{'service_worker':'save.js'},
+                  'commands':{'save-account-session':{'suggested_key':{'default':'Alt+Shift+S'},'description':'Save this provider account session to Studio'}}}
+        # Domain permissions are generated from the fixed server configuration.
+        # Fixture domains exist only in isolated tests, never in a web argument.
+        manifest['host_permissions']=[('http://'+d+'/*' if d in ('127.0.0.1','localhost') else 'https://*.'+d+'/*') for d in config['domains']]+['http://127.0.0.1/*']
+        (directory/'manifest.json').write_text(json.dumps(manifest))
+        script='const config='+json.dumps(config)+';\n'+'''chrome.commands.onCommand.addListener(async command => {
+  if (command !== 'save-account-session') return;
+  try {
+    const groups = await Promise.all(config.domains.map(domain => chrome.cookies.getAll({domain})));
+    const unique = new Map();
+    for (const c of groups.flat()) {
+      if (/^(?:cf_|__cf)/i.test(c.name)) continue;
+      unique.set(c.domain+'\\n'+c.path+'\\n'+c.name, {
+        domain:c.domain, path:c.path, name:c.name, value:c.value,
+        secure:c.secure, httpOnly:c.httpOnly, expires:c.expirationDate ?? -1
+      });
+    }
+    await fetch(config.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.token},
+      body:JSON.stringify({op:'desktop-session',session:config.session,cookies:[...unique.values()]})});
+  } catch (_) { /* The Studio Save operation times out visibly; no secret logs. */ }
+});'''
+        (directory/'save.js').write_text(script)
+        for path in directory.iterdir():path.chmod(0o600)
+
+    def start(self, provider):
+        self.expire();configuration=site(provider)
+        if not configuration['login']:raise ValueError('이 출처에는 지원하는 로그인 화면이 없습니다.')
+        if self.session:raise ValueError('열린 로그인 창을 먼저 저장하거나 취소하세요.')
+        if not self.available():raise LoginFailure('browser_start_failed')
+        self.provider=provider;self.session=secrets.token_hex(16);self.deadline=time.monotonic()+600
+        try:
+            self.directory=tempfile.TemporaryDirectory(prefix='studio-desktop-')
+            root=Path(self.directory.name);root.chmod(0o700)
+            self.env={**os.environ,'DISPLAY':':99','XAUTHORITY':str(root/'display.auth'),'HOME':str(root)}
+            self.run(['xauth','-f',self.env['XAUTHORITY'],'add',':99','.',secrets.token_hex(16)])
+            os.chmod(self.env['XAUTHORITY'],0o600)
+            display=subprocess.Popen(['Xvfb',':99','-screen','0','1000x700x24','-nolisten','tcp','-auth',self.env['XAUTHORITY']],
+                env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            self.processes.append(display)
+            extension=root/'extension';extension.mkdir(mode=0o700);self.extension(extension)
+            args=[os.environ.get('STUDIO_CHROMIUM','/usr/bin/chromium'),'--no-sandbox','--disable-dev-shm-usage',
+                  '--no-first-run','--no-default-browser-check','--window-size=1000,700','--start-maximized',
+                  '--user-data-dir='+str(root/'profile'),'--disable-extensions-except='+str(extension),
+                  '--load-extension='+str(extension)]
+            proxy=os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY')
+            if proxy:args.append('--proxy-server='+proxy)
+            args.append(configuration['login'])
+            browser=subprocess.Popen(args,env=self.env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+            self.processes.append(browser)
+            until=time.monotonic()+15
+            while time.monotonic()<until:
+                if display.poll() is not None or browser.poll() is not None:raise RuntimeError('desktop exited')
+                try:
+                    windows=self.run(['xdotool','search','--onlyvisible','--class','chromium'],timeout=1).decode().splitlines()
+                    if windows:
+                        self.window=next(w for w in windows if w.isdigit())
+                        self.run(['xdotool','windowfocus','--sync',self.window])
+                        return self.frame()
+                except (subprocess.SubprocessError,StopIteration):pass
+                time.sleep(.15)
+            raise RuntimeError('desktop window unavailable')
+        except Exception:
+            self.close();raise LoginFailure('browser_start_failed') from None
+
+    def frame(self):
+        # scrot writes only into this disposable private profile; remove each
+        # image immediately. It never enters a media volume, export or log.
+        path=Path(self.directory.name)/'frame.png'
+        try:
+            self.run(['scrot','--overwrite',str(path)])
+            with path.open('rb') as stream:raw=stream.read(2*1024*1024+1)
+            if len(raw)>2*1024*1024 or not raw.startswith(b'\x89PNG\r\n\x1a\n'):raise ValueError('preview')
+        except Exception:raise LoginFailure('login_preview_failed') from None
+        finally:path.unlink(missing_ok=True)
+        error=bool(self.saving_until and time.monotonic()>self.saving_until and not self.saved)
+        if error:self.saving_until=0
+        return {'session':self.session,'provider':self.provider,'width':1000,'height':700,
+                'location':site(self.provider)['name']+' · 일반 NAS 브라우저 (주소는 화면의 주소창에서 확인)',
+                'restricted_request':False,'response_status':None,'browser_mode':'desktop',
+                'saving':bool(self.saving_until and not self.saved),'save_error':error,'session_saved':self.saved,
+                'image':'data:image/png;base64,'+base64.b64encode(raw).decode()}
+
+    def call(self, data):
+        if not isinstance(data,dict):raise ValueError('잘못된 로그인 요청입니다.')
+        op=data.get('op')
+        if op in ('status','start','forget'):return super().call(data)
+        schemas={'frame':set(),'cancel':set(),'save':set(),'visit':set(),'click':{'x','y'},
+                 'text':{'text'},'key':{'key'},'scroll':{'delta'},'desktop-session':{'cookies'}}
+        if op not in schemas or set(data)!=(schemas[op]|{'op','session'}):raise ValueError('잘못된 로그인 요청입니다.')
+        self.expire()
+        if not self.session or not secrets.compare_digest(str(data['session']),self.session):raise ValueError('로그인 창이 만료됐습니다.')
+        if op=='cancel':self.close();return {'closed':True}
+        if op=='frame':return self.frame()
+        if op=='desktop-session':
+            if not self.saving_until or time.monotonic()>self.saving_until:raise ValueError('먼저 세션 저장을 선택하세요.')
+            cookies=data['cookies']
+            if not isinstance(cookies,list) or any(not isinstance(c,dict) for c in cookies):raise ValueError('쿠키 형식을 확인하세요.')
+            result=self.vault.save(self.provider,cookies);self.saved=True;self.saving_until=0
+            return result
+        if op=='save':
+            self.saving_until=time.monotonic()+15;self.saved=False
+            self.run(['xdotool','key','--clearmodifiers','alt+shift+s'])
+            return {'saving':True}
+        if op=='click':
+            if any(type(data[k]) not in (int,float) or not math.isfinite(data[k]) for k in ('x','y')) or not (0<=data['x']<1000 and 0<=data['y']<700):raise ValueError('화면 안을 선택하세요.')
+            self.run(['xdotool','mousemove','--sync',str(int(data['x'])),str(int(data['y'])),'click','1'])
+        elif op=='text':
+            text=data['text']
+            if not isinstance(text,str) or not 1<=len(text)<=2000 or '\x00' in text:raise ValueError('입력 문자를 확인하세요.')
+            self.run(['xdotool','type','--clearmodifiers','--file','-'],input=text.encode())
+        elif op=='key':
+            if data['key'] not in KEYS:raise ValueError('지원하지 않는 키입니다.')
+            key={'Enter':'Return','Backspace':'BackSpace','ArrowLeft':'Left','ArrowRight':'Right','ArrowUp':'Up','ArrowDown':'Down'}.get(data['key'],data['key'])
+            self.run(['xdotool','key','--clearmodifiers',key])
+        elif op=='scroll':
+            if type(data['delta']) is not int or not -700<=data['delta']<=700:raise ValueError('스크롤 범위를 확인하세요.')
+            self.run(['xdotool','click','--repeat',str(max(1,abs(data['delta'])//100)),'4' if data['delta']<0 else '5'])
+        elif op=='visit':
+            url={'ehentai':'https://e-hentai.org/','exhentai':'https://exhentai.org/','nhentai':'https://nhentai.net/'}[self.provider]
+            self.run(['xdotool','key','--clearmodifiers','ctrl+l'])
+            self.run(['xdotool','type','--clearmodifiers','--file','-'],input=url.encode())
+            self.run(['xdotool','key','Return'])
+        return {'accepted':True}
+
+
 class BrowserActor:
     """Playwright objects stay on one thread; no parallel login windows."""
-    def __init__(self, vault, route_fixture=None):
+    def __init__(self, vault, route_fixture=None, browser=None):
         self.executor=ThreadPoolExecutor(max_workers=1)
-        self.browser=LoginBrowser(vault,route_fixture)
+        # Production browser is an ordinary desktop process, without CDP/WebDriver.
+        # Playwright remains available only for explicit generated-route fixtures.
+        self.browser=browser or (LoginBrowser(vault,route_fixture) if route_fixture else DesktopBrowser(vault))
         self.stop=threading.Event()
         self.reaper=threading.Thread(target=self.reap,daemon=True); self.reaper.start()
     def call(self,data): return self.executor.submit(self.browser.call,data).result(timeout=40)
@@ -204,7 +378,7 @@ def make_login_server(host,port,actor,token):
                 return self.respond({'error':'invalid_request'},400)
             try:
                 length=int(self.headers.get('Content-Length','0'))
-                if not 0<length<=16384: raise ValueError('요청 크기를 확인하세요.')
+                if not 0<length<=262144: raise ValueError('요청 크기를 확인하세요.')
                 data=json.loads(self.rfile.read(length));result=actor.call(data)
                 self.respond(result)
             except LoginFailure as error:

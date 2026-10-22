@@ -789,18 +789,22 @@ function renderLoginFrame(frame) {
     $('#login-controls').hidden = false;
     $('#login-screen').src = frame.image;
     $('#login-location').textContent = frame.location;
+    $('#login-save').textContent = frame.browser_mode === 'desktop' ? '일반 브라우저 계정 세션 저장' : '로그인 완료 · 세션 저장';
     $('#login-restriction').hidden = !frame.restricted_request;
     $('#login-restriction').textContent = frame.blocked_navigation
         ? '허용 범위 밖으로 이동하려는 요청이 차단됐습니다. 로그인 진행이 안 되면 취소하고 이 상태를 알려주세요.'
         : '일부 외부 요소 요청이 차단됐습니다. 이 안내만으로 로그인 실패를 뜻하지 않습니다. 입력란이 보이면 로그인할 수 있습니다.';
     $('#connections-status').textContent = frame.response_status >= 400
         ? `로그인 사이트가 HTTP ${frame.response_status}을 반환했습니다. 사이트가 접근을 거부하거나 오류가 난 상태일 수 있습니다.`
-        : 'NAS 브라우저 화면이 열렸습니다. 아래 화면의 입력란을 선택해 로그인하세요.';
+        : frame.browser_mode === 'desktop' ? '일반 Chromium 원격 화면입니다. 사이트 인증과 로그인은 화면에서 직접 진행하세요.' : 'NAS 브라우저 화면이 열렸습니다. 아래 화면의 입력란을 선택해 로그인하세요.';
 }
 async function connectionStatus() {
     const status = await api('/api/site-connections');
+    const desktopMissing = status.browser_mode === 'desktop' && !status.desktop_available;
+    if (status.browser_mode === 'desktop') $('#login-mode-note').textContent = '일반 Chromium 원격 화면입니다. 사람 인증과 로그인은 직접 진행합니다. 계정 세션 저장은 명시적으로 선택할 때만 수행하며 사람 인증 쿠키는 다운로드 작업자에 전달하지 않습니다. 실제 사이트 지원은 별도 확인이 필요합니다.';
     $('#connections-status').textContent = status.configured ? 'NAS 로그인 서비스 연결됨 · 실제 사이트 지원은 별도 검증합니다.' : 'NAS 로그인 서비스가 아직 설치되지 않았습니다. 다운로드 엔진과 전용 세션 저장 공간을 추가해야 합니다.';
-    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
+    if (desktopMissing) $('#connections-status').textContent = '일반 브라우저 실행 패키지가 아직 설치되지 않았습니다. NAS 전용 브라우저 구성 연결이 필요합니다.';
+    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
     if (status.active) {
         loginSession = status.active.session;
         await loginOperation({ op: 'frame' });
@@ -817,10 +821,19 @@ async function loginOperation(operation) {
     if (loginBusy) return;
     loginBusy = true; clearTimeout(loginTimer);
     $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = true);
+    let savedNow = false;
     try {
         const result = await api('/api/site-connections', { ...operation, session: loginSession });
         if (result.image) renderLoginFrame(result);
-        if (operation.op === 'save' || operation.op === 'cancel') {
+        if (result.save_error) $('#connections-status').textContent = '브라우저의 세션 저장 응답이 없습니다. 로그인 상태를 확인하고 다시 저장하세요.';
+        if (result.saving) $('#connections-status').textContent = '일반 브라우저의 계정 세션을 NAS에 저장하는 중입니다. 사람 인증 쿠키는 작업자로 전달하지 않습니다.';
+        if (result.session_saved) {
+            await api('/api/site-connections', { op: 'cancel', session: loginSession });
+            clearLoginPreview();
+            toast('계정 세션을 NAS에 저장했습니다. 실제 다운로드 지원은 별도 확인이 필요합니다.');
+            savedNow = true;
+        }
+        if ((operation.op === 'save' && !result.saving) || operation.op === 'cancel') {
             clearLoginPreview();
             if (operation.op === 'save') toast('세션을 NAS에 저장했습니다. 실제 접근 성공은 아직 미검증입니다.');
         }
@@ -830,6 +843,7 @@ async function loginOperation(operation) {
         loginBusy = false;
         $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = false);
     }
+    if (savedNow) await connectionStatus();
     scheduleLoginFrame();
 }
 $('#connections-open').onclick = guard(async () => { $('#connections-dialog').showModal(); await connectionStatus(); });

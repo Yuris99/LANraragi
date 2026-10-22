@@ -22,10 +22,11 @@ class RequestTests(unittest.TestCase):
         self.request = json.loads((DEPLOY / "nas-services.json").read_text())
 
     def test_valid_and_every_source_hash(self):
-        self.assertEqual(release.parse(json.dumps(self.request)), self.request)
-        for name, digest in self.request["files"].items():
-            source=subprocess.check_output(['git','show',self.request['revision']+':studio/'+name],cwd=DEPLOY)
-            self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
+        for request in (self.request,json.loads((DEPLOY/'nas-desktop-services.json').read_text())):
+            self.assertEqual(release.parse(json.dumps(request)), request)
+            for name, digest in request["files"].items():
+                source=subprocess.check_output(['git','show',request['revision']+':studio/'+name],cwd=DEPLOY)
+                self.assertEqual(hashlib.sha256(source).hexdigest(), digest)
 
     def test_arbitrary_commands_paths_and_duplicate_fields_rejected(self):
         for field, value in (("command", "sh"), ("image", "unreviewed"), ("root", "/other")):
@@ -71,7 +72,7 @@ class ControllerTests(unittest.TestCase):
         for name in release.FILES:
             source=subprocess.check_output(['git','show',request['revision']+':studio/'+name],cwd=DEPLOY)
             (self.remote/name).write_bytes(source)
-        (self.remote / "nas-services.json").write_text(json.dumps(request))
+        (self.remote / "nas-desktop-services.json").write_text(json.dumps(request))
         self.write_tool("curl", '''import os,pathlib,sys
 r=pathlib.Path(os.environ['TEST_ROOT']); args=sys.argv[1:]
 url=next(a for a in args if a.startswith('https://'));name=url.rsplit('/',1)[1]
@@ -133,7 +134,7 @@ if 'inspect' in a:print('sha256:'+'a'*64)
         self.assertIn('failed_or_interrupted',(self.control/'services.result').read_text())
 
     def test_login_only_does_not_start_worker(self):
-        p=self.remote/'nas-services.json';r=json.loads(p.read_text());r['worker']=False;p.write_text(json.dumps(r))
+        p=self.remote/'nas-desktop-services.json';r=json.loads(p.read_text());r['worker']=False;p.write_text(json.dumps(r))
         self.assertEqual(self.tick().returncode,0)
         self.assertEqual((self.root/'actions').read_text().splitlines(),['update-login'])
 
@@ -183,6 +184,52 @@ if 'inspect' in a:print('sha256:'+'a'*64)
         self.assertNotEqual(self.install_extension(installer,'0'*64).returncode,0)
         self.assertEqual((self.control/'poll.sh').read_bytes(),legacy)
         self.assertFalse((self.control/'poll-app-legacy.sh').exists())
+        self.assertFalse((self.control/'poll.lock').exists())
+
+    def desktop_upgrade_fixture(self):
+        installer,_=self.bootstrap_fixture()
+        digest=hashlib.sha256((DEPLOY/'service-controller.sha256').read_bytes()).hexdigest()
+        result=self.install_extension(installer,digest);self.assertEqual(result.returncode,0,result.stderr)
+        recipe=self.control/'service-recipes/Dockerfile.login';recipe.write_text('# previous frozen recipe\n'+recipe.read_text())
+        self.freeze()
+        script=(DEPLOY/'upgrade-desktop-login.sh').read_text().replace('/volume*/docker/library-studio)',str(self.root/'library-studio')+')')
+        script=script.replace('[ "$(id -u)" -eq 0 ]','[ "$(id -u)" -eq '+str(os.getuid())+' ]').replace('= 0:700 ]','= '+str(os.getuid())+':700 ]')
+        upgrade=self.root/'upgrade.sh';upgrade.write_text(script)
+        return upgrade,digest
+
+    def run_upgrade(self, upgrade, digest):
+        return subprocess.run(['sh',str(upgrade),str(self.root/'library-studio'),'b'*40,digest,'apply'],env=self.env,capture_output=True,text=True)
+
+    def test_desktop_upgrade_retains_configs_compose_and_previous_controller(self):
+        upgrade,digest=self.desktop_upgrade_fixture()
+        before=(self.control/'service-recipes/Dockerfile.login').read_bytes()
+        config=(self.control/'configs.sha256').read_bytes()
+        result=self.run_upgrade(upgrade,digest);self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.control/'before-desktop-login/service-recipes/Dockerfile.login').read_bytes(),before)
+        self.assertEqual((self.control/'configs.sha256').read_bytes(),config)
+        self.assertNotIn(b'# previous frozen recipe',(self.control/'service-recipes/Dockerfile.login').read_bytes())
+        self.assertEqual(self.run_upgrade(upgrade,digest).returncode,0)
+
+    def test_desktop_upgrade_preserves_live_service_lock_and_rejects_bad_manifest(self):
+        upgrade,digest=self.desktop_upgrade_fixture()
+        (self.control/'services.lock').mkdir()
+        result=self.run_upgrade(upgrade,digest);self.assertEqual(result.returncode,75,result.stderr)
+        self.assertTrue((self.control/'services.lock').is_dir());self.assertFalse((self.control/'poll.lock').exists())
+        (self.control/'services.lock').rmdir()
+        before=(self.control/'controller.sha256').read_bytes()
+        self.assertNotEqual(self.run_upgrade(upgrade,'0'*64).returncode,0)
+        self.assertEqual((self.control/'controller.sha256').read_bytes(),before)
+        self.assertFalse((self.control/'before-desktop-login').exists())
+
+    def test_desktop_upgrade_copy_failure_restores_previous_frozen_files(self):
+        upgrade,digest=self.desktop_upgrade_fixture()
+        before=(self.control/'controller.sha256').read_bytes();recipe=(self.control/'service-recipes/Dockerfile.login').read_bytes()
+        real=shutil.which('cp')
+        self.write_tool('cp','import os,sys\nif any(a.endswith("service-release.py.new") for a in sys.argv[1:]):sys.exit(31)\nos.execv('+repr(real)+',["cp"]+sys.argv[1:])\n')
+        self.assertNotEqual(self.run_upgrade(upgrade,digest).returncode,0)
+        self.assertEqual((self.control/'controller.sha256').read_bytes(),before)
+        self.assertEqual((self.control/'service-recipes/Dockerfile.login').read_bytes(),recipe)
+        self.assertFalse((self.control/'desktop-controller.revision').exists())
         self.assertFalse((self.control/'poll.lock').exists())
 
 

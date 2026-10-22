@@ -31,7 +31,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 docker_local() { (unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH;docker --host=unix:///var/run/docker.sock "$@"); }
 base=https://raw.githubusercontent.com/Yuris99/LANraragi
-curl -fsSL --connect-timeout 15 --max-time 60 --max-filesize 4096 "$base/refs/heads/feature/library-studio/studio/deploy/nas-services.json" -o "$lock/request"
+curl -fsSL --connect-timeout 15 --max-time 60 --max-filesize 4096 "$base/refs/heads/feature/library-studio/studio/deploy/nas-desktop-services.json" -o "$lock/request"
 image=sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0
 parser=$(cat "$control/service-release.py")
 docker_local run --rm -i --pull=never --user 65534:65534 --network none --read-only --memory 64m --cap-drop ALL --security-opt no-new-privileges:true --entrypoint python "$image" -c "$parser" < "$lock/request" > "$lock/parsed"
@@ -76,7 +76,7 @@ apply() {
     sh "$control/service-recipes/deploy/install-site-login.sh" start-worker "$root" library-studio-nas-pilot "$login" "$worker_image"
   fi
   # Verify RPC is actually responsive using the Studio-side private key; never print it.
-  docker_local exec library-studio-nas-pilot-studio-1 python -c 'from site_sessions import LoginClient; c=LoginClient(config_root="/data"); assert c.call({"op":"status"})["configured"]'
+  docker_local exec library-studio-nas-pilot-studio-1 python -c 'from site_sessions import LoginClient; r=LoginClient(config_root="/data").call({"op":"status"}); assert r["configured"] and r.get("browser_mode")=="desktop" and r.get("desktop_available")'
 }
 # Direct invocation keeps errexit active (an if/function would suppress it).
 apply > services.log 2>&1
