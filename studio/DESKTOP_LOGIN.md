@@ -56,6 +56,11 @@ No NAS media, DB, account, ACL, firewall, LANraragi, Stash/NMLO or scheduler
 change is included. Successful recipe installation is distinct from image build,
 browser launch, actual website authentication and actual download success.
 
+The pinned launcher and installer retry transient DNS/connect/timeout/transfer
+errors on the same HTTPS URL, at most four attempts with bounded delays. HTTP
+denials and certificate errors stop immediately. Exhausted pre-install transfers
+remove only their own stage/locks and preserve all existing frozen files.
+
 ## Validation boundary
 
 Generated tests cover real nonroot/read-only Docker, Xvfb, ordinary Chromium,
