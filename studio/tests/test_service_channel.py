@@ -209,6 +209,8 @@ if 'inspect' in a:print('sha256:'+'a'*64)
         self.assertEqual((self.control/'configs.sha256').read_bytes(),config)
         self.assertNotIn(b'# previous frozen recipe',(self.control/'service-recipes/Dockerfile.login').read_bytes())
         self.assertEqual(self.run_upgrade(upgrade,digest).returncode,0)
+        equivalent=subprocess.run(['sh',str(upgrade),str(self.root/'library-studio'),'c'*40,digest,'apply'],env=self.env,capture_output=True,text=True)
+        self.assertEqual(equivalent.returncode,0,equivalent.stderr)
 
     def test_desktop_upgrade_preserves_live_service_lock_and_rejects_bad_manifest(self):
         upgrade,digest=self.desktop_upgrade_fixture()
@@ -231,6 +233,32 @@ if 'inspect' in a:print('sha256:'+'a'*64)
         self.assertEqual((self.control/'service-recipes/Dockerfile.login').read_bytes(),recipe)
         self.assertFalse((self.control/'desktop-controller.revision').exists())
         self.assertFalse((self.control/'poll.lock').exists())
+
+    def test_desktop_upgrade_retries_transient_connect_failure_before_mutation(self):
+        upgrade,digest=self.desktop_upgrade_fixture()
+        os.rename(self.bin/'curl',self.bin/'curl.forward')
+        self.write_tool('curl','''import os,pathlib,sys
+r=pathlib.Path(os.environ['TEST_ROOT']);p=r/'fetch_count'
+n=int(p.read_text())+1 if p.exists() else 1;p.write_text(str(n))
+if n<=2:sys.exit(7)
+os.execv(str(r/'bin/curl.forward'),['curl']+sys.argv[1:])
+''')
+        sleep=self.bin/'sleep';sleep.write_text('#!/bin/sh\nexit 0\n');sleep.chmod(0o755)
+        result=self.run_upgrade(upgrade,digest);self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('download_network_retry=2/3',result.stderr)
+        self.assertTrue((self.control/'desktop-controller.revision').is_file())
+
+    def test_desktop_upgrade_denial_stops_once_and_network_exhaustion_leaves_code_unchanged(self):
+        upgrade,digest=self.desktop_upgrade_fixture();before=(self.control/'controller.sha256').read_bytes()
+        sleep=self.bin/'sleep';sleep.write_text('#!/bin/sh\nexit 0\n');sleep.chmod(0o755)
+        for code,expected in ((22,1),(7,4)):
+            count=self.root/'transport_count';count.unlink(missing_ok=True)
+            self.write_tool('curl','import pathlib,os,sys\np=pathlib.Path(os.environ["TEST_ROOT"])/"transport_count"\np.write_text(str(int(p.read_text())+1 if p.exists() else 1))\nsys.exit('+str(code)+')\n')
+            result=self.run_upgrade(upgrade,digest);self.assertEqual(result.returncode,code,result.stderr)
+            self.assertEqual(int(count.read_text()),expected)
+            self.assertEqual((self.control/'controller.sha256').read_bytes(),before)
+            self.assertFalse((self.control/'before-desktop-login').exists())
+            self.assertFalse((self.control/'poll.lock').exists())
 
 
 class LoginUpdateTests(unittest.TestCase):
