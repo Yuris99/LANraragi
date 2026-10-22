@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "enabled": false,
+  "enabled": true,
   "generation": 3,
-  "revision": "39f05f8afea17671f1cb74b057cfab7f7f37c467",
+  "revision": "ada25d12ea62b1db90f86f34a584203ea1520283",
   "worker": true,
   "files": {
-    "login_service.py": "d38eb3f0ee8a788d941285175df25c8650812c486fc3eba48f3799f69b60566b",
-    "site_sessions.py": "639cbc61ec89cb45fb89a9183b4adf1f31db622394c54e3cd0e4b3f0e913c4d0",
+    "login_service.py": "b667ea7d31246e2f1f94727e11912e547a620560ddf3f917c5fffecb4f022c3b",
+    "site_sessions.py": "c51cc92e9afb115f3d9ca309382520a1990d9e41f759df8126228b3839be6e05",
     "init_login.py": "801ae821b624d73885cb172e35f9fff417f918c3ade77743798d5d2be39d14de",
     "worker.py": "2f35e9fc5f60f46802da909ac348cf3e9b507c877b8fa35755e4ba64cf2c34a7",
     "gallery_engine.py": "7e2982446972ced2a0dfb34411048a6c1959dade81a3ac35e2cefae0a4319bd9",
