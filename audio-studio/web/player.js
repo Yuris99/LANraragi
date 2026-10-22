@@ -5,6 +5,8 @@
   let tracks = [], current = null, cues = [], wake = null, wakePending = false;
   let generation = 0, progressPending = false, lastSaved = 0, loading = false, switching = false;
   let resume = 0, returnFocus = null, orderPending = false;
+  let controlsTimer = null, controlsVisible = true, seeking = false, keyboardMode = false;
+  const chrome = [$('player-header'), $('player-transport'), $('player-controls')];
   const preferences = {size:28, vertical:72, horizontal:50, delay:0, enabled:true, keepAwake:true, speed:1, mode:'all'};
   try { Object.assign(preferences, JSON.parse(localStorage.getItem('audio-player-preferences') || '{}')); } catch (_) { /* Private mode or invalid stored data. */ }
   for (const [key,min,max] of [['size',14,72],['vertical',8,88],['horizontal',10,90],['delay',-120,120],['speed',0.5,2]]) {
@@ -12,7 +14,32 @@
   }
   preferences.mode = preferences.mode === 'single' ? 'single' : 'all';
 
-  const note = message => { $('player-status').textContent = message; };
+  const note = message => { $('player-status').textContent = message; if (message) showControls(); };
+  function canHideControls() {
+    const focused = document.activeElement;
+    return !stage.hidden && !media.paused && !media.ended && !media.error && !loading && !switching && !seeking && !keyboardMode
+      && !$('player-settings').open && !$('player-queue').open
+      && !(stage.contains(focused) && ['INPUT','SELECT','TEXTAREA'].includes(focused?.tagName));
+  }
+  function setControlsVisible(visible) {
+    controlsVisible = visible;
+    if (!visible && chrome.some(node => node.contains(document.activeElement))) $('screen-controls').focus();
+    stage.classList.toggle('controls-hidden', !visible);
+    for (const node of chrome) { node.inert = !visible; node.setAttribute('aria-hidden', String(!visible)); }
+    $('screen-controls').setAttribute('aria-expanded', String(visible));
+    $('screen-controls').setAttribute('aria-label', visible ? '재생 조작 버튼 숨기기' : '재생 조작 버튼 표시');
+  }
+  function scheduleHide() {
+    clearTimeout(controlsTimer); controlsTimer = null;
+    if (controlsVisible && canHideControls()) controlsTimer = setTimeout(() => { if (canHideControls()) setControlsVisible(false); }, 3000);
+  }
+  function showControls() { setControlsVisible(true); scheduleHide(); }
+  function panelState() {
+    $('player-panels').hidden = !$('player-settings').open && !$('player-queue').open;
+    $('player-settings-button').setAttribute('aria-expanded', String(!!$('player-settings').open));
+    $('player-queue-button').setAttribute('aria-expanded', String(!!$('player-queue').open));
+    showControls();
+  }
   async function request(path, data) {
     const response = await fetch(path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     const value = await response.json();
@@ -143,6 +170,8 @@
     if (!list.length) return;
     returnFocus = document.activeElement;
     stage.hidden = false; document.body.classList.add('cinema-open');
+    keyboardMode = false; seeking = false;
+    $('player-settings').open = false; $('player-queue').open = false; panelState();
     backgroundInert(true);
     if (options.mode === 'all' || options.mode === 'single') {
       preferences.mode = options.mode;
@@ -161,6 +190,7 @@
     await releaseWake();
     if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
     stage.hidden = true; document.body.classList.remove('cinema-open');
+    clearTimeout(controlsTimer); controlsTimer = null;
     backgroundInert(false);
     returnFocus?.focus();
     document.dispatchEvent(new Event('player-closed'));
@@ -183,6 +213,7 @@
     $('seek').max = Number.isFinite(media.duration) ? String(media.duration) : '0';
     $('total').textContent = core.formatTime(media.duration);
     note('');
+    if (stage.hidden) { media.pause(); return; }
     media.play().catch(() => note('재생 버튼을 눌러 시작하세요.'));
   });
   media.addEventListener('timeupdate', () => {
@@ -192,10 +223,11 @@
       safe(saveProgress).finally(() => { progressPending = false; });
     }
   });
-  media.addEventListener('play', () => { $('toggle-play').textContent = '일시정지'; safe(acquireWake); });
-  media.addEventListener('pause', () => { $('toggle-play').textContent = '재생'; safe(releaseWake); if (!switching) safe(saveProgress); });
-  media.addEventListener('seeked', () => { renderCaptions(); if (!loading) safe(saveProgress); });
+  media.addEventListener('play', () => { if (stage.hidden) { media.pause(); return; } $('toggle-play').textContent = 'Ⅱ'; $('toggle-play').setAttribute('aria-label','일시정지'); showControls(); safe(acquireWake); });
+  media.addEventListener('pause', () => { $('toggle-play').textContent = '▶'; $('toggle-play').setAttribute('aria-label','재생'); showControls(); safe(releaseWake); if (!switching && !stage.hidden) safe(saveProgress); });
+  media.addEventListener('seeked', () => { renderCaptions(); if (!loading && !stage.hidden) safe(saveProgress); });
   media.addEventListener('ended', () => safe(async () => {
+    if (stage.hidden) return;
     await releaseWake();
     try { await saveProgress(); } catch (error) { note(error.message); }
     const next = core.nextTrack(tracks, current?.id, preferences.mode);
@@ -214,11 +246,21 @@
   $('player-next').addEventListener('click', () => safe(() => skip(1)));
   $('close-player').addEventListener('click', () => safe(close));
   $('fullscreen').addEventListener('click', () => safe(enterFullscreen));
-  $('hide-controls').addEventListener('click', () => {
-    const hidden = stage.classList.toggle('controls-hidden');
-    $('hide-controls').textContent = hidden ? '조작부 표시' : '조작부 숨기기';
+  $('screen-controls').addEventListener('click', () => {
+    if (controlsVisible && canHideControls()) { clearTimeout(controlsTimer); setControlsVisible(false); }
+    else showControls();
   });
-  $('reopen-player').addEventListener('click', () => { if (current) { returnFocus = document.activeElement; stage.hidden = false; document.body.classList.add('cinema-open'); backgroundInert(true); $('close-player').focus(); } });
+  $('player-settings-button').addEventListener('click', () => { $('player-settings').open = !$('player-settings').open; $('player-queue').open = false; panelState(); });
+  $('player-queue-button').addEventListener('click', () => { $('player-queue').open = !$('player-queue').open; $('player-settings').open = false; panelState(); });
+  $('player-settings').addEventListener('toggle', panelState);
+  $('player-queue').addEventListener('toggle', panelState);
+  stage.addEventListener('pointerdown', () => { keyboardMode = false; if (controlsVisible) scheduleHide(); });
+  stage.addEventListener('pointermove', event => { if (event.pointerType === 'mouse') showControls(); });
+  stage.addEventListener('focusin', event => { if (event.target !== $('screen-controls')) showControls(); });
+  stage.addEventListener('focusout', () => queueMicrotask(scheduleHide));
+  $('seek').addEventListener('pointerdown', () => { seeking = true; showControls(); });
+  for (const event of ['pointerup','pointercancel','blur']) $('seek').addEventListener(event, () => { seeking = false; scheduleHide(); });
+  $('reopen-player').addEventListener('click', () => { if (current) { returnFocus = document.activeElement; stage.hidden = false; keyboardMode = false; document.body.classList.add('cinema-open'); backgroundInert(true); showControls(); $('close-player').focus(); } });
   $('subtitle-select').addEventListener('change', () => safe(async () => {
     const token = ++generation; cues = []; renderCaptions();
     const id = $('subtitle-select').value;
@@ -235,6 +277,7 @@
   $('retry-wake').addEventListener('click', () => safe(acquireWake));
   document.addEventListener('keydown', event => {
     if (stage.hidden) return;
+    keyboardMode = true; showControls();
     if (event.key === 'Escape') { safe(close); return; }
     if (event.key === 'Tab') {
       const focusable = [...stage.querySelectorAll('button:not(:disabled),input:not(:disabled),select,summary')].filter(n => n.getClientRects().length);
