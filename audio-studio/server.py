@@ -12,18 +12,19 @@ from pathlib import Path, PureWindowsPath
 from urllib.parse import parse_qs, urlsplit
 
 from catalog import Catalog, text
+from subtitles import read_subtitles
 
 HERE = Path(__file__).resolve().parent
 AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.aac', '.ogg', '.opus', '.wav', '.flac', '.mp4', '.webm'}
 
 
-def media_path(root, relative):
+def media_path(root, relative, extensions=None):
     text(relative, '상대 파일 경로', 2000)
     windows = PureWindowsPath(relative)
     if windows.drive or windows.root or '\\' in relative or ':' in relative:
         raise ValueError('미디어 폴더 내부의 / 구분 상대 경로가 필요합니다.')
     candidate = (root / relative).resolve()
-    if not candidate.is_relative_to(root.resolve()) or candidate.suffix.lower() not in AUDIO_EXTENSIONS:
+    if not candidate.is_relative_to(root.resolve()) or candidate.suffix.lower() not in (extensions or AUDIO_EXTENSIONS):
         raise ValueError('허용된 미디어 폴더·음성 파일 형식이 아닙니다.')
     if not candidate.is_file():
         raise ValueError('등록할 로컬 파일을 찾을 수 없습니다.')
@@ -123,19 +124,24 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             track = store.track(match[1])
             return self.stream(media_path(self.server.media_root, track['relative_path']))
-        asset = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}.get(path)
+        match = re.fullmatch('/api/subtitles/([0-9a-f]{32})', path)
+        if match:
+            subtitle = store.subtitle(match[1])
+            file = media_path(self.server.media_root, subtitle['relative_path'], {'.srt', '.vtt'})
+            return self.reply({'cues': read_subtitles(file)})
+        asset = {'/': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/player.css': 'player.css', '/player.js': 'player.js', '/player-core.js': 'player-core.js'}.get(path)
         if not asset:
             return self.reply({'error': '찾을 수 없습니다.'}, 404)
         raw = (HERE / 'web' / asset).read_bytes()
         self.send_response(200)
         # Windows registry associations may label .js as text/plain, which nosniff blocks.
-        content_types = {'index.html': 'text/html', 'app.js': 'text/javascript', 'style.css': 'text/css'}
+        content_types = {'index.html': 'text/html', 'app.js': 'text/javascript', 'style.css': 'text/css', 'player.css': 'text/css', 'player.js': 'text/javascript', 'player-core.js': 'text/javascript'}
         self.send_header('Content-Type', content_types[asset] + '; charset=utf-8')
         self.send_header('Content-Length', str(len(raw)))
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; media-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; media-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(raw)
@@ -144,10 +150,18 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         store = self.server.catalog
         if path == '/api/works':
-            return self.reply(store.create_work(data['title']), 201)
+            return self.reply(store.create_work(data['title'], data.get('rj_code', '')), 201)
+        match = re.fullmatch('/api/works/([0-9a-f]{32})/codes', path)
+        if match:
+            return self.reply(store.add_code(match[1], data['code']), 201)
         if path == '/api/editions':
             return self.reply(store.create_edition(data['work_id'], data['title'], data['kind'],
                               data.get('language', ''), data.get('credits')), 201)
+        match = re.fullmatch('/api/editions/([0-9a-f]{32})/(profile|order)', path)
+        if match:
+            if match[2] == 'profile':
+                return self.reply(store.set_profile(match[1], data['media_type'], data['translation']))
+            return self.reply(store.reorder_tracks(match[1], data['track_ids']))
         match = re.fullmatch('/api/editions/([0-9a-f]{32})/(sources|tracks)', path)
         if match:
             if match[2] == 'sources':
@@ -159,6 +173,11 @@ class Handler(BaseHTTPRequestHandler):
         match = re.fullmatch('/api/tracks/([0-9a-f]{32})/progress', path)
         if match:
             return self.reply(store.progress(match[1], data['seconds']))
+        match = re.fullmatch('/api/tracks/([0-9a-f]{32})/subtitles', path)
+        if match:
+            file = media_path(self.server.media_root, data['relative_path'], {'.srt', '.vtt'})
+            read_subtitles(file)
+            return self.reply(store.add_subtitle(match[1], data['relative_path'], data.get('language', 'ko'), data.get('label', '한국어')), 201)
         return self.reply({'error': '찾을 수 없습니다.'}, 404)
 
     def stream(self, path):

@@ -1,15 +1,26 @@
 <!doctype html>
 <html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Audio Studio · 동인음성 서재</title><link rel="stylesheet" href="/style.css"><script src="/app.js?v=1" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Audio Studio · 동인음성 서재</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/player.css"><script src="/player-core.js" defer></script><script src="/player.js" defer></script><script src="/app.js?v=2" defer></script></head>
 <body>
 <header><div><span class="eyebrow">LANraragi Studio / AUDIO</span><h1>소리로 이어지는 서재</h1><p>하나의 원작, 각자의 판본. 출처와 기록을 함께 보관하세요.</p></div><a href="/api/export" download="audio-studio-catalog.json">목록 내보내기 ↗</a></header>
 <main>
 <section class="toolbar"><label for="search">서재 검색</label><input id="search" type="search" placeholder="원작, 판본, 출처 ID, 제작진 검색"><span id="count"></span></section>
 <p id="status" role="status" aria-live="polite"></p>
 <div class="layout"><section aria-label="원작 목록" id="library"></section>
-<aside><section class="panel"><span class="eyebrow">01 / ORIGINAL</span><h2>원작 만들기</h2><p>제목이 같아도 새 원작으로 등록됩니다.</p><form id="work-form"><label>원작 제목<input name="title" required maxlength="1000"></label><button>원작 등록</button></form></section>
+<aside><section class="panel"><span class="eyebrow">01 / ORIGINAL</span><h2>원작 만들기</h2><p>RJ 코드는 직접 확인해서 등록합니다. 제목이 같아도 자동 병합하지 않습니다.</p><form id="work-form"><label>원작 제목<input name="title" required maxlength="1000"></label><label>RJ 코드 (선택)<input name="rj_code" placeholder="RJ01234567" pattern="RJ[0-9]{6,12}" maxlength="14"></label><button>원작 등록</button></form></section>
 <section class="panel"><span class="eyebrow">02 / EDITION</span><h2>판본 연결하기</h2><p>연결할 원작을 직접 선택하세요.</p><form id="edition-form"><label>원작<select name="work_id" id="work-select" required></select></label><label>판본 제목<input name="title" required maxlength="1000"></label><div class="pair"><label>유형<select name="kind"><option value="audio">음성판</option><option value="voice_comic">보이스코믹</option><option value="comic">만화</option><option value="translation">번역본</option></select></label><label>언어<input name="language" placeholder="ja / ko" maxlength="100"></label></div><label>제작진 JSON<textarea name="credits" rows="2" placeholder='{"circle":"서클명","voice":["성우명"]}'>{}</textarea></label><button>선택한 원작에 판본 등록</button></form></section></aside></div>
 <section id="detail" class="panel" hidden aria-label="판본 상세"></section>
 </main>
-<footer id="player-bar"><div><span class="eyebrow">NOW PLAYING</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="previous" aria-label="이전 트랙">이전</button><audio id="audio" controls preload="metadata"></audio><button id="next" aria-label="다음 트랙">다음</button><label>재생 속도<select id="speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></footer>
+<footer id="player-bar"><div><span class="eyebrow">NOW PLAYING</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="reopen-player">플레이어 열기</button></footer>
+<section id="cinema" role="dialog" aria-modal="true" aria-label="전체 화면 감상 플레이어" hidden>
+  <div class="cinema-header"><button id="close-player" aria-label="플레이어 닫기">닫기</button><strong id="player-title">트랙 선택</strong><button id="fullscreen">전체 화면</button><button id="hide-controls">조작부 숨기기</button></div>
+  <div class="screen"><video id="media" playsinline preload="metadata"></video><div id="caption" aria-live="off"></div></div>
+  <div class="cinema-controls">
+    <p id="player-status" role="status" aria-live="polite"></p>
+    <div class="timeline"><span id="elapsed">0:00</span><input id="seek" aria-label="재생 위치" type="range" min="0" max="0" step="0.1" value="0" disabled><span id="total">0:00</span></div>
+    <div class="transport"><button id="player-previous">이전</button><button id="back-ten">−10초</button><button id="toggle-play">재생</button><button id="forward-ten">＋10초</button><button id="player-next">다음</button></div>
+    <div class="player-options"><label>재생 범위<select id="play-mode"><option value="all">전체 연속 재생</option><option value="single">현재 트랙만</option></select></label><label>배속<select id="player-speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><label>자막<select id="subtitle-select"><option value="">자막 없음</option></select></label></div>
+    <div class="player-panels"><details><summary>자막 · 화면 설정</summary><div class="settings-grid"><label class="check"><input id="caption-enabled" type="checkbox" checked>자막 표시</label><label class="check"><input id="keep-awake" type="checkbox" checked>재생 중 화면 유지</label><label>자막 크기 <output id="caption-size-value">28px</output><input id="caption-size" type="range" min="14" max="72" value="28"></label><label>위아래 위치<input id="caption-vertical" type="range" min="8" max="88" value="72"></label><label>좌우 위치<input id="caption-horizontal" type="range" min="10" max="90" value="50"></label><label>자막 시간차 <output id="caption-delay-value">0.0초</output><input id="caption-delay" type="number" min="-120" max="120" step="0.1" value="0"></label></div><div class="wake-line"><span id="wake-status">재생 시 화면 유지 요청</span><button id="retry-wake">화면 유지 재시도</button></div><p>영상에 박힌 자막은 위치·크기·싱크를 변경할 수 없습니다. 별도 SRT/VTT 자막을 선택하면 조절할 수 있습니다.</p></details><details><summary>재생 순서 편집</summary><p>↑ ↓로 순서를 저장합니다. 마지막 트랙 뒤에는 반복 없이 끝납니다.</p><ol id="queue"></ol></details></div>
+  </div>
+</section>
 </body></html>

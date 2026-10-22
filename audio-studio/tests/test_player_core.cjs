@@ -1,0 +1,22 @@
+const assert = require('node:assert/strict');
+const {nextTrack,activeCues,move,formatTime} = require('../web/player-core.js');
+const tracks = [{id:'a'},{id:'b'},{id:'c'}];
+assert.equal(nextTrack(tracks,'a','all').id,'b');
+assert.equal(nextTrack(tracks,'c','all'),null); // Last track never wraps around.
+assert.equal(nextTrack(tracks,'a','single'),null);
+assert.equal(nextTrack(tracks,'missing','all'),null);
+const reordered = move(tracks,'c',-1);
+assert.deepEqual(reordered.map(t=>t.id),['a','c','b']);
+assert.equal(nextTrack(reordered,'c','all').id,'b');
+assert.deepEqual(tracks.map(t=>t.id),['a','b','c']);
+assert.deepEqual(move(tracks,'a',-1),tracks);
+const cues=[{start:1,end:3,text:'one'},{start:2,end:4,text:'two'}];
+assert.equal(activeCues(cues,1,0),'one');
+assert.equal(activeCues(cues,2,0),'one\ntwo');
+assert.equal(activeCues(cues,4,0),'');
+assert.equal(activeCues(cues,1,1),'');
+assert.equal(activeCues(cues,2,1),'one');
+assert.equal(activeCues(cues,0,-1),'one');
+assert.equal(formatTime(65.9),'1:05');
+assert.equal(formatTime(Infinity),'0:00');
+console.log('Player queue, stop-at-end, caption sync and ordering checks passed.');
