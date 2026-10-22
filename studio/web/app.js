@@ -842,18 +842,24 @@ function sessionRequestNote(request) {
 $('#session-import-form').onsubmit = guard(async event => {
     event.preventDefault();
     if (loginBusy) return;
-    const input = $('#session-import-file'), file = input.files[0];
-    if (!file) throw new Error('세션 파일을 선택하세요.');
-    if (file.size > 131072) { input.value = ''; throw new Error('세션 파일은 128 KiB 이하여야 합니다.'); }
+    const input = $('#session-import-file'), text = $('#session-import-text'), file = input.files[0];
+    const pasted = text.value.trim();
+    if (file && pasted) throw new Error('붙여넣기와 파일 중 하나만 선택하세요.');
+    if (!file && !pasted) throw new Error('세션 내용을 붙여 넣거나 파일을 선택하세요.');
+    if ((file && file.size > 131072) || new TextEncoder().encode(pasted).length > 131072) {
+        input.value = ''; text.value = '';
+        throw new Error('세션 내용은 128 KiB 이하여야 합니다.');
+    }
     loginBusy = true; $('#session-import-submit').disabled = true;
     let content = '';
     try {
-        content = await file.text(); input.value = '';
+        content = file ? await file.text() : pasted; input.value = ''; text.value = '';
         await api('/api/site-connections', {op:'import-session', provider:$('#session-import-provider').value, content});
         content = '';
         toast('계정 세션을 NAS에 저장했습니다. 사이트 접근은 자동 연결 작업에서 확인합니다.');
         await connectionStatus();
-    } finally { content = ''; input.value = ''; loginBusy = false; $('#session-import-submit').disabled = false; }
+    } finally { content = ''; input.value = ''; text.value = ''; loginBusy = false; $('#session-import-submit').disabled = false; }
+
 });
 async function connectionStatus() {
     const status = await api('/api/site-connections');
@@ -908,7 +914,7 @@ async function loginOperation(operation) {
 $('#connections-open').onclick = guard(async () => { $('#connections-dialog').showModal(); await connectionStatus(); });
 $('#connections-refresh').onclick = guard(connectionStatus);
 $('#connections-dialog').addEventListener('close', () => {
-    clearTimeout(loginTimer); $('#session-import-file').value = ''; $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
+    clearTimeout(loginTimer); $('#session-import-text').value = ''; $('#session-import-file').value = ''; $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
 });
 $('#connections-sites').onclick = guard(async event => {
     const button = event.target.closest('button');
