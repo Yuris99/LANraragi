@@ -1,5 +1,9 @@
 # Source metadata and counterpart connections
 
+Historical generation15 behavior below. Registration-triggered three-site jobs,
+distinct ExHentai identities, authenticated internal document requests and durable
+paged searching are documented in [AUTOMATIC_SOURCES.md](AUTOMATIC_SOURCES.md).
+
 This continuation adds a standard-library metadata reader, authenticated HTML
 preview/import, direct E-Hentai/Hitomi metadata requests and bounded counterpart
 discovery. Real website access, download success and NAS deployment remain

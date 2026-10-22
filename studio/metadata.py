@@ -26,6 +26,7 @@ def canonical_tag(tag):
 class Node:
     def __init__(self, tag='', attrs=()):
         self.tag, self.attrs, self.children = tag, dict(attrs), []
+        self.parent = None
 
     def walk(self):
         yield self
@@ -58,6 +59,7 @@ class Document(HTMLParser):
         if self.count > 20000 or len(self.stack) > 128:
             raise ValueError('HTML 구조 제한을 초과했습니다.')
         node = Node(tag, attrs)
+        node.parent = self.stack[-1]
         self.stack[-1].children.append(node)
         if tag not in self.VOID:
             self.stack.append(node)
@@ -96,7 +98,7 @@ def parse_html(url, text):
     source = parse_source(url)
     root = Document(text).root
     tags, comments, pages = [], [], None
-    if source['provider'] == 'ehentai':
+    if source['provider'] in ('ehentai','exhentai'):
         # Verify gallery identity from declarations, never execute inline scripts.
         scripts = '\n'.join(''.join(c for c in n.children if isinstance(c, str))
                             for n in root.walk() if n.tag == 'script' and not n.attrs.get('src'))
@@ -127,6 +129,12 @@ def parse_html(url, text):
                 info = next((n for n in node.walk() if 'c3' in n.attrs.get('class', '').split()), None)
                 anchor = next((n.attrs.get('name', '')[1:] for n in node.walk()
                                if re.fullmatch(r'c[0-9]+', n.attrs.get('name', ''))), '')
+                if not anchor and node.parent:
+                    siblings=[n for n in node.parent.children if isinstance(n,Node)]
+                    position=siblings.index(node)
+                    previous=siblings[position-1] if position else None
+                    if previous and re.fullmatch(r'c[0-9]+',previous.attrs.get('name','')):
+                        anchor=previous.attrs['name'][1:]
                 author = next((clean(n) for n in info.walk() if n.tag == 'a'), '') if info else ''
                 if body and anchor:
                     comments.append({'id': anchor, 'text': clean(body), 'author': author,
@@ -186,7 +194,7 @@ def fetch_metadata(url, fetch=None):
     fetch = fetch or public_document
     if source['provider'] == 'hitomi':
         return parse_hitomi_json(url, fetch('https://ltn.gold-usergeneratedcontent.net/galleries/' + source['external_id'] + '.js'))
-    if source['provider'] == 'ehentai': return parse_html(url, fetch(source['url']))
+    if source['provider'] in ('ehentai','exhentai'): return parse_html(url, fetch(source['url']))
     raise ValueError('이 출처의 직접 정보 수집기는 아직 지원하지 않습니다.')
 
 
@@ -214,62 +222,94 @@ def compare_metadata(first, second):
             'message': '출처 연결의 비교 근거입니다. 파일 병합·삭제와 판본 통합은 실행하지 않습니다.'}
 
 
-def public_artist_index(artist):
+def public_artist_index(artist,offset=None):
     """Read only the latest eight IDs from the normal public Hitomi artist index."""
     import urllib.request
+    import urllib.error
     from urllib.parse import quote
     from connectors import NoRedirect
     if not isinstance(artist,str) or not artist or len(artist)>150: raise ValueError('작가 이름을 확인하세요.')
     url = 'https://ltn.gold-usergeneratedcontent.net/artist/' + quote(artist,safe='') + '-all.nozomi'
-    request = urllib.request.Request(url,headers={'Range':'bytes=0-31','User-Agent':'LibraryStudio/0.1'})
-    with urllib.request.build_opener(NoRedirect()).open(request,timeout=20) as response:
+    position=0 if offset is None else offset
+    if type(position) is not int or not 0<=position<=100000:raise ValueError('작가 색인 범위를 확인하세요.')
+    request = urllib.request.Request(url,headers={'Range':f'bytes={position*4}-{position*4+31}','User-Agent':'LibraryStudio/0.1'})
+    try:response=urllib.request.build_opener(NoRedirect()).open(request,timeout=20)
+    except urllib.error.HTTPError as error:
+        if error.code==416 and position:return {'ids':[],'complete':True}
+        raise
+    with response:
         if response.status not in (200,206): raise ValueError('작가 색인 응답을 확인하지 못했습니다.')
         if response.headers.get_content_type().startswith('text/') or response.headers.get_content_type()=='application/json':
             raise ValueError('작가 색인 대신 오류 문서가 반환됐습니다.')
-        if response.status==206 and not re.fullmatch(r'bytes 0-[0-9]+/[0-9]+',response.headers.get('Content-Range','')):
+        scope=re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)',response.headers.get('Content-Range',''))
+        if response.status==206 and (not scope or int(scope[1])!=position*4):
             raise ValueError('작가 색인의 응답 범위가 다릅니다.')
+        if response.status==200 and position:raise ValueError('작가 색인의 범위 요청이 지원되지 않습니다.')
         raw=response.read(32)
     if len(raw)%4: raise ValueError('작가 색인 형식이 변경됐습니다.')
-    return [str(int.from_bytes(raw[i:i+4],'big')) for i in range(0,len(raw),4)]
+    if scope and (int(scope[2])-int(scope[1])+1!=len(raw) or int(scope[3])%4):raise ValueError('작가 색인이 불완전합니다.')
+    ids=[str(int.from_bytes(raw[i:i+4],'big')) for i in range(0,len(raw),4)]
+    return ids if offset is None else {'ids':ids,'complete':len(raw)<32 or bool(scope and int(scope[2])+1>=int(scope[3]))}
 
 
-def counterpart_candidates(metadata,fetch=None,index_fetch=None):
+def counterpart_candidates(metadata,fetch=None,index_fetch=None,target=None,cursor=None):
     """Bounded same-title discovery on the other site, without downloading images.
 
     Artist index checks are deliberately incomplete (latest eight); errors are
     reported, never substituted by another source or treated as no matches.
     """
     import urllib.error
-    from urllib.parse import quote
+    from urllib.parse import quote,urljoin,parse_qs
     from connectors import public_document
     fetch=fetch or public_document
-    target='ehentai' if metadata['provider']=='hitomi' else 'hitomi'
+    target=target or ('ehentai' if metadata['provider']=='hitomi' else 'hitomi')
+    if target not in ('ehentai','exhentai','hitomi') or target==metadata['provider']:
+        raise ValueError('다른 출처를 지정하세요.')
     output={'provider':target,'items':[],'bounded':True,'failures':0,'status':'checked',
             'message':'제한된 후보 검색입니다. 결과 없음은 다른 사이트에 작품이 없다는 뜻이 아닙니다.'}
     try:
+        if cursor is not None and (not isinstance(cursor,dict) or any(type(v) is not int or v<0 for v in cursor.values())):raise ValueError('검색 위치를 확인하세요.')
         if target=='hitomi':
             if not metadata.get('artists'):
                 return {**output,'status':'needs_artist','message':'Hitomi 작가 색인 검색에는 작가 정보가 필요합니다.'}
-            ids=(index_fetch or public_artist_index)(metadata['artists'][0])
+            position=(cursor or {}).get('offset',0)
+            page=(index_fetch or public_artist_index)(metadata['artists'][0],position) if cursor is not None else (index_fetch or public_artist_index)(metadata['artists'][0])
+            ids=page['ids'] if isinstance(page,dict) else page
+            if cursor is not None and not page.get('complete',False):
+                output['next_cursor']={'offset':position+8}
+                if position+8>100000:output['status']='search_limit';output.pop('next_cursor')
             urls=['https://hitomi.la/galleries/'+number+'.html' for number in list(dict.fromkeys(ids))[:8]
                   if isinstance(number,str) and re.fullmatch(r'[1-9][0-9]{0,11}',number)]
         else:
             # Normal gallery search, not an alternate path to blocked content.
             title=metadata['title'][:150]
-            html=fetch('https://e-hentai.org/?f_search='+quote(title,safe=''))
+            host='exhentai.org' if target=='exhentai' else 'e-hentai.org'
+            page_number=(cursor or {}).get('page',0);offset=(cursor or {}).get('offset',0)
+            if page_number>1000:raise ValueError('검색 페이지 범위를 확인하세요.')
+            search_url='https://'+host+'/?f_search='+quote(title,safe='')+('&page='+str(page_number) if page_number else '')
+            html=fetch(search_url)
             root=Document(html).root
-            urls=[]
+            urls=[];has_next=False
             for node in root.walk():
                 href=node.attrs.get('href','')
-                if node.tag=='a' and re.fullmatch(r'https://e-hentai\.org/g/[0-9]+/[A-Za-z0-9]+/',href) and href not in urls:
+                if node.tag=='a' and re.fullmatch(r'https://'+re.escape(host)+r'/g/[0-9]+/[A-Za-z0-9]+/',href) and href not in urls:
                     urls.append(href)
-            urls=urls[:5]
+                if node.tag=='a':
+                    link=urlsplit(urljoin(search_url,href));query=parse_qs(link.query)
+                    if link.hostname==host and link.path=='/' and query.get('f_search')==[title] and len(query.get('page',[]))==1 and query['page'][0].isdigit() and int(query['page'][0])>page_number:
+                        has_next=True
+            if cursor is not None:
+                if offset+5<len(urls):output['next_cursor']={'page':page_number,'offset':offset+5}
+                elif has_next and page_number<1000:output['next_cursor']={'page':page_number+1,'offset':0}
+                elif has_next:output['status']='search_limit'
+            urls=urls[offset:offset+5]
         if not urls: output['status']='no_candidates'
         for url in urls:
             try:
                 candidate=fetch_metadata(url,fetch)
                 output['items'].append({'metadata':candidate,'comparison':compare_metadata(metadata,candidate)})
             except urllib.error.HTTPError as error:
+                if error.code in (404,410):continue
                 output['failures']+=1
                 if error.code in (301,302,303,307,308,401,403,429):
                     output.update(status='access_required',message='접근 제한 응답으로 후보 조회를 중단했습니다. 자동 연결하지 않습니다.')
@@ -278,6 +318,7 @@ def counterpart_candidates(metadata,fetch=None,index_fetch=None):
                 output['failures']+=1
         output['items'].sort(key=lambda item:(item['comparison']['automatic_eligible'],item['comparison']['artist_match'],item['comparison']['title_similarity']),reverse=True)
         if output['failures']:output['status']='partial'
+        elif output.get('next_cursor'):output['status']='scanning'
     except urllib.error.HTTPError as error:
         output.update(status='access_required' if error.code in (301,302,303,307,308,401,403,429) else 'unavailable',message='대상 사이트 응답을 확인하지 못했습니다. 다른 출처로 대체하지 않습니다.')
     except (OSError,ValueError,KeyError,TypeError):

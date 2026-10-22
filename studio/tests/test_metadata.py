@@ -66,6 +66,12 @@ class MetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):parse_hitomi_json(H,'var galleryinfo = {"id":123456}; alert(1)')
         with self.assertRaises(ValueError):parse_hitomi_json(H,hitomi_js().replace('123456','9'))
 
+    def test_eh_comment_anchor_before_the_comment_block_keeps_stable_identity(self):
+        html=eh_html().replace('<div class="c1"><a name="c12"></a>','<a name="c12"></a><div class="c1">')
+        comment=parse_html(E,html)['comments'][0]
+        self.assertEqual(comment['id'],'12')
+        self.assertEqual(comment['text'],'A & B')
+
     def test_cross_provider_ids_differ_and_strict_edition_evidence(self):
         h=parse_hitomi_json(H,hitomi_js());e=parse_html(E,eh_html())
         self.assertNotEqual(h['external_id'],e['external_id'])

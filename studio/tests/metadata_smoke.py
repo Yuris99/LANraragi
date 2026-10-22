@@ -51,16 +51,16 @@ def main():
                 page.locator('#metadata-preview').click()
                 page.wait_for_function("() => !document.querySelector('#metadata-save').disabled")
                 page.locator('#metadata-save').click()
-                page.wait_for_function("() => document.querySelectorAll('[data-counterpart]').length===1")
+                page.wait_for_function("() => document.querySelectorAll('.source-header').length===1")
                 assert store.get_work(work['id'])['title']=='Keep my title'
                 assert 'date_added:' not in page.locator('#detail').inner_text()
                 h=store.get_work(work['id'])['sources'][0]['metadata'];e=parse_html(E,eh_html())
                 candidate={'metadata':e,'comparison':compare_metadata(h,e)}
-                with patch('server.counterpart_candidates',return_value={'status':'checked','items':[candidate],'message':'Generated bounded check'}):
-                    page.locator('[data-counterpart]').click()
-                    page.locator('[data-counterpart-select="0"]').wait_for()
+                job=store.claim_automatic()
+                store.finish_automatic(job,{'sites':[{'provider':'ehentai','status':'review','items':[candidate]}],'connected':[]},'review')
+                page.locator('[data-counterpart-select="0"]').wait_for()
                 page.locator('[data-counterpart-select="0"]').click()
-                page.wait_for_function("() => document.querySelectorAll('[data-counterpart]').length===2")
+                page.wait_for_function("() => document.querySelectorAll('.source-header').length===2")
                 assert len(store.get_work(work['id'])['sources'])==2
                 assert next(s for s in store.get_work(work['id'])['sources'] if s['provider']=='ehentai')['comments'][0]['text']=='A & B'
                 assert store.get_work(work['id'])['user_tags']==['keep-user-tag']

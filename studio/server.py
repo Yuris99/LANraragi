@@ -18,6 +18,7 @@ from pathlib import Path
 from connectors import fetch_comments, source_candidates
 from sources import parse_source
 from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates
+from auto_sources import AutoLinker
 from store import Store
 from uploads import Uploads,UploadError
 from editions import VoiceAssets
@@ -73,6 +74,56 @@ class Studio:
         self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
         self.login=LoginClient(config_root=Path(store.path).parent)
 
+    def source_transport(self):
+        from connectors import public_document
+        from metadata import public_artist_index
+        def denied(url):raise urllib.error.HTTPError(url,503,'source_service_unavailable',{},None)
+        def public_fetch(url):
+            if urllib.parse.urlsplit(url).hostname=='exhentai.org':raise urllib.error.HTTPError(url,403,'session_required',{},None)
+            return public_document(url)
+        try:status=self.login.call({'op':'status'})
+        except ValueError:
+            if getattr(self.login,'url',''):return denied,denied,{p:'service_unavailable' for p in ('ehentai','exhentai','hitomi')}
+            status={}
+        if not status.get('source_documents'):
+            # No failed authenticated request is retried anonymously.
+            return public_fetch,public_artist_index,{'exhentai':'service_update_required' if status.get('configured') else 'session_required'}
+        def request(url,offset=None):
+            result=self.login.call({'op':'source-document','url':url,**({'offset':offset} if offset is not None else {})})
+            if result.get('status')!='ok':
+                code=result.get('http_status') or (403 if result.get('status') in ('access_required','session_required') else 503)
+                raise urllib.error.HTTPError(url,code,'source_document_unavailable',{},None)
+            return result
+        def fetch(url):return request(url)['document']
+        def index(artist,offset=None):
+            if not isinstance(artist,str) or not 0<len(artist)<=150:raise ValueError('작가 정보가 필요합니다.')
+            url='https://ltn.gold-usergeneratedcontent.net/artist/'+urllib.parse.quote(artist,safe='')+'-all.nozomi'
+            result=request(url,offset);raw=base64.b64decode(result['index'],validate=True)
+            if len(raw)>32 or len(raw)%4:raise ValueError('작가 색인 형식을 확인하세요.')
+            ids=[str(int.from_bytes(raw[i:i+4],'big')) for i in range(0,len(raw),4)]
+            return ids if offset is None else {'ids':ids,'complete':result.get('complete',False)}
+        ex=next((s for s in status.get('sites',[]) if s['provider']=='exhentai'),{})
+        return fetch,index,{} if ex.get('state')=='saved_unverified' else {'exhentai':'session_required'}
+
+    def automatic_source_loop(self):
+        linker=AutoLinker(self.store,self.source_transport,pause=self.stop.wait);checked=0
+        while not self.stop.wait(2):
+            if not self.store.automatic_enabled():continue
+            if time.monotonic()-checked>60:
+                try:
+                    status=self.login.call({'op':'status'})
+                    fingerprint=json.dumps({'documents':status.get('source_documents',False),'sites':[
+                        [s['provider'],s.get('state'),s.get('session_revision','')] for s in status.get('sites',[])]},sort_keys=True)
+                    self.store.automatic_session_changed(fingerprint)
+                except (ValueError,OSError):pass
+                checked=time.monotonic()
+            if not self.match_lock.acquire(blocking=False):continue
+            try:linker.run_one()
+            except Exception:
+                # Durable leases permit recovery; never log source data or secrets.
+                pass
+            finally:self.match_lock.release()
+
     def sync(self):
         if not self.sync_lock.acquire(blocking=False):
             raise ValueError('동기화가 이미 진행 중입니다.')
@@ -127,11 +178,11 @@ class Studio:
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
-        if source['provider'] in ('hitomi','ehentai'):
+        if source['provider'] in ('hitomi','ehentai','exhentai'):
             if not self.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
             try:
                 self.store.begin_matching(work_id)
-                return self.store.import_metadata(work_id,direct_metadata(source['url']),remote=True)
+                return self.store.import_metadata(work_id,direct_metadata(source['url'],self.source_transport()[0]),remote=True)
             finally:self.match_lock.release()
         if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
         plugins=self.lrr.json('/api/plugins/metadata')
@@ -149,9 +200,9 @@ class Studio:
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
-        if source['provider'] in ('nhentai','ehentai'):self.store.begin_comment_fetch(work_id,source_id)
-        if source['provider']=='ehentai':
-            metadata=direct_metadata(source['url'])
+        if source['provider'] in ('nhentai','ehentai','exhentai'):self.store.begin_comment_fetch(work_id,source_id)
+        if source['provider'] in ('ehentai','exhentai'):
+            metadata=direct_metadata(source['url'],self.source_transport()[0])
             result={'status':'fetched','comments':metadata['comments'],'fetched_at':time.time(),
                     'message':'응답 HTML에 포함된 댓글을 갱신했습니다. 기존 댓글은 보존합니다.'}
         else:result=fetch_comments(source['url'])
@@ -316,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        if path=='/api/source-linking':return self.respond(store.automatic_summary())
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/source-linking',path)
+        if match:return self.respond(store.automatic_status(store.get_work(match[1])['id']))
         if path=='/api/site-connections':return self.respond(self.app.login.call({'op':'status'}))
         if path=='/api/downloads/status':return self.respond({'command_workers':store.worker_status(),'site_verified':False})
         if path=='/api/folders':return self.respond(store.folder_status())
@@ -485,6 +539,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        if path=='/api/source-linking':
+            if set(data)!={'enabled'}:raise ValueError('자동 연결 설정만 지정하세요.')
+            return self.respond(store.set_automatic_enabled(data['enabled']))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/source-linking',path)
+        if match:
+            if data:raise ValueError('추가 필드는 지정하지 마세요.')
+            return self.respond(store.retry_automatic(match[1]))
         if path=='/api/metadata/preview':
             if set(data)!={'url','html'}:raise ValueError('출처 URL과 HTML만 지정하세요.')
             return self.respond(parse_html(data['url'],data['html']))
@@ -518,6 +579,7 @@ class Handler(BaseHTTPRequestHandler):
             if set(data)!={'url','html'}:raise ValueError('출처 URL과 HTML만 지정하세요.')
             return self.respond(store.import_metadata(match[1],parse_html(data['url'],data['html'])))
         if path=='/api/site-connections':
+            if data.get('op')=='source-document':raise ValueError('내부 정보 조회는 로그인 화면 API에서 사용할 수 없습니다.')
             if len(json.dumps(data).encode())>16384:raise ValueError('로그인 요청 크기를 확인하세요.')
             return self.respond(self.app.login.call(data))
         if path=='/api/visual/index':
@@ -630,6 +692,7 @@ if __name__=='__main__':
     server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1')
     threading.Thread(target=app.nas_loop,daemon=True).start()
     threading.Thread(target=app.command_index_loop,daemon=True).start()
+    threading.Thread(target=app.automatic_source_loop,daemon=True).start()
     if os.environ.get('STUDIO_IMPORT_DIR'):
         from importer import Importer
         importer=Importer(app,os.environ['STUDIO_IMPORT_DIR'])

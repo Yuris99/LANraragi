@@ -8,6 +8,8 @@ import io
 import json
 import math
 import os
+import re
+import base64
 from pathlib import Path
 import stat
 import tempfile
@@ -51,6 +53,64 @@ def session_provider(url):
     if host == 'nhentai.net': return 'nhentai'
     if host == 'hitomi.la': return 'hitomi'
     raise ValueError('지원하지 않는 세션 출처입니다.')
+
+
+def source_document(vault,url,offset=0):
+    """Fixed read-only metadata routes; account cookies never leave this service."""
+    if not isinstance(url,str) or len(url)>2048 or any(c in url for c in '\r\n\x00'):
+        raise ValueError('invalid_source_url')
+    value=urllib.parse.urlsplit(url)
+    if type(offset) is not int or not 0<=offset<=100000:raise ValueError('invalid_index_offset')
+    if value.scheme!='https' or value.username or value.password or value.port or value.fragment:
+        raise ValueError('invalid_source_url')
+    host=value.hostname;index=False
+    if host in ('e-hentai.org','exhentai.org'):
+        provider='exhentai' if host=='exhentai.org' else 'ehentai'
+        search=urllib.parse.parse_qs(value.query,keep_blank_values=True)
+        gallery=re.fullmatch(r'/g/[0-9]+/[A-Za-z0-9]+/',value.path) and not value.query
+        searching=value.path=='/' and set(search) in ({'f_search'},{'f_search','page'}) and len(search['f_search'])==1 and 0<len(search['f_search'][0])<=150
+        if 'page' in search and (len(search['page'])!=1 or not re.fullmatch(r'[0-9]{1,4}',search['page'][0]) or int(search['page'][0])>1000):searching=False
+        if not (gallery or searching):raise ValueError('invalid_source_url')
+    elif host=='ltn.gold-usergeneratedcontent.net' and not value.query:
+        provider='hitomi'
+        index=bool(re.fullmatch(r'/artist/[^/]+-all\.nozomi',value.path))
+        if not (index or re.fullmatch(r'/galleries/[0-9]+\.js',value.path)):
+            raise ValueError('invalid_source_url')
+    else:raise ValueError('invalid_source_url')
+    if offset and not index:raise ValueError('invalid_index_offset')
+    cookies=[]
+    if provider!='hitomi':
+        try:cookies=vault.read(provider)
+        except FileNotFoundError:
+            if provider=='exhentai':return {'status':'session_required'}
+        except (ValueError,OSError):return {'status':'session_required'}
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,*args):return None
+    jar=http.cookiejar.CookieJar()
+    for cookie in cookies:jar.set_cookie(cookie)
+    headers={'User-Agent':'LibraryStudio/0.1','Accept':'text/html,text/javascript,application/json,application/octet-stream'}
+    if index:headers['Range']=f'bytes={offset*4}-{offset*4+31}'
+    request=urllib.request.Request(url,headers=headers)
+    try:
+        with urllib.request.build_opener(NoRedirect(),urllib.request.HTTPCookieProcessor(jar)).open(request,timeout=20) as response:
+            if index:
+                if response.headers.get_content_type().startswith('text/') or response.headers.get_content_type()=='application/json':
+                    return {'status':'invalid_response'}
+                scope=re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)',response.headers.get('Content-Range',''))
+                if response.status==206 and (not scope or int(scope[1])!=offset*4):return {'status':'invalid_response'}
+                if response.status==200 and offset:return {'status':'invalid_response'}
+            raw=response.read(32 if index else 1024*1024+1)
+        if len(raw)>1024*1024:return {'status':'response_limit'}
+        if index:
+            if len(raw)%4:return {'status':'invalid_response'}
+            if scope and (int(scope[2])-int(scope[1])+1!=len(raw) or int(scope[3])%4):return {'status':'invalid_response'}
+            complete=len(raw)<32 or bool(scope and int(scope[2])+1>=int(scope[3]))
+            return {'status':'ok','index':base64.b64encode(raw).decode('ascii'),'complete':complete}
+        return {'status':'ok','document':raw.decode('utf-8')}
+    except urllib.error.HTTPError as error:
+        if index and offset and error.code==416:return {'status':'ok','index':'','complete':True}
+        return {'status':'access_required' if error.code in (301,302,303,307,308,401,403,429) else 'not_found' if error.code in (404,410) else 'unavailable','http_status':error.code}
+    except (OSError,UnicodeError):return {'status':'unavailable'}
 
 
 class CookieVault:
@@ -124,7 +184,9 @@ class CookieVault:
         try: count = len(self.read(name)); state = 'saved_unverified'
         except FileNotFoundError: count = 0; state = 'not_saved'
         except (ValueError, OSError, http.cookiejar.LoadError): count = 0; state = 'unavailable'
-        return {'provider':name,'name':site(name)['name'],'state':state,'cookie_count':count,
+        try:revision=str(self.path(name).stat().st_mtime_ns)
+        except OSError:revision=''
+        return {'provider':name,'name':site(name)['name'],'state':state,'cookie_count':count,'session_revision':revision,
                 'login_available':bool(site(name)['login']),'site_verified':False,
                 'download_enabled':name != 'exhentai'}
 

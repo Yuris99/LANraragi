@@ -16,9 +16,10 @@ def uid():
 
 
 from editions import EditionCatalog, SCHEMA as EDITION_SCHEMA
+from auto_sources import AutomaticSources, SCHEMA as AUTO_SOURCE_SCHEMA
 
 
-class Store(EditionCatalog):
+class Store(EditionCatalog,AutomaticSources):
     def __init__(self, path):
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +82,7 @@ class Store(EditionCatalog):
                 state TEXT NOT NULL,details TEXT NOT NULL,created REAL NOT NULL);
             ''')
             db.executescript(EDITION_SCHEMA)
+            db.executescript(AUTO_SOURCE_SCHEMA)
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
@@ -90,6 +92,15 @@ class Store(EditionCatalog):
             columns={r['name'] for r in db.execute('PRAGMA table_info(sources)')}
             for name,definition in [('comments_attempted','REAL'),('comments_fetched','REAL'),('comments_status',"TEXT NOT NULL DEFAULT 'import-only'"),('metadata',"TEXT NOT NULL DEFAULT '{}'")]:
                 if name not in columns:db.execute('ALTER TABLE sources ADD COLUMN '+name+' '+definition)
+            # Historical versions grouped ExHentai under E-Hentai. Preserve the
+            # saved URL and an old E bookmark while giving each host its own ID.
+            for source in db.execute("SELECT * FROM sources WHERE provider='ehentai' AND url LIKE 'https://exhentai.org/%'").fetchall():
+                db.execute('INSERT OR IGNORE INTO settings VALUES(?,?)',('legacy_ex_e:'+source['external_id'],source['work_id']))
+                snapshot=json.loads(source['metadata'])
+                if snapshot:snapshot['provider']='exhentai'
+                db.execute("UPDATE sources SET provider='exhentai',metadata=? WHERE id=?",(json.dumps(snapshot,ensure_ascii=False),source['id']))
+            now=time.time()
+            db.execute("INSERT OR IGNORE INTO source_link_jobs(work_id,created,updated,next_at) SELECT DISTINCT s.work_id,?,?,? FROM sources s JOIN works w ON w.id=s.work_id WHERE w.merged_into IS NULL AND s.provider IN ('ehentai','exhentai','hitomi')",(now,now,now))
             db.execute('''INSERT INTO work_numbers(work_id)
                 SELECT w.id FROM works w WHERE NOT EXISTS
                 (SELECT 1 FROM work_numbers n WHERE n.work_id=w.id) ORDER BY w.added,w.id''')
@@ -126,7 +137,7 @@ class Store(EditionCatalog):
 
     @staticmethod
     def short_identity(work):
-        for provider,prefix in [('hitomi',''),('ehentai','E'),('nhentai','N')]:
+        for provider,prefix in [('hitomi',''),('ehentai','E'),('exhentai','X'),('nhentai','N')]:
             values=[s['external_id'] for s in work['sources'] if s['provider']==provider
                     and re.fullmatch(r'[0-9]{1,32}',s['external_id'])]
             if values:return prefix+min(values,key=lambda value:(len(value),value))
@@ -134,16 +145,17 @@ class Store(EditionCatalog):
 
     def resolve_short_id(self, value):
         if not isinstance(value,str):raise ValueError('작품 번호 형식을 확인하세요.')
-        match=re.fullmatch(r'([ENL]?)([0-9]{1,32})',value.upper())
-        if not match:raise ValueError('작품 번호는 히토미 숫자, E번호, N번호 또는 L번호입니다.')
+        match=re.fullmatch(r'([EXNL]?)([0-9]{1,32})',value.upper())
+        if not match:raise ValueError('작품 번호는 히토미 숫자, E번호, X번호, N번호 또는 L번호입니다.')
         prefix,number=match.groups()
         with self.db() as db:
             if prefix=='L':
                 if len(number)>19 or not 1<=int(number)<=9223372036854775807:raise ValueError('로컬 번호 범위를 확인하세요.')
                 row=db.execute('SELECT work_id FROM work_numbers WHERE number=?',(int(number),)).fetchone()
             else:
-                provider={'':'hitomi','E':'ehentai','N':'nhentai'}[prefix]
+                provider={'':'hitomi','E':'ehentai','X':'exhentai','N':'nhentai'}[prefix]
                 row=db.execute('SELECT work_id FROM sources WHERE provider=? AND external_id=?',(provider,number)).fetchone()
+                if not row and prefix=='E':row=db.execute('SELECT value AS work_id FROM settings WHERE key=?',('legacy_ex_e:'+number,)).fetchone()
         if not row:raise KeyError('보관함에 연결된 작품 번호가 없습니다. 자동 다운로드는 실행하지 않습니다.')
         return self.get_work(row['work_id'])
 
@@ -341,7 +353,7 @@ class Store(EditionCatalog):
                            [*values.values(),work_id])
         return self.get_work(work_id)
 
-    def upsert_source(self, work_id, data):
+    def upsert_source(self, work_id, data, schedule=True, lease_guard=None):
         work_id=self.get_work(work_id)['id']
         identity = parse_source(data.get('url'))
         tags = tags_list(data.get('tags',[]))
@@ -368,6 +380,7 @@ class Store(EditionCatalog):
                 raise ValueError('출처 페이지 수를 확인하세요.')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            if lease_guard:self.check_automatic_lease(db,lease_guard)
             existing = db.execute('SELECT * FROM sources WHERE provider=? AND external_id=?',
                                   (identity['provider'],identity['external_id'])).fetchone()
             if existing and existing['work_id'] != work_id:
@@ -389,13 +402,15 @@ class Store(EditionCatalog):
                 db.execute("UPDATE works SET artist=?,artist_locked=1 WHERE id=? AND artist='' AND artist_locked=0 AND merged_into IS NULL",(artist,work_id))
             if metadata is not None:
                 db.execute('UPDATE sources SET metadata=? WHERE id=?',(json.dumps(metadata,ensure_ascii=False),source_id))
+            if schedule and identity['provider'] in ('ehentai','exhentai','hitomi') and (not existing or existing['url']!=identity['url'] or (metadata is not None and json.loads(existing['metadata'])!=metadata)):
+                self.enqueue_source_link(db,work_id)
         return self.get_work(work_id)
 
-    def import_metadata(self,work_id,metadata,remote=False):
+    def import_metadata(self,work_id,metadata,remote=False,schedule=True,lease_guard=None):
         # Source title never overwrites the user's catalog title or edition.
         self.upsert_source(work_id,{'url':metadata['url'],'tags':metadata['tags'],
             'metadata':metadata,'artist_if_empty':', '.join(metadata['artists'])[:500],
-            'status':'fetched' if remote else 'manual'})
+            'status':'fetched' if remote else 'manual'},schedule=schedule,lease_guard=lease_guard)
         work=self.get_work(work_id)
         source=next(s for s in work['sources'] if s['url']==metadata['url'])
         if metadata.get('comments'):
@@ -591,7 +606,7 @@ class Store(EditionCatalog):
         return self.job(job_id)
 
     def resolve_reference(self,provider,reference):
-        if provider not in ('ehentai','hitomi','nhentai'):
+        if provider not in ('ehentai','exhentai','hitomi','nhentai'):
             raise ValueError('출처를 선택하세요.')
         if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
             raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
@@ -602,7 +617,7 @@ class Store(EditionCatalog):
             with self.db() as db:
                 saved=db.execute('SELECT url FROM sources WHERE provider=? AND external_id=?',(provider,number)).fetchone()
             if saved:value=saved[0];origin='saved'
-            elif provider=='ehentai':
+            elif provider in ('ehentai','exhentai'):
                 raise ValueError('E-Hentai의 처음 등록하는 번호에는 전체 작품 URL이 필요합니다. 번호 외 URL 식별값을 추측하지 않습니다.')
             else:
                 value=(f'https://hitomi.la/galleries/{number}.html' if provider=='hitomi' else f'https://nhentai.net/g/{number}/')
@@ -617,6 +632,7 @@ class Store(EditionCatalog):
                 'available':bool(work and work['lrr_id'])}
 
     def request_download(self,provider,reference,target,engine):
+        if provider=='exhentai':raise ValueError('익헨의 인증된 동일 출처 다운로드는 아직 검증 전입니다. 자동 정보 연결과 별개입니다.')
         if target not in ('nas','pc') or engine not in ('lanraragi','command') or (target=='pc' and engine=='lanraragi'):
             raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')
         source=self.resolve_reference(provider,reference)

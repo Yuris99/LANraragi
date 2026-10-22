@@ -65,7 +65,7 @@ class ShortIdTests(unittest.TestCase):
         store=Store(restored)
         self.assertEqual(store.resolve_short_id('L1')['id'],first['id']);self.assertEqual(store.create_work('New')['short_id'],'L3')
     def test_invalid_aliases_are_bounded_and_create_no_jobs(self):
-        for alias in ['',None,'X123','/123','123/6','L0','L9223372036854775808','1'*33,'https://hitomi.la/galleries/123.html']:
+        for alias in ['',None,'Q123','/123','123/6','L0','L9223372036854775808','1'*33,'https://hitomi.la/galleries/123.html']:
             with self.subTest(alias=alias),self.assertRaises(ValueError):self.store.resolve_short_id(alias)
         with self.assertRaises(KeyError):self.store.resolve_short_id('E123')
         self.assertEqual(self.store.jobs(),[])

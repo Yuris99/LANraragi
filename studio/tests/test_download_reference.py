@@ -26,13 +26,15 @@ class ReferenceTests(unittest.TestCase):
             self.store.request_download('ehentai','123','nas','lanraragi')
         self.assertEqual(self.store.jobs(),[]);self.assertEqual(self.store.list_works()['total'],0)
 
-    def test_saved_eh_number_keeps_the_complete_original_host_and_token(self):
+    def test_saved_ex_number_keeps_host_token_and_separate_provider(self):
         work=self.store.create_work('Synthetic saved source')
         url='https://exhentai.org/g/123/abcdef/'
         self.store.upsert_source(work['id'],{'url':url})
-        result=self.store.resolve_reference('ehentai','000123')
+        result=self.store.resolve_reference('exhentai','000123')
         self.assertEqual(result['url'],url);self.assertEqual(result['origin'],'saved')
         self.assertEqual(result['work_id'],work['id'])
+        self.assertEqual(result['provider'],'exhentai')
+        with self.assertRaises(ValueError):self.store.resolve_reference('ehentai','000123')
 
     def test_same_number_from_other_source_cannot_supply_a_missing_token(self):
         work=self.store.create_work('Synthetic different source')

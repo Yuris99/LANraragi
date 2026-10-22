@@ -39,6 +39,9 @@ def copy_database(source,destination,restore=False):
                     copied.execute('UPDATE jobs SET lease=NULL,lease_until=NULL')
                     if copied.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='folder_jobs'").fetchone():
                         copied.execute("UPDATE folder_jobs SET state='failed',lease=NULL,lease_until=NULL,message='복원한 가져오기 작업: NAS 원본과 사본을 확인한 뒤 새10권을 요청하세요.' WHERE state IN ('queued','running')")
+                    if copied.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_link_jobs'").fetchone():
+                        copied.execute("UPDATE source_link_jobs SET state='blocked',lease=NULL,lease_until=NULL WHERE state IN ('queued','running','waiting','scanning')")
+                        copied.execute("INSERT OR REPLACE INTO settings VALUES('automatic_source_links','false')")
                     copied.commit()
                 counts=inspect_database(copied)
                 copied.execute('PRAGMA journal_mode=DELETE')

@@ -51,7 +51,7 @@ class LoginBrowser:
 
     def status(self):
         self.expire()
-        return {'configured':True,'sites':[self.vault.status(k) for k in SITES],
+        return {'configured':True,'source_documents':True,'sites':[self.vault.status(k) for k in SITES],
                 'active':{'provider':self.provider,'session':self.session} if self.session else None}
 
     def route(self, route):
@@ -347,8 +347,16 @@ class BrowserActor:
         # Playwright remains available only for explicit generated-route fixtures.
         self.browser=browser or (LoginBrowser(vault,route_fixture) if route_fixture else DesktopBrowser(vault))
         self.stop=threading.Event()
+        self.document_lock=threading.Lock()
         self.reaper=threading.Thread(target=self.reap,daemon=True); self.reaper.start()
-    def call(self,data): return self.executor.submit(self.browser.call,data).result(timeout=40)
+    def call(self,data):
+        if isinstance(data,dict) and data.get('op')=='source-document':
+            if set(data) not in ({'op','url'},{'op','url','offset'}):raise ValueError('invalid_source_document')
+            from site_sessions import source_document
+            if not self.document_lock.acquire(blocking=False):return {'status':'busy'}
+            try:return source_document(self.browser.vault,data['url'],data.get('offset',0))
+            finally:self.document_lock.release()
+        return self.executor.submit(self.browser.call,data).result(timeout=40)
     def reap(self):
         while not self.stop.wait(15):
             try: self.executor.submit(self.browser.expire).result(timeout=40)

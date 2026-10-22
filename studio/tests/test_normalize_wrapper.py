@@ -12,6 +12,9 @@ class WrapperTests(unittest.TestCase):
         text=(studio/'deploy/normalize-nas-library.sh').read_text()
         for name,variable in [('deploy/normalize-library-names.py','helper_sha'),('sources.py','sources_sha'),('deploy/runtime-manifest.sha256','manifest_sha')]:
             source=Path(__file__).parent/'fixtures/name-normalization-runtime.sha256' if name=='deploy/runtime-manifest.sha256' else studio/name
+            # The one-shot NAS file executor pins an old reviewed revision. Its
+            # parser must stay frozen when the live app gains distinct EX IDs.
+            if name=='sources.py':source=Path(__file__).parent/'fixtures/name-normalization-sources.py'
             digest=hashlib.sha256(source.read_bytes()).hexdigest()
             self.assertIn(variable+'='+digest,text)
         release=json.loads((Path(__file__).parent/'fixtures/name-normalization-release.json').read_text())
