@@ -4,6 +4,8 @@ LANraragi Studio에서 분리한 로컬 서비스. 원작·판본 관리, RJ 코
 
 ## 실행
 
+독립 컨테이너 테스트 구성은 [DOCKER_TEST.md](DOCKER_TEST.md)를 참고한다. Docker 테스트 포트는 43132이며 기존 개발 DB와 별개의 새 볼륨을 사용한다.
+
 Python 3.10 이상, 외부 Python 패키지 불필요. 이 worktree의 루트에서:
 
 ```powershell

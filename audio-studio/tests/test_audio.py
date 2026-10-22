@@ -259,6 +259,25 @@ class HTTPTests(unittest.TestCase):
             make_server(self.store, self.media, port=self.server.server_port)
         self.assertEqual(self.request('/api/health')[0], 200)
 
+    def test_container_bind_preserves_auth_and_host_checks(self):
+        with self.assertRaises(ValueError):
+            make_server(self.store, self.media, port=0, bind='192.0.2.1')
+        container = make_server(self.store, self.media, port=0, bind='0.0.0.0', password='container-test-only')
+        thread = threading.Thread(target=container.serve_forever, daemon=True)
+        thread.start()
+        original_base = self.base
+        self.base = f'http://127.0.0.1:{container.server_port}'
+        try:
+            self.assertEqual(self.request('/api/health')[0], 401)
+            auth = 'Basic ' + base64.b64encode(b'admin:container-test-only').decode()
+            self.assertEqual(self.request('/api/health', headers={'Authorization': auth})[0], 200)
+            self.assertEqual(self.request('/api/health', headers={'Host': 'evil.test', 'Authorization': auth})[0], 403)
+        finally:
+            self.base = original_base
+            container.shutdown()
+            container.server_close()
+            thread.join(5)
+
 
 if __name__ == '__main__':
     unittest.main()

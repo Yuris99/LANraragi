@@ -1,0 +1,45 @@
+name: audio-studio-test
+services:
+  audio:
+    image: lanraragi-audio-studio:local-test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AUDIO_STUDIO_BIND: 0.0.0.0
+      AUDIO_STUDIO_PASSWORD: ${AUDIO_STUDIO_PASSWORD:-}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:43132:43130"
+    volumes:
+      - audio-test-data:/app/data
+      - audio-test-media:/app/media:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -B
+        - -c
+        - >-
+          import base64,json,os,urllib.request;
+          password=os.environ.get('AUDIO_STUDIO_PASSWORD','');
+          headers={'Authorization':'Basic '+base64.b64encode(('admin:'+password).encode()).decode()} if password else {};
+          response=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:43130/api/health',headers=headers),timeout=3);
+          assert json.load(response)['service']=='audio-studio'
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+volumes:
+  audio-test-data:
+  audio-test-media:

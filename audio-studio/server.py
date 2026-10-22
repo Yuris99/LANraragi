@@ -233,8 +233,10 @@ class LocalServer(ThreadingHTTPServer):
         super().server_bind()
 
 
-def make_server(catalog, media_root, port=43130, password=''):
-    server = LocalServer(('127.0.0.1', port), Handler)
+def make_server(catalog, media_root, port=43130, password='', bind='127.0.0.1'):
+    if bind not in ('127.0.0.1', '0.0.0.0'):
+        raise ValueError('지원하지 않는 바인딩 주소입니다.')
+    server = LocalServer((bind, port), Handler)
     server.catalog = catalog
     server.media_root = Path(media_root).resolve()
     server.password = password
@@ -245,7 +247,8 @@ def make_server(catalog, media_root, port=43130, password=''):
 if __name__ == '__main__':
     # No .env, comic DB, LANraragi API, downloader, NAS or Redis configuration is loaded.
     server = make_server(Catalog(HERE / 'data' / 'audio.sqlite3'), HERE / 'media',
-                         password=os.environ.get('AUDIO_STUDIO_PASSWORD', ''))
+                         password=os.environ.get('AUDIO_STUDIO_PASSWORD', ''),
+                         bind=os.environ.get('AUDIO_STUDIO_BIND', '127.0.0.1'))
     print('Audio Studio: http://127.0.0.1:43130 (Ctrl+C to stop)', flush=True)
     try:
         server.serve_forever()

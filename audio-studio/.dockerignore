@@ -1,0 +1,10 @@
+# Explicit allowlist: no databases, media, credentials, logs or browser captures.
+**
+!Dockerfile
+!catalog.py
+!server.py
+!subtitles.py
+!web/
+!web/**
+!tests/
+!tests/test_*.py
