@@ -322,11 +322,11 @@ async function refreshTagStrip() {
 }
 $("#tag-strip-kind").onchange = guard(refreshTagStrip);
 $("#tag-strip-search").oninput = () => { clearTimeout(state.tagStripTimer); state.tagStripTimer = setTimeout(guard(refreshTagStrip), 200); };
-$("#tag-strip-search").onkeydown = (event) => {
+$("#tag-strip-search").onkeydown = guard(async (event) => {
     // Enter picks the first match; Escape clears the tag search only.
-    if (event.key === "Enter") { event.preventDefault(); $("#tag-strip-list [data-strip-tag]:not(.selected)")?.click(); }
+    if (event.key === "Enter") { event.preventDefault(); clearTimeout(state.tagStripTimer); await refreshTagStrip(); $("#tag-strip-list [data-strip-tag]:not(.selected)")?.click(); }
     if (event.key === "Escape" && event.target.value) { event.preventDefault(); event.target.value = ""; guard(refreshTagStrip)(); }
-};
+});
 $("#tag-strip").addEventListener("click", guard(async (event) => {
     if (event.target.closest("#tag-strip-more")) { $("#tag-filter").showModal(); await refreshTagFilter(); return; }
     const chip = event.target.closest("[data-strip-tag]"); if (!chip) return;
@@ -536,12 +536,13 @@ $("#layout").onclick = () => { settings.layout = settings.layout === "list" ? "g
 $("#direction").onclick = guard(async () => { state.direction = state.direction === "desc" ? "asc" : "desc"; $("#direction").textContent = state.direction === "desc" ? "↓" : "↑"; await load(); });
 $("#sort").onchange = guard(async (e) => { state.sort = e.target.value; state.page = 1; await load(); });
 let suggestionRequest = 0;
-function hideSuggestions() { $("#search-suggestions").hidden = true; $("#search").setAttribute("aria-expanded", "false"); $("#search").removeAttribute("aria-activedescendant"); }
+function hideSuggestions() { suggestionRequest++; $("#search-suggestions").hidden = true; $("#search").setAttribute("aria-expanded", "false"); $("#search").removeAttribute("aria-activedescendant"); }
 async function refreshSuggestions(query) {
     const request = ++suggestionRequest, scope = tagScope(query);
     if (!query.trim()) { hideSuggestions(); return; }
     const tags = await matchingTags(scope);
     if (request !== suggestionRequest || $("#search").value !== query) return;
+    $("#search").removeAttribute("aria-activedescendant");
     $("#library-tag-suggestions").innerHTML = tags.slice(0, 20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
     const scoped = query.trim() !== scope.term;
     $("#search-suggestions").innerHTML = tags.slice(0, 8).map((item, i) => `<div class="suggestion" role="option" id="suggestion-${i}" data-suggest-tag="${esc(item.tag)}" aria-selected="false">${tagLabel(item.tag)}<span class="count">${item.count} 작품</span></div>`).join("")
@@ -553,14 +554,14 @@ async function applySuggestion(tag) {
     hideSuggestions(); clearTimeout(state.searchTimer);
     state.allTag = tag; state.tag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary();
 }
-$("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
+$("#search").oninput = () => { hideSuggestions(); clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
     const query = $("#search").value;
     // A "kind:term" query is a tag lookup; the text search would also match other kinds (male: inside female:).
     if (tagScope(query).term === query.trim()) { state.tag = ""; state.query = query; state.page = 1; await load(); }
     await refreshSuggestions(query);
 }), 250); };
 $("#search").addEventListener("keydown", guard(async (event) => {
-    const options = [...document.querySelectorAll("#search-suggestions [data-suggest-tag]")];
+    const options = $("#search-suggestions").hidden ? [] : [...document.querySelectorAll("#search-suggestions [data-suggest-tag]")];
     const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
     if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length && !$("#search-suggestions").hidden) {
         event.preventDefault();
