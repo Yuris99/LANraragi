@@ -72,6 +72,23 @@ def connection_error_kind(error):
     return 'network_error'
 
 
+def connection_error_phase(error):
+    # Keep only fixed standard-library frame categories, never frame data.
+    reason=error.reason if isinstance(error,urllib.error.URLError) else error
+    frames=set()
+    traceback=getattr(reason,'__traceback__',None)
+    while traceback:
+        frames.add((traceback.tb_frame.f_globals.get('__name__'),traceback.tb_frame.f_code.co_name))
+        traceback=traceback.tb_next
+    for frame,phase in ((('ssl','do_handshake'),'tls_handshake'),
+                        (('socket','getaddrinfo'),'dns_lookup'),
+                        (('socket','create_connection'),'tcp_connect'),
+                        (('http.client','_tunnel'),'proxy_connect'),
+                        (('http.client','_read_status'),'http_headers')):
+        if frame in frames:return phase
+    return 'transport_unknown'
+
+
 def _source_document(vault,url,offset=0,trace=None):
     """Fixed read-only metadata routes; account cookies never leave this service."""
     if not isinstance(url,str) or len(url)>2048 or any(c in url for c in '\r\n\x00'):
@@ -132,6 +149,7 @@ def _source_document(vault,url,offset=0,trace=None):
         if index and offset and error.code==416:return {'status':'ok','index':'','complete':True}
         return {'status':'access_required' if error.code in (301,302,303,307,308,401,403,429) else 'not_found' if error.code in (404,410) else 'unavailable','http_status':error.code}
     except (OSError,UnicodeError) as error:
+        if trace is not None:trace['error_phase']=connection_error_phase(error)
         return {'status':'unavailable','error_kind':connection_error_kind(error)}
 
 
@@ -147,6 +165,8 @@ def source_document(vault,url,offset=0):
             'http_status':trace.get('http_status'),'at':int(time.time())}
         if result.get('error_kind'):
             vault.last_requests[provider]['error_kind']=result['error_kind']
+        if trace.get('error_phase'):
+            vault.last_requests[provider]['error_phase']=trace['error_phase']
     return result
 
 

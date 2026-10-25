@@ -62,3 +62,30 @@
 실제 표준 fallback 함수를 호출하는 합성 검사로 평문 읽기·vault·probe가 모두 호출되지 않음을 확인했고,
 비공개 pipe 입력 호환과 경고 필터 복구도 확인했다. 신규 프로브 10개 + 기존 진단 11개, 총 21개 통과.
 이 수정 후에도 NAS 실행·추가 사이트 요청·게시·배포는 하지 않았다.
+
+## 기존 상태 RPC로 전송 단계 관찰 — 서비스 코드 후보
+
+2026-10-26 KST. 메인은 DSM 인증 복구와 목록의 login:g6/worker:g6 표시는 확인했지만,
+컨테이너 상세/console 조회가 `No such container`/`Container undefined`로 실패했다고 보고했다.
+실행 UID·설치 파일 SHA·실제 이미지 ID의 직접 검증은 여전히 미완료이며,
+별도 프로브의 NAS 실행과 추가 사이트 요청은 0회다. 이를 서비스 재시작이나 권한 변경으로 해결하지 않았다.
+
+메인 요청에 따라 `site_sessions.py`의 기존 예외 처리에 단계 기록만 추가한 코드 후보를 준비했다.
+
+- 기존 `OSError`/`UnicodeError`를 처리할 때만 `URLError.reason` 또는 원래 예외의 표준 모듈/함수 이름을 검사한다. 표준 프레임의 고정 분류는 `dns_lookup`, `tcp_connect`, `tls_handshake`, `proxy_connect`, `http_headers`다. 근거가 없으면 `transport_unknown`이다.
+- 고정 `error_phase` 문자열만 기존 `last_requests` → 기존 status RPC로 전달한다. 예외 객체/문자열·경로·프레임 로컬·URL·문서·쿠키·환경 설정은 기록하지 않는다. 기존 source-document 결과 스키마는 그대로다.
+- HTTP 오류는 기존 상태 코드와 상태로 별도 처리하며 `error_phase`를 추가하지 않는다. HTTP200 이후 문자 해석 오류도 HTTP200과 기존 `response_decode_error`를 보존하고, 표준 단계 프레임이 없으면 `transport_unknown`으로 남긴다. 이 필드는 인증/파싱 성공이나 끊은 주체를 판정하지 않는다.
+- 후속 성공/HTTP 오류/세션 필요 결과는 이전 요청 기록 전체를 교체하므로 오래된 `error_phase`가 남지 않는다. 요청·세션·인증서·TLS·UA·DNS·프록시·리다이렉트·대기/재시도 정책은 변경하지 않는다. 새 RPC·실행 기능·라이브러리는 없다.
+- 실제 CPython 표준 함수를 호출하는 합성 실패로 DNS/TCP/TLS/프록시/HTTP 헤더 단계를 확인했다. DNS는 바깥 TCP 프레임보다, 프록시 터널은 내부 HTTP 상태 프레임보다 우선한다. 다른 모듈의 같은 함수 이름은 근거로 취급하지 않는다.
+- localhost의 기존 인증 RPC로 합성 source-document 실패 → status 조회를 연결해 저장 세션 모드/단계 전달, 쿠키·URL·서비스 키 비노출, 브라우저 미실행을 확인했다. HTTP403/429/리다이렉트/503과 후속 성공의 이전 단계 제거도 검사했다. 신규 진단 19개 + 기존 별도 프로브 10개, 총 29개 통과했다.
+- runtime-manifest 일치 검사까지 Python 30개 통과했다. 기존 JS API 오류·후보 UI 검사, 앱 JS 구문 및 diff 검사도 통과했다. 전체 로컬 검사나 실제 외부 사이트 요청은 실행하지 않았다.
+
+변경된 런타임 파일은 서비스6 고정 소스 `c56429a4bfd008eebfb128ab82636d5dd15589bf`와 비교해
+`site_sessions.py` 하나다. 이 후보의 SHA-256은
+`eb07b4b3f4dd090e972e191355e926691177f3b8bc74065349b537254eba0f03`다.
+개발 스냅샷의 runtime-manifest도 같은 파일 해시에 맞췄다. `STUDIO_UPDATE=22`와 앱/서비스 공개 배포 요청 파일은 변경하지 않았다.
+공개 앱22의 고정 소스와 실제 NAS 실행 이미지의 직접 확인 상태를 이 후보와 혼동하지 않는다.
+
+메인이 서비스 갱신을 검토할 경우 기존 desktop 서비스 채널의 다음 generation과 고정 revision/7개 파일 해시를
+먼저 확인해야 한다. 이 문서는 새 배포 승인이나 게시가 아니며, worker는 push·통합·배포·NAS 변경·사이트 요청을 하지 않았다.
+새 코드의 실제 NAS 관찰과 새 메타데이터/댓글 저장 성공은 여전히 미검증이다.
