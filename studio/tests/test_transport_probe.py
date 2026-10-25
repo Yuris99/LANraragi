@@ -1,6 +1,7 @@
 """Synthetic failures only; no sockets, vault files or site requests."""
 import http.cookiejar
 import email.message
+import getpass
 import io
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ import sys
 import unittest
 import urllib.error
 import urllib.request
+import warnings
 from unittest.mock import Mock,patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -106,6 +108,43 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(result['status'],'probe_unavailable')
         self.assertIsNone(result['open_calls'])
         self.assertNotIn('private',output.getvalue())
+
+    def test_cli_no_echo_failure_stops_before_plaintext_input_or_any_vault_request(self):
+        output,error_output=io.StringIO(),io.StringIO()
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore',getpass.GetPassWarning)
+            filters=list(warnings.filters)
+            with patch('sys.stdin') as input_stream,patch('sys.stdout',output),patch(
+                    'sys.stderr',error_output),patch(
+                    'diagnostics.source_transport_probe.getpass.getpass',side_effect=getpass.fallback_getpass),patch(
+                    'getpass._raw_input',return_value=URL) as plaintext,patch(
+                    'diagnostics.source_transport_probe.CookieVault') as vault,patch(
+                    'diagnostics.source_transport_probe.probe') as request:
+                input_stream.isatty.return_value=True
+                main()
+            self.assertEqual(warnings.filters,filters)
+        plaintext.assert_not_called()
+        vault.assert_not_called()
+        request.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue())['status'],'probe_unavailable')
+        self.assertNotIn(URL,output.getvalue())
+        self.assertEqual(error_output.getvalue(),'')
+
+    def test_cli_private_pipe_input_still_works_without_terminal_prompt(self):
+        input_stream=Mock()
+        input_stream.isatty.return_value=False
+        input_stream.buffer=io.BytesIO(json.dumps({'url':URL}).encode()+b'\n')
+        output=io.StringIO()
+        with patch('sys.stdin',input_stream),patch('sys.stdout',output),patch(
+                'diagnostics.source_transport_probe.getpass.getpass') as prompt,patch(
+                'diagnostics.source_transport_probe.CookieVault') as vault,patch(
+                'diagnostics.source_transport_probe.probe',return_value={'status':'session_required'}) as request:
+            main()
+        prompt.assert_not_called()
+        self.assertTrue(vault.call_args.kwargs['readonly'])
+        request.assert_called_once_with(vault.return_value,URL)
+        self.assertEqual(json.loads(output.getvalue()),{'status':'session_required'})
+        self.assertNotIn(URL,output.getvalue())
 
 
 if __name__=='__main__':unittest.main()

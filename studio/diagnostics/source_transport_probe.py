@@ -12,6 +12,7 @@ import ssl
 import sys
 import urllib.error
 import urllib.request
+import warnings
 
 from site_sessions import CookieVault, source_document
 
@@ -72,7 +73,10 @@ def probe(vault,url):
 
 def main():
     try:
-        if sys.stdin.isatty():data={'url':getpass.getpass('Existing gallery URL (input hidden): ')}
+        if sys.stdin.isatty():
+            with warnings.catch_warnings():
+                warnings.simplefilter('error',getpass.GetPassWarning)
+                data={'url':getpass.getpass('Existing gallery URL (input hidden): ')}
         else:
             raw=sys.stdin.buffer.readline(4097)
             if len(raw)>4096:raise ValueError('input_limit')
