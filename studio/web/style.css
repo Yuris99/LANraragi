@@ -90,7 +90,11 @@ h3{font-size:16px;font-weight:600}
 .batch-toolbar label{flex-direction:row!important;align-items:center;gap:8px;margin:0!important;font-size:13px;color:var(--muted)}
 .batch-toolbar input,.card-select input{width:auto;min-height:0;accent-color:var(--accent)}
 .batch-toolbar .quiet{min-height:32px;padding:4px 12px;font-size:13px}
-.tag-strip{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.tag-strip{display:flex;align-items:flex-start;gap:6px;margin:0 0 14px}
+.tag-strip-list{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.tag-search{flex:none;width:180px;height:32px;padding:0 12px;border-radius:999px;gap:6px}
+.tag-search .icon{width:15px;height:15px}
+.tag-search input{font-size:13px}
 .tag-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border-radius:999px;background:var(--surface);color:var(--text);font-size:13px;white-space:nowrap}
 .tag-chip:hover{background:var(--raised)}
 .tag-chip .ns{color:var(--faint)}
@@ -311,6 +315,8 @@ summary:hover{color:var(--text)}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;flex-basis:100%;margin:0 -16px;padding:0 16px}
   .chip{flex:none}
   .tag-strip{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px 12px;padding:0 16px}
+  .tag-strip-list{flex-wrap:nowrap}
+  .tag-search{width:150px}
   .tag-chip{flex:none}
   .privacy-mode #privacy-state{display:none}
   .library-meta{flex-wrap:nowrap;align-items:flex-start}

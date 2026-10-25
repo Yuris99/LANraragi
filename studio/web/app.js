@@ -293,15 +293,22 @@ async function load({ fromRoute = false } = {}) {
 // Quick tag filter on the library screen: user tags first, then source tags by count.
 let tagStripRequest = 0;
 async function refreshTagStrip() {
-    const request = ++tagStripRequest, tags = await api("/api/library/tags?q=");
+    const query = $("#tag-strip-search").value.trim(), request = ++tagStripRequest;
+    const tags = await api(`/api/library/tags?q=${encodeURIComponent(query)}`);
     if (request !== tagStripRequest) return;
     const active = state.allTag || state.tag;
     let shown = [...tags.filter((t) => !t.tag.includes(":")), ...tags.filter((t) => t.tag.includes(":"))].slice(0, 14);
     if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
     const label = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
-    $("#tag-strip").innerHTML = shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
-    $("#tag-strip").hidden = !shown.length;
+    $("#tag-strip-list").innerHTML = (query && !tags.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip").hidden = !shown.length && !query;
 }
+$("#tag-strip-search").oninput = () => { clearTimeout(state.tagStripTimer); state.tagStripTimer = setTimeout(guard(refreshTagStrip), 200); };
+$("#tag-strip-search").onkeydown = (event) => {
+    // Enter picks the first match; Escape clears the tag search only.
+    if (event.key === "Enter") { event.preventDefault(); $("#tag-strip-list [data-strip-tag]:not(.selected)")?.click(); }
+    if (event.key === "Escape" && event.target.value) { event.preventDefault(); event.target.value = ""; guard(refreshTagStrip)(); }
+};
 $("#tag-strip").addEventListener("click", guard(async (event) => {
     if (event.target.closest("#tag-strip-more")) { $("#tag-filter").showModal(); await refreshTagFilter(); return; }
     const chip = event.target.closest("[data-strip-tag]"); if (!chip) return;
