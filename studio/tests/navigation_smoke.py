@@ -53,7 +53,8 @@ def main():
                 assert page.locator('#search').input_value()=='History'
                 work_id=page.locator('.card').first.get_attribute('data-id');short=page.locator('.card').first.get_attribute('data-short-id')
                 page.locator('.card').first.scroll_into_view_if_needed();page.evaluate('window.scrollTo(0,400)');scroll=page.evaluate('scrollY')
-                page.locator('.card').first.click();page.wait_for_url('**/#/'+short);page.locator('#detail[open]').wait_for()
+                # Dispatch keeps the chosen scroll; click() may auto-scroll a card above the viewport.
+                page.locator('.card').first.dispatch_event('click');page.wait_for_url('**/#/'+short);page.locator('#detail[open]').wait_for()
                 detail_url=page.url
                 page.locator('#read-work').click();page.wait_for_url('**/'+short+'/1');page.locator('#reader[open]').wait_for()
                 page.locator('#reader-page').fill('6');page.locator('#reader-jump button').click();page.wait_for_url('**/'+short+'/6')
