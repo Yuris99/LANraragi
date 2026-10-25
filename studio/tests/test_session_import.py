@@ -55,7 +55,7 @@ class ImportTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.vault.import_file('hitomi',json.dumps(exported()))
 
     def test_diagnostics_separate_saved_anonymous_and_access_failure(self):
-        class Response(io.BytesIO):pass
+        class Response(io.BytesIO):status=200
         class Opener:
             def open(self,request,timeout):return Response(b'<html>generated</html>')
         url='https://e-hentai.org/g/123/abc/'

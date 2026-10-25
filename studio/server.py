@@ -26,7 +26,7 @@ from site_sessions import LoginClient
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=20
+STUDIO_UPDATE=21
 
 
 class LRR:

@@ -7,7 +7,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name
+from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name, clean_title
 from metadata import canonical_tag, visible_tag
 
 
@@ -126,6 +126,9 @@ class Store(EditionCatalog,AutomaticSources):
         result = dict(row)
         result['tags'] = json.loads(result['tags'])
         result['organization'] = filename_hints(result.get('archive_filename') or result['title'])
+        hint = result['organization']
+        numbers = [n['number'] for n in hint['numbers'] if n['provider'] or len(n['number']) >= 5] if not hint['ambiguous'] else []
+        result['display_title'] = clean_title(result['title'], result['artist'] or hint['artist'], numbers)
         return result
 
     @staticmethod
@@ -133,6 +136,9 @@ class Store(EditionCatalog,AutomaticSources):
         result = dict(row)
         for key in ('tags', 'comments', 'metadata'):
             result[key] = json.loads(result[key])
+        meta = result['metadata']
+        if meta.get('title'):
+            result['display_title'] = clean_title(meta['title'],meta.get('artists',[]),[result['external_id']])
         return result
 
     @staticmethod

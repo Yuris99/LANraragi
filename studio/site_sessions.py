@@ -95,6 +95,7 @@ def _source_document(vault,url,offset=0,trace=None):
     if trace is not None:trace['mode']='saved_session' if request.has_header('Cookie') else 'no_matching_cookies' if cookies else 'anonymous'
     try:
         with urllib.request.build_opener(NoRedirect(),urllib.request.HTTPCookieProcessor(jar)).open(request,timeout=20) as response:
+            if trace is not None:trace['http_status']=response.status
             if index:
                 if response.headers.get_content_type().startswith('text/') or response.headers.get_content_type()=='application/json':
                     return {'status':'invalid_response'}
@@ -110,6 +111,7 @@ def _source_document(vault,url,offset=0,trace=None):
             return {'status':'ok','index':base64.b64encode(raw).decode('ascii'),'complete':complete}
         return {'status':'ok','document':raw.decode('utf-8')}
     except urllib.error.HTTPError as error:
+        if trace is not None:trace['http_status']=error.code
         if index and offset and error.code==416:return {'status':'ok','index':'','complete':True}
         return {'status':'access_required' if error.code in (301,302,303,307,308,401,403,429) else 'not_found' if error.code in (404,410) else 'unavailable','http_status':error.code}
     except (OSError,UnicodeError):return {'status':'unavailable'}
@@ -124,7 +126,7 @@ def source_document(vault,url,offset=0):
     result=_source_document(vault,url,offset,trace)
     if provider:
         vault.last_requests[provider]={'mode':trace['mode'],'status':result['status'],
-            'http_status':result.get('http_status'),'at':int(time.time())}
+            'http_status':trace.get('http_status'),'at':int(time.time())}
     return result
 
 

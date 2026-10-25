@@ -1,5 +1,6 @@
 """Source identity is (provider, external_id), never an unqualified number."""
 import re
+import unicodedata
 from urllib.parse import urlsplit
 
 
@@ -85,6 +86,27 @@ def filename_hints(filename):
     return {'filename': basename, 'title':title or name, 'numbers': numbers, 'artist': artist,
             'ambiguous': len(numbers) != 1,
             'provenance': 'filename-hint-only'}
+
+
+def clean_title(title, artists=(), source_ids=()):
+    """Derived display/search text; never rename a file or overwrite its title."""
+    original = str(title or '').strip()
+    value = re.sub(r'\.(?:cbz|zip|cbr|rar|7z|pdf)$', '', original, flags=re.I)
+    def key(text):
+        return re.sub(r'[\W_]+', '', unicodedata.normalize('NFKC', text).casefold())
+    names = [artists] if isinstance(artists, str) else list(artists)
+    known = {key(name) for name in names if name}
+    known.update(key(part) for name in names for part in re.split(r'[,、]', name) if part.strip())
+    value = re.sub(r'^\s*\((?:C\d+|COMIC1[^)]*|COMITIA\s*\d+|コミティア\d+)\)\s*', '', value, flags=re.I)
+    prefix = re.match(r'^\[([^\[\]]+)\]\s*', value)
+    if prefix and (key(prefix[1]) in known or {key(part.strip()) for part in re.split(r'[,、]', prefix[1])} <= known or re.search(r'\([^()]+\)$', prefix[1])):
+        value = value[prefix.end():]
+    value = re.sub(r'(?:\s*\[(?:korean|japanese|english|chinese|digital|translated|韓国翻訳|韓国語|日本語)\])+\s*$', '', value, flags=re.I)
+    suffix = re.search(r'\s*[\[({]([HEXNLU]?\d{1,12})[\])}]\s*$', value, flags=re.I)
+    if suffix and suffix[1].upper().lstrip('HEXNLU') in {str(n).upper().lstrip('HEXNLU') for n in source_ids}:
+        value = value[:suffix.start()]
+    value = re.sub(r'(?:\s*\[(?:korean|japanese|english|chinese|digital|translated|韓国翻訳|韓国語|日本語)\])+\s*$', '', value, flags=re.I)
+    return value.strip() or original
 
 
 def canonical_archive_name(title, artist='', provider=None, number=None):

@@ -4,7 +4,7 @@ import re
 import unicodedata
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
-from sources import parse_source, tags_list, comments_list
+from sources import parse_source, tags_list, comments_list, clean_title
 
 MAX_DOCUMENT = 2 * 1024 * 1024
 
@@ -203,11 +203,7 @@ def compare_metadata(first, second):
     def norm(value):
         return re.sub(r'[\W_]+', '', unicodedata.normalize('NFKC', str(value)).casefold())
     def title_key(item):
-        value = item.get('title', '')
-        for artist in item.get('artists', []):
-            value = re.sub(r'^\[' + re.escape(artist) + r'\]\s*', '', value, flags=re.I)
-        value = re.sub(r'(?:\s*\[(?:korean|japanese|english|chinese|digital|translated)\])+\s*$', '', value, flags=re.I)
-        return norm(value)
+        return norm(clean_title(item.get('title', ''), item.get('artists', []), [item.get('external_id', '')]))
     from difflib import SequenceMatcher
     title = SequenceMatcher(None, title_key(first), title_key(second)).ratio()
     artists = bool({norm(a) for a in first.get('artists', [])} & {norm(a) for a in second.get('artists', [])})
@@ -282,7 +278,7 @@ def counterpart_candidates(metadata,fetch=None,index_fetch=None,target=None,curs
                   if isinstance(number,str) and re.fullmatch(r'[1-9][0-9]{0,11}',number)]
         else:
             # Normal gallery search, not an alternate path to blocked content.
-            title=metadata['title'][:150]
+            title=clean_title(metadata['title'],metadata.get('artists',[]),[metadata.get('external_id','')])[:150]
             host='exhentai.org' if target=='exhentai' else 'e-hentai.org'
             page_number=(cursor or {}).get('page',0);offset=(cursor or {}).get('offset',0)
             if page_number>1000:raise ValueError('검색 페이지 범위를 확인하세요.')
@@ -316,7 +312,7 @@ def counterpart_candidates(metadata,fetch=None,index_fetch=None,target=None,curs
                     return output
             except (ValueError,KeyError,TypeError,OSError):
                 output['failures']+=1
-        output['items'].sort(key=lambda item:(item['comparison']['automatic_eligible'],item['comparison']['artist_match'],item['comparison']['title_similarity']),reverse=True)
+        output['items'].sort(key=lambda item:(item['comparison']['automatic_eligible'],item['comparison']['language_match'],item['comparison']['artist_match'],item['comparison']['title_similarity']),reverse=True)
         if output['failures']:output['status']='partial'
         elif output.get('next_cursor'):output['status']='scanning'
     except urllib.error.HTTPError as error:

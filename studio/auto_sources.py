@@ -4,6 +4,7 @@ import secrets
 import time
 import urllib.error
 from metadata import fetch_metadata, counterpart_candidates
+from sources import clean_title
 
 PROVIDERS=('ehentai','exhentai','hitomi')
 SCHEMA='''
@@ -50,6 +51,10 @@ class AutomaticSources:
         with self.db() as db:row=db.execute('SELECT * FROM source_link_jobs WHERE work_id=?',(work_id,)).fetchone()
         if not row:return {'state':'no_source','result':{},'epoch':0}
         result=dict(row);result['result']=json.loads(result['result'])
+        for site in result['result'].get('sites',[]):
+            for item in site.get('items',[]):
+                meta=item['metadata']
+                item['display_title']=clean_title(meta['title'],meta.get('artists',[]),[meta['external_id']])
         result.pop('lease',None);return result
 
     def retry_automatic(self,work_id):
@@ -180,7 +185,7 @@ class AutoLinker:
                 cursor=old.get('next_cursor') or {'offset':0}
                 result=counterpart_candidates(metadata,guarded_fetch,guarded_index,target=target,cursor=cursor)
                 accumulated={(item['metadata']['provider'],item['metadata']['external_id']):item for item in old.get('items',[])+result['items']}
-                result['items']=sorted(accumulated.values(),key=lambda item:(item['comparison']['automatic_eligible'],item['comparison']['artist_match'],item['comparison']['title_similarity']),reverse=True)[:10]
+                result['items']=sorted(accumulated.values(),key=lambda item:(item['comparison']['automatic_eligible'],item['comparison']['language_match'],item['comparison']['artist_match'],item['comparison']['title_similarity']),reverse=True)[:10]
                 if result['status']=='no_candidates' and result['items']:result['status']='checked'
                 result['finished']=result['status'] in ('checked','no_candidates','needs_artist','search_limit')
                 if result['status'] in ('access_required','unavailable','partial'):result['next_cursor']=cursor
