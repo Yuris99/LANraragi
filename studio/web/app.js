@@ -287,8 +287,28 @@ async function load({ fromRoute = false } = {}) {
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
     libraryKey = routeHash({ kind: "library", library: displayedLibrary });
+    refreshTagStrip().catch(() => {});
     await refreshLibraryStatus();
 }
+// Quick tag filter on the library screen: user tags first, then source tags by count.
+let tagStripRequest = 0;
+async function refreshTagStrip() {
+    const request = ++tagStripRequest, tags = await api("/api/library/tags?q=");
+    if (request !== tagStripRequest) return;
+    const active = state.allTag || state.tag;
+    let shown = [...tags.filter((t) => !t.tag.includes(":")), ...tags.filter((t) => t.tag.includes(":"))].slice(0, 14);
+    if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
+    const label = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
+    $("#tag-strip").innerHTML = shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip").hidden = !shown.length;
+}
+$("#tag-strip").addEventListener("click", guard(async (event) => {
+    if (event.target.closest("#tag-strip-more")) { $("#tag-filter").showModal(); await refreshTagFilter(); return; }
+    const chip = event.target.closest("[data-strip-tag]"); if (!chip) return;
+    const tag = chip.dataset.stripTag;
+    if (tag === (state.allTag || state.tag)) { state.tag = ""; state.allTag = ""; } else { state.allTag = tag; state.tag = ""; }
+    state.page = 1; await navigateLibrary();
+}));
 async function refreshLibraryStatus() {
     try {
         const status = await api("/api/library/status");

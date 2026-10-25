@@ -90,6 +90,14 @@ h3{font-size:16px;font-weight:600}
 .batch-toolbar label{flex-direction:row!important;align-items:center;gap:8px;margin:0!important;font-size:13px;color:var(--muted)}
 .batch-toolbar input,.card-select input{width:auto;min-height:0;accent-color:var(--accent)}
 .batch-toolbar .quiet{min-height:32px;padding:4px 12px;font-size:13px}
+.tag-strip{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.tag-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border-radius:999px;background:var(--surface);color:var(--text);font-size:13px;white-space:nowrap}
+.tag-chip:hover{background:var(--raised)}
+.tag-chip .ns{color:var(--faint)}
+.tag-chip .count{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+.tag-chip.selected{background:var(--text);color:#141210;font-weight:600}
+.tag-chip.selected .ns,.tag-chip.selected .count{color:#4a4642}
+.tag-chip.more{background:none;border:1px solid var(--control);color:var(--muted)}
 .active-tag{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin:0 0 12px;background:var(--surface);border-radius:var(--radius);font-size:14px;overflow-wrap:anywhere}
 .active-tag>span{min-width:0}
 
@@ -267,6 +275,7 @@ summary:hover{color:var(--text)}
   .card-select,.grid.list .card-select{width:44px;height:44px;background:none}
   .card-select input{width:22px;height:22px}
   .tag{min-height:36px}
+  .tag-chip{min-height:44px}
   .batch-toolbar .quiet,.source-actions .quiet,.detail-section h3 .quiet,.source-header a.quiet{min-height:44px}
   .search{height:44px}
 }
@@ -301,6 +310,8 @@ summary:hover{color:var(--text)}
   .toolbar{gap:10px}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;flex-basis:100%;margin:0 -16px;padding:0 16px}
   .chip{flex:none}
+  .tag-strip{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px 12px;padding:0 16px}
+  .tag-chip{flex:none}
   .privacy-mode #privacy-state{display:none}
   .library-meta{flex-wrap:nowrap;align-items:flex-start}
   .batch-toolbar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:4px -16px 16px;padding:0 16px}
