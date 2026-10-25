@@ -11,6 +11,8 @@ import os
 import re
 import base64
 from pathlib import Path
+import socket
+import ssl
 import stat
 import tempfile
 import time
@@ -53,6 +55,21 @@ def session_provider(url):
     if host == 'nhentai.net': return 'nhentai'
     if host == 'hitomi.la': return 'hitomi'
     raise ValueError('지원하지 않는 세션 출처입니다.')
+
+
+def connection_error_kind(error):
+    reason=error.reason if isinstance(error,urllib.error.URLError) else error
+    for kind,classes in (
+        ('certificate_error',(ssl.SSLCertVerificationError,)),
+        ('tls_error',(ssl.SSLError,)),
+        ('dns_error',(socket.gaierror,)),
+        ('timeout',(TimeoutError,)),
+        ('connection_reset',(ConnectionResetError,)),
+        ('connection_refused',(ConnectionRefusedError,)),
+        ('response_decode_error',(UnicodeError,)),
+    ):
+        if isinstance(reason,classes):return kind
+    return 'network_error'
 
 
 def _source_document(vault,url,offset=0,trace=None):
@@ -114,7 +131,8 @@ def _source_document(vault,url,offset=0,trace=None):
         if trace is not None:trace['http_status']=error.code
         if index and offset and error.code==416:return {'status':'ok','index':'','complete':True}
         return {'status':'access_required' if error.code in (301,302,303,307,308,401,403,429) else 'not_found' if error.code in (404,410) else 'unavailable','http_status':error.code}
-    except (OSError,UnicodeError):return {'status':'unavailable'}
+    except (OSError,UnicodeError) as error:
+        return {'status':'unavailable','error_kind':connection_error_kind(error)}
 
 
 def source_document(vault,url,offset=0):
@@ -127,6 +145,8 @@ def source_document(vault,url,offset=0):
     if provider:
         vault.last_requests[provider]={'mode':trace['mode'],'status':result['status'],
             'http_status':trace.get('http_status'),'at':int(time.time())}
+        if result.get('error_kind'):
+            vault.last_requests[provider]['error_kind']=result['error_kind']
     return result
 
 
