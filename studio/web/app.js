@@ -88,7 +88,12 @@ function toast(message) {
 }
 async function api(path, data, options = {}) {
     const response = await fetch(path, { ...(data === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }), ...options });
-    const value = await response.json();
+    let value;
+    try { value = await response.json(); }
+    catch (error) {
+        if (error.name === 'AbortError') throw error;
+        throw new Error(`Studio 서버 응답을 확인할 수 없습니다 (HTTP ${response.status}). 연결 상태를 확인하세요.`);
+    }
     if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
     return value;
 }
@@ -861,7 +866,8 @@ function sessionRequestNote(request) {
     if (!request) return ' · 최근 정보 조회 기록 없음';
     const mode = {no_matching_cookies:'요청 주소에 적용되는 쿠키 없음', not_sent:'요청하지 않음', saved_session:'저장 세션 사용', anonymous:'비로그인 요청', unusable_session:'저장 세션 사용 불가'}[request.mode] || '상태 확인 필요';
     const outcome = {ok:'응답 수신 · 로그인 유효성 미확인', session_required:'세션 재등록 필요', access_required:'사이트 추가 인증·접근 제한', unavailable:'네트워크·서버 연결 실패', not_found:'항목 없음', invalid_response:'응답 형식 오류', response_limit:'응답 크기 초과'}[request.status] || '확인 필요';
-    return ` · 최근 조회: ${mode} / ${outcome}${request.http_status ? ` (HTTP ${request.http_status})` : ''}`;
+    const reason = {certificate_error:'인증서 검증 실패',tls_error:'TLS 연결 실패',dns_error:'DNS 조회 실패',timeout:'연결 시간 초과',connection_reset:'연결 초기화',connection_refused:'연결 거부',response_decode_error:'응답 문자 해석 실패',network_error:'네트워크 연결 실패'}[request.error_kind];
+    return ` · 최근 조회: ${mode} / ${outcome}${typeof reason === 'string' ? ` · ${reason}` : ''}${request.http_status ? ` (HTTP ${request.http_status})` : ''}`;
 }
 $('#session-import-form').onsubmit = guard(async event => {
     event.preventDefault();

@@ -3,6 +3,8 @@ import io
 import json
 from pathlib import Path
 import sys
+import socket
+import ssl
 import unittest
 import urllib.error
 from unittest.mock import Mock, patch
@@ -80,6 +82,45 @@ class SourceDiagnosticsTests(unittest.TestCase):
         result,trace=self.fetch(b'x'*(1024*1024+1))
         self.assertEqual(result['status'],'response_limit')
         self.assertEqual(trace['http_status'],200)
+
+    def test_connection_failures_record_only_fixed_categories_without_retry(self):
+        cases=[(ssl.SSLCertVerificationError('private'),'certificate_error'),
+               (ssl.SSLError('private'),'tls_error'),(socket.gaierror('private'),'dns_error'),
+               (TimeoutError('private'),'timeout'),(ConnectionResetError('private'),'connection_reset'),
+               (ConnectionRefusedError('private'),'connection_refused'),(OSError('private'),'network_error'),
+               ('private url and cookie','network_error')]
+        for reason,expected in cases:
+            with self.subTest(kind=expected),patch('urllib.request.build_opener') as opener:
+                opener.return_value.open.side_effect=urllib.error.URLError(reason)
+                result=source_document(self.vault,E)
+                trace=self.vault.last_requests['ehentai']
+                self.assertEqual((result['status'],trace['error_kind']),('unavailable',expected))
+                self.assertIsNone(trace['http_status'])
+                self.assertNotIn('private',json.dumps(result)+json.dumps(trace))
+                self.assertNotIn(E,json.dumps(trace))
+                opener.return_value.open.assert_called_once()
+
+    def test_decode_failure_keeps_http_200_without_claiming_parsing_success(self):
+        result,trace=self.fetch(b'\xff')
+        self.assertEqual(result,{'status':'unavailable','error_kind':'response_decode_error'})
+        self.assertEqual((trace['http_status'],trace['error_kind']),(200,'response_decode_error'))
+
+    def test_http_server_failure_keeps_its_http_code_and_no_transport_guess(self):
+        with patch('urllib.request.build_opener') as opener:
+            opener.return_value.open.side_effect=urllib.error.HTTPError(E,503,'private',{},None)
+            source_document(self.vault,E)
+        trace=self.vault.last_requests['ehentai']
+        self.assertEqual((trace['status'],trace['http_status']),('unavailable',503))
+        self.assertNotIn('error_kind',trace)
+
+    def test_later_success_replaces_previous_failure_category(self):
+        with patch('urllib.request.build_opener') as opener:
+            opener.return_value.open.side_effect=ConnectionResetError('private')
+            source_document(self.vault,E)
+        self.assertEqual(self.vault.last_requests['ehentai']['error_kind'],'connection_reset')
+        _,trace=self.fetch(eh_html().encode())
+        self.assertNotIn('error_kind',trace)
+        self.assertEqual((trace['status'],trace['http_status']),('ok',200))
 
 
 if __name__=='__main__':unittest.main()
