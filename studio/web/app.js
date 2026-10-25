@@ -290,27 +290,34 @@ async function load({ fromRoute = false } = {}) {
     refreshTagStrip().catch(() => {});
     await refreshLibraryStatus();
 }
-// Quick tag filter on the library screen: user tags first, then source tags by count.
-let tagStripRequest = 0;
-async function refreshTagStrip() {
-    let kind = $("#tag-strip-kind").value, term = $("#tag-strip-search").value.trim();
-    // Typing "male:x" picks that kind exactly, so female: tags no longer match.
-    const typed = /^([a-z]+):(.*)$/i.exec(term);
-    if (typed) { kind = typed[1].toLowerCase(); term = typed[2].trim(); }
-    const request = ++tagStripRequest;
+// Hitomi-style tag matching: "gender" matches every kind, "male:gender" only male: tags.
+const tagKinds = ["artist", "group", "parody", "character", "female", "male", "mixed", "other", "language", "tag", "cosplayer", "reclass"];
+function tagScope(text, kind = "") {
+    const typed = /^([a-z]+):(.*)$/i.exec(text.trim());
+    if (typed && tagKinds.includes(typed[1].toLowerCase())) return { kind: typed[1].toLowerCase(), term: typed[2].trim() };
+    return { kind, term: text.trim() };
+}
+async function matchingTags({ kind, term }) {
     // shortcut: the endpoint returns the top 100 by count before the kind filter; rare tags of a kind may need a longer term.
     const tags = await api(`/api/library/tags?q=${encodeURIComponent(term || (kind && kind !== "user" ? kind + ":" : ""))}`);
-    if (request !== tagStripRequest) return;
-    const lower = term.toLowerCase(), filtering = Boolean(kind || term);
-    const matches = tags.filter(({ tag }) => {
+    const lower = term.toLowerCase();
+    return tags.filter(({ tag }) => {
         const i = tag.indexOf(":"), ns = i > 0 ? tag.slice(0, i).toLowerCase() : "user";
         return kind ? ns === kind && (i > 0 ? tag.slice(i + 1) : tag).toLowerCase().includes(lower) : tag.toLowerCase().includes(lower);
     });
+}
+const tagLabel = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
+// Quick tag filter on the library screen: user tags first, then source tags by count.
+let tagStripRequest = 0;
+async function refreshTagStrip() {
+    const scope = tagScope($("#tag-strip-search").value, $("#tag-strip-kind").value), request = ++tagStripRequest;
+    const matches = await matchingTags(scope);
+    if (request !== tagStripRequest) return;
+    const filtering = Boolean(scope.kind || scope.term);
     const active = state.allTag || state.tag;
     let shown = [...matches.filter((t) => !t.tag.includes(":")), ...matches.filter((t) => t.tag.includes(":"))].slice(0, filtering ? 30 : 14);
     if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
-    const label = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
-    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
     $("#tag-strip").hidden = !shown.length && !filtering;
 }
 $("#tag-strip-kind").onchange = guard(refreshTagStrip);
@@ -528,12 +535,50 @@ $("#read-direction").onchange = (e) => { settings.direction = e.target.value; sa
 $("#layout").onclick = () => { settings.layout = settings.layout === "list" ? "grid" : "list"; saveSettings(); };
 $("#direction").onclick = guard(async () => { state.direction = state.direction === "desc" ? "asc" : "desc"; $("#direction").textContent = state.direction === "desc" ? "↓" : "↑"; await load(); });
 $("#sort").onchange = guard(async (e) => { state.sort = e.target.value; state.page = 1; await load(); });
+let suggestionRequest = 0;
+function hideSuggestions() { $("#search-suggestions").hidden = true; $("#search").setAttribute("aria-expanded", "false"); $("#search").removeAttribute("aria-activedescendant"); }
+async function refreshSuggestions(query) {
+    const request = ++suggestionRequest, scope = tagScope(query);
+    if (!query.trim()) { hideSuggestions(); return; }
+    const tags = await matchingTags(scope);
+    if (request !== suggestionRequest || $("#search").value !== query) return;
+    $("#library-tag-suggestions").innerHTML = tags.slice(0, 20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
+    const scoped = query.trim() !== scope.term;
+    $("#search-suggestions").innerHTML = tags.slice(0, 8).map((item, i) => `<div class="suggestion" role="option" id="suggestion-${i}" data-suggest-tag="${esc(item.tag)}" aria-selected="false">${tagLabel(item.tag)}<span class="count">${item.count} 작품</span></div>`).join("")
+        || (scoped ? '<div class="suggestion empty">일치하는 태그가 없습니다.</div>' : "");
+    const open = Boolean($("#search-suggestions").innerHTML) && document.activeElement === $("#search");
+    $("#search-suggestions").hidden = !open; $("#search").setAttribute("aria-expanded", String(open));
+}
+async function applySuggestion(tag) {
+    hideSuggestions(); clearTimeout(state.searchTimer);
+    state.allTag = tag; state.tag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary();
+}
 $("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
     const query = $("#search").value;
-    state.tag = ""; state.query = query; state.page = 1; await load();
-    const tags = await api('/api/library/tags?q=' + encodeURIComponent(query));
-    if ($("#search").value === query) $("#library-tag-suggestions").innerHTML = tags.slice(0,20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
+    // A "kind:term" query is a tag lookup; the text search would also match other kinds (male: inside female:).
+    if (tagScope(query).term === query.trim()) { state.tag = ""; state.query = query; state.page = 1; await load(); }
+    await refreshSuggestions(query);
 }), 250); };
+$("#search").addEventListener("keydown", guard(async (event) => {
+    const options = [...document.querySelectorAll("#search-suggestions [data-suggest-tag]")];
+    const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length && !$("#search-suggestions").hidden) {
+        event.preventDefault();
+        const next = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        options.forEach((option, i) => option.setAttribute("aria-selected", String(i === next)));
+        $("#search").setAttribute("aria-activedescendant", options[next].id); options[next].scrollIntoView({ block: "nearest" });
+    }
+    if (event.key === "Enter") {
+        const scoped = tagScope($("#search").value).term !== $("#search").value.trim();
+        const pick = current >= 0 ? options[current] : scoped ? options[0] : null;
+        if (pick) { event.preventDefault(); await applySuggestion(pick.dataset.suggestTag); }
+    }
+    if (event.key === "Escape" && !$("#search-suggestions").hidden) { event.preventDefault(); hideSuggestions(); }
+}));
+$("#search-suggestions").addEventListener("mousedown", (event) => event.preventDefault());
+$("#search-suggestions").addEventListener("click", guard(async (event) => { const option = event.target.closest("[data-suggest-tag]"); if (option) await applySuggestion(option.dataset.suggestTag); }));
+$("#search").addEventListener("focus", () => { if ($("#search").value.trim()) guard(refreshSuggestions)($("#search").value); });
+$("#search").addEventListener("blur", hideSuggestions);
 document.addEventListener('input', event => {
     if (event.target.closest('#html-metadata-form')) {
         $("#metadata-save").disabled = true; $("#metadata-preview-result").textContent = '';

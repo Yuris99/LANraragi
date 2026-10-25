@@ -62,7 +62,14 @@ progress{accent-color:var(--accent)}
 
 main{margin-left:232px;min-height:100vh;padding:0 32px}
 .topbar{min-height:64px;display:flex;align-items:center;gap:12px;background:var(--bg);border-bottom:1px solid var(--line)}
-.search{display:flex;align-items:center;gap:10px;flex:1;min-width:0;max-width:560px;height:40px;padding:0 12px;border:1px solid var(--control);border-radius:var(--radius);color:var(--faint);cursor:text}
+.search-wrap{position:relative;flex:1;min-width:0;max-width:560px}
+.search-suggestions{position:absolute;z-index:30;top:calc(100% + 4px);left:0;right:0;max-height:min(360px,60vh);overflow:auto;padding:4px;background:var(--raised);border:1px solid var(--control);border-radius:var(--radius);box-shadow:0 12px 40px rgb(0 0 0 / .5)}
+.suggestion{display:flex;align-items:center;gap:8px;min-height:38px;padding:6px 10px;border-radius:6px;font-size:14px;cursor:pointer}
+.suggestion .ns{color:var(--faint)}
+.suggestion .count{margin-left:auto;color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+.suggestion:hover,.suggestion[aria-selected="true"]{background:var(--hover)}
+.suggestion.empty{color:var(--faint);cursor:default}
+.search{display:flex;align-items:center;gap:10px;width:100%;min-width:0;height:40px;padding:0 12px;border:1px solid var(--control);border-radius:var(--radius);color:var(--faint);cursor:text}
 .search:focus-within{border-color:var(--text)}
 .search input{background:none;border:0;min-height:0;width:100%;padding:0;font-size:14px;outline:none}
 .search kbd{font:12px/1 inherit;color:var(--faint);border:1px solid var(--control);border-radius:4px;padding:3px 7px}
@@ -280,7 +287,7 @@ summary:hover{color:var(--text)}
   .card-select,.grid.list .card-select{width:44px;height:44px;background:none}
   .card-select input{width:22px;height:22px}
   .tag{min-height:36px}
-  .tag-chip,.tag-kind{min-height:44px}
+  .tag-chip,.tag-kind,.suggestion{min-height:44px}
   .batch-toolbar .quiet,.source-actions .quiet,.detail-section h3 .quiet,.source-header a.quiet{min-height:44px}
   .search{height:44px}
 }
@@ -302,7 +309,7 @@ summary:hover{color:var(--text)}
   main{margin-left:0;padding:0 20px}
   #sync,#open-number{display:inline-flex}
   .topbar{flex-wrap:wrap;gap:8px 10px;padding:10px 0}
-  .search{max-width:none}
+  .search-wrap{max-width:none}
   .top-actions{flex-basis:100%;margin:0;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
   .top-actions>*{flex:none}
   .top-actions #add{order:-1}
