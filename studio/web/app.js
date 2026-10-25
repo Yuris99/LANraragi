@@ -264,7 +264,7 @@ function sources(work) { return work.sources.map((s) => `<span class="source-pil
 function workCoverURL(work) { return work.cover_asset_id ? `/api/voice/assets/${work.cover_asset_id}` : work.lrr_id ? `/api/media/${work.lrr_id}/thumbnail` : null; }
 function cover(work) {
     const thumbnail = workCoverURL(work); const editionKind = (work.edition_summary || work.edition)?.kind || "comic";
-    return `<div class="cover">${thumbnail ? `<img src="${thumbnail}" loading="lazy" decoding="async" alt="${esc(work.display_title || work.title)} 표지">` : `<div class="placeholder"><span>▤</span><small>${editionKind === "comic" ? "METADATA ONLY" : "VOICE COMIC"}</small></div>`}<span class="pages">${editionKind === "comic" ? work.pages + " P" : editionKind === "voice_video" ? "보이스 · 영상" : "보이스 · 음성"}</span>${work.favorite ? `<span class="favorite-star">★</span>` : ""}</div>`;
+    return `<div class="cover">${thumbnail ? `<img src="${thumbnail}" loading="lazy" decoding="async" alt="${esc(work.display_title || work.title)} 표지">` : `<div class="placeholder"><small>${editionKind === "comic" ? "파일 없음 · 정보만 등록" : "보이스코믹"}</small></div>`}<span class="pages">${editionKind === "comic" ? work.pages + " P" : editionKind === "voice_video" ? "보이스 · 영상" : "보이스 · 음성"}</span>${work.favorite ? `<span class="favorite-star" title="즐겨찾기"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg><span class="sr-only">즐겨찾기</span></span>` : ""}</div>`;
 }
 let requestNumber = 0;
 async function load({ fromRoute = false } = {}) {
@@ -280,11 +280,60 @@ async function load({ fromRoute = false } = {}) {
     $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" tabindex="0" role="button" aria-label="${esc(work.display_title || work.title)} 상세 보기"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3>${esc(work.display_title || work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
     updateSelection();
     $("#empty").hidden = result.items.length > 0;
+    const filtered = Boolean(state.query || state.tag || state.allTag || state.provider || state.view === "favorite");
+    $("#empty h2").textContent = filtered ? "조건에 맞는 작품이 없습니다" : "보관함을 채워 보세요";
+    $("#empty p").textContent = filtered ? "검색어·태그·출처 필터를 바꾸거나 해제해 보세요." : "LANraragi 라이브러리를 동기화하거나 작품을 추가해 출처를 연결할 수 있습니다.";
+    $("#empty-sync").hidden = filtered;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
     libraryKey = routeHash({ kind: "library", library: displayedLibrary });
+    refreshTagStrip().catch(() => {});
     await refreshLibraryStatus();
 }
+// Hitomi-style tag matching: "gender" matches every kind, "male:gender" only male: tags.
+const tagKinds = ["artist", "group", "parody", "character", "female", "male", "mixed", "other", "language", "tag", "cosplayer", "reclass"];
+function tagScope(text, kind = "") {
+    const typed = /^([a-z]+):(.*)$/i.exec(text.trim());
+    if (typed && tagKinds.includes(typed[1].toLowerCase())) return { kind: typed[1].toLowerCase(), term: typed[2].trim() };
+    return { kind, term: text.trim() };
+}
+async function matchingTags({ kind, term }) {
+    // shortcut: the endpoint returns the top 100 by count before the kind filter; rare tags of a kind may need a longer term.
+    const tags = await api(`/api/library/tags?q=${encodeURIComponent(term || (kind && kind !== "user" ? kind + ":" : ""))}`);
+    const lower = term.toLowerCase();
+    return tags.filter(({ tag }) => {
+        const i = tag.indexOf(":"), ns = i > 0 ? tag.slice(0, i).toLowerCase() : "user";
+        return kind ? ns === kind && (i > 0 ? tag.slice(i + 1) : tag).toLowerCase().includes(lower) : tag.toLowerCase().includes(lower);
+    });
+}
+const tagLabel = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
+// Quick tag filter on the library screen: user tags first, then source tags by count.
+let tagStripRequest = 0;
+async function refreshTagStrip() {
+    const scope = tagScope($("#tag-strip-search").value, $("#tag-strip-kind").value), request = ++tagStripRequest;
+    const matches = await matchingTags(scope);
+    if (request !== tagStripRequest) return;
+    const filtering = Boolean(scope.kind || scope.term);
+    const active = state.allTag || state.tag;
+    let shown = [...matches.filter((t) => !t.tag.includes(":")), ...matches.filter((t) => t.tag.includes(":"))].slice(0, filtering ? 30 : 14);
+    if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
+    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip").hidden = !shown.length && !filtering;
+}
+$("#tag-strip-kind").onchange = guard(refreshTagStrip);
+$("#tag-strip-search").oninput = () => { clearTimeout(state.tagStripTimer); state.tagStripTimer = setTimeout(guard(refreshTagStrip), 200); };
+$("#tag-strip-search").onkeydown = (event) => {
+    // Enter picks the first match; Escape clears the tag search only.
+    if (event.key === "Enter") { event.preventDefault(); $("#tag-strip-list [data-strip-tag]:not(.selected)")?.click(); }
+    if (event.key === "Escape" && event.target.value) { event.preventDefault(); event.target.value = ""; guard(refreshTagStrip)(); }
+};
+$("#tag-strip").addEventListener("click", guard(async (event) => {
+    if (event.target.closest("#tag-strip-more")) { $("#tag-filter").showModal(); await refreshTagFilter(); return; }
+    const chip = event.target.closest("[data-strip-tag]"); if (!chip) return;
+    const tag = chip.dataset.stripTag;
+    if (tag === (state.allTag || state.tag)) { state.tag = ""; state.allTag = ""; } else { state.allTag = tag; state.tag = ""; }
+    state.page = 1; await navigateLibrary();
+}));
 async function refreshLibraryStatus() {
     try {
         const status = await api("/api/library/status");
@@ -296,10 +345,10 @@ async function refreshLibraryStatus() {
         $("#library-status").textContent = `${counts.join(" · ")}. 연결된 NAS의 CBZ는 다시 업로드할 필요가 없습니다. 새 파일이 안 보이면 동기화하세요.`;
     } catch { $("#library-status").textContent = "라이브러리 상태를 확인하지 못했습니다. 잠시 후 동기화로 다시 확인하세요."; }
 }
-function sourceRows(sources) { return sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></div><small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ""}${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.filter(visibleTag).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`; }
+function sourceRows(sources) { return sources.map((s) => `<div class="source-row"><div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${providerName[s.provider]} #${esc(s.external_id)} ↗</a><span class="source-actions"><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></span></div><small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ""}${s.status === "fetched" ? `수집 ${new Date(s.fetched * 1000).toLocaleString("ko-KR")}` : "수동 등록 · 원격 정보 미확인"} · 태그 ${s.tags.length} · 댓글 ${s.comments.length}</small><div class="tags">${s.tags.filter(visibleTag).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("")}</div>${s.comments.length ? `<details><summary>보관한 댓글 ${s.comments.length}개</summary>${s.comments.map((c) => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join("")}</details>` : ""}</div>`).join("") || `<p class="muted">같은 작품이 있는 사이트의 URL을 각각 연결하세요.</p>`; }
 function renderDetail(work) {
     pauseVoicePlayers();
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><div class="eyebrow">COLLECTION ENTRY</div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점">${n <= work.rating ? "★" : "☆"}</button>`).join("")}<button data-rating="0" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "★ 즐겨찾기 해제" : "☆ 즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
@@ -341,7 +390,7 @@ function renderPage() {
         progressTask = progressTask.catch(() => {}).then(() => api(`/api/works/${reader.work.id}/progress`, { page: displayedPage })).catch((error) => toast(error.message));
     };
     image.onerror = () => toast("페이지를 아직 불러오지 못했습니다. 추출 상태를 확인한 뒤 다시 열어 주세요.");
-    image.src = reader.pages[reader.page]; $("#reader-position").textContent = `${reader.page + 1} / ${reader.pages.length}`;
+    image.src = reader.pages[reader.page]; $("#reader-title").textContent = reader.work.display_title || reader.work.title; $("#reader-position").textContent = `${reader.page + 1} / ${reader.pages.length}`;
     $("#reader-prev").disabled = reader.page === 0; $("#reader-next").disabled = reader.page + 1 === reader.pages.length;
     $("#reader-page").max = String(reader.pages.length); $("#reader-page").value = String(displayedPage);
     document.title = `${displayedPage} / ${reader.pages.length} · ${reader.work.display_title || reader.work.title} · Library Studio`;
@@ -486,12 +535,50 @@ $("#read-direction").onchange = (e) => { settings.direction = e.target.value; sa
 $("#layout").onclick = () => { settings.layout = settings.layout === "list" ? "grid" : "list"; saveSettings(); };
 $("#direction").onclick = guard(async () => { state.direction = state.direction === "desc" ? "asc" : "desc"; $("#direction").textContent = state.direction === "desc" ? "↓" : "↑"; await load(); });
 $("#sort").onchange = guard(async (e) => { state.sort = e.target.value; state.page = 1; await load(); });
+let suggestionRequest = 0;
+function hideSuggestions() { $("#search-suggestions").hidden = true; $("#search").setAttribute("aria-expanded", "false"); $("#search").removeAttribute("aria-activedescendant"); }
+async function refreshSuggestions(query) {
+    const request = ++suggestionRequest, scope = tagScope(query);
+    if (!query.trim()) { hideSuggestions(); return; }
+    const tags = await matchingTags(scope);
+    if (request !== suggestionRequest || $("#search").value !== query) return;
+    $("#library-tag-suggestions").innerHTML = tags.slice(0, 20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
+    const scoped = query.trim() !== scope.term;
+    $("#search-suggestions").innerHTML = tags.slice(0, 8).map((item, i) => `<div class="suggestion" role="option" id="suggestion-${i}" data-suggest-tag="${esc(item.tag)}" aria-selected="false">${tagLabel(item.tag)}<span class="count">${item.count} 작품</span></div>`).join("")
+        || (scoped ? '<div class="suggestion empty">일치하는 태그가 없습니다.</div>' : "");
+    const open = Boolean($("#search-suggestions").innerHTML) && document.activeElement === $("#search");
+    $("#search-suggestions").hidden = !open; $("#search").setAttribute("aria-expanded", String(open));
+}
+async function applySuggestion(tag) {
+    hideSuggestions(); clearTimeout(state.searchTimer);
+    state.allTag = tag; state.tag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary();
+}
 $("#search").oninput = () => { clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
     const query = $("#search").value;
-    state.tag = ""; state.query = query; state.page = 1; await load();
-    const tags = await api('/api/library/tags?q=' + encodeURIComponent(query));
-    if ($("#search").value === query) $("#library-tag-suggestions").innerHTML = tags.slice(0,20).map(item => `<option value="${esc(item.tag)}" label="${item.count} 작품"></option>`).join('');
+    // A "kind:term" query is a tag lookup; the text search would also match other kinds (male: inside female:).
+    if (tagScope(query).term === query.trim()) { state.tag = ""; state.query = query; state.page = 1; await load(); }
+    await refreshSuggestions(query);
 }), 250); };
+$("#search").addEventListener("keydown", guard(async (event) => {
+    const options = [...document.querySelectorAll("#search-suggestions [data-suggest-tag]")];
+    const current = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && options.length && !$("#search-suggestions").hidden) {
+        event.preventDefault();
+        const next = (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+        options.forEach((option, i) => option.setAttribute("aria-selected", String(i === next)));
+        $("#search").setAttribute("aria-activedescendant", options[next].id); options[next].scrollIntoView({ block: "nearest" });
+    }
+    if (event.key === "Enter") {
+        const scoped = tagScope($("#search").value).term !== $("#search").value.trim();
+        const pick = current >= 0 ? options[current] : scoped ? options[0] : null;
+        if (pick) { event.preventDefault(); await applySuggestion(pick.dataset.suggestTag); }
+    }
+    if (event.key === "Escape" && !$("#search-suggestions").hidden) { event.preventDefault(); hideSuggestions(); }
+}));
+$("#search-suggestions").addEventListener("mousedown", (event) => event.preventDefault());
+$("#search-suggestions").addEventListener("click", guard(async (event) => { const option = event.target.closest("[data-suggest-tag]"); if (option) await applySuggestion(option.dataset.suggestTag); }));
+$("#search").addEventListener("focus", () => { if ($("#search").value.trim()) guard(refreshSuggestions)($("#search").value); });
+$("#search").addEventListener("blur", hideSuggestions);
 document.addEventListener('input', event => {
     if (event.target.closest('#html-metadata-form')) {
         $("#metadata-save").disabled = true; $("#metadata-preview-result").textContent = '';
@@ -509,6 +596,12 @@ document.addEventListener('change', guard(async event => {
 $("#previous").onclick = guard(async () => { state.page -= 1; await load(); }); $("#next").onclick = guard(async () => { state.page += 1; await load(); });
 $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () => turnPage(1);
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
+// Phone navigation sheet; presentation only.
+function setNav(open) { document.body.classList.toggle("nav-open", open); $("#nav-scrim").hidden = !open; $("#nav-toggle").setAttribute("aria-expanded", String(open)); }
+$("#nav-toggle").onclick = () => setNav(!document.body.classList.contains("nav-open"));
+$("#nav-scrim").onclick = () => setNav(false);
+$("#sidebar").addEventListener("click", (e) => { if (e.target.closest("button,a")) setNav(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("nav-open")) { setNav(false); $("#nav-toggle").focus(); } });
 applySettings();
 applyRoute(); guard(showJobs)();
 guard(async () => { const health = await api("/api/health"); $("#studio-version").textContent = Number.isInteger(health.studio_update) ? `Studio 업데이트 ${health.studio_update}` : "Studio 버전 표시 업데이트 대기"; $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
@@ -899,7 +992,7 @@ async function connectionStatus() {
     if (desktopMissing) $('#connections-status').textContent = '일반 브라우저 실행 패키지가 아직 설치되지 않았습니다. NAS 전용 브라우저 구성 연결이 필요합니다.';
     $('#session-import-submit').disabled = !status.configured || !status.session_import;
     $('#session-import-note').textContent = status.session_import ? '등록 후 자동 연결 작업이 다시 확인합니다. 저장 성공과 사이트 접근 성공은 별도로 표시합니다.' : '로그인 서비스의 세션 등록 기능 업데이트를 기다립니다.';
-    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site"><span>${esc(s.name)} · ${esc(connectionStateName[s.state] || s.state)}${esc(sessionRequestNote(s.last_request))}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
+    $('#connections-sites').innerHTML = status.sites.map(s => `<div class="connection-site${s.last_request && s.last_request.status !== 'ok' ? ' failed' : ''}"><span><strong>${esc(s.name)}</strong> · ${esc(connectionStateName[s.state] || s.state)}${esc(sessionRequestNote(s.last_request))}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
     if (status.active) {
         loginSession = status.active.session;
         await loginOperation({ op: 'frame' });
