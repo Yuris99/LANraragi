@@ -293,16 +293,27 @@ async function load({ fromRoute = false } = {}) {
 // Quick tag filter on the library screen: user tags first, then source tags by count.
 let tagStripRequest = 0;
 async function refreshTagStrip() {
-    const query = $("#tag-strip-search").value.trim(), request = ++tagStripRequest;
-    const tags = await api(`/api/library/tags?q=${encodeURIComponent(query)}`);
+    let kind = $("#tag-strip-kind").value, term = $("#tag-strip-search").value.trim();
+    // Typing "male:x" picks that kind exactly, so female: tags no longer match.
+    const typed = /^([a-z]+):(.*)$/i.exec(term);
+    if (typed) { kind = typed[1].toLowerCase(); term = typed[2].trim(); }
+    const request = ++tagStripRequest;
+    // shortcut: the endpoint returns the top 100 by count before the kind filter; rare tags of a kind may need a longer term.
+    const tags = await api(`/api/library/tags?q=${encodeURIComponent(term || (kind && kind !== "user" ? kind + ":" : ""))}`);
     if (request !== tagStripRequest) return;
+    const lower = term.toLowerCase(), filtering = Boolean(kind || term);
+    const matches = tags.filter(({ tag }) => {
+        const i = tag.indexOf(":"), ns = i > 0 ? tag.slice(0, i).toLowerCase() : "user";
+        return kind ? ns === kind && (i > 0 ? tag.slice(i + 1) : tag).toLowerCase().includes(lower) : tag.toLowerCase().includes(lower);
+    });
     const active = state.allTag || state.tag;
-    let shown = [...tags.filter((t) => !t.tag.includes(":")), ...tags.filter((t) => t.tag.includes(":"))].slice(0, 14);
+    let shown = [...matches.filter((t) => !t.tag.includes(":")), ...matches.filter((t) => t.tag.includes(":"))].slice(0, filtering ? 30 : 14);
     if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
     const label = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
-    $("#tag-strip-list").innerHTML = (query && !tags.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
-    $("#tag-strip").hidden = !shown.length && !query;
+    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${label(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip").hidden = !shown.length && !filtering;
 }
+$("#tag-strip-kind").onchange = guard(refreshTagStrip);
 $("#tag-strip-search").oninput = () => { clearTimeout(state.tagStripTimer); state.tagStripTimer = setTimeout(guard(refreshTagStrip), 200); };
 $("#tag-strip-search").onkeydown = (event) => {
     // Enter picks the first match; Escape clears the tag search only.

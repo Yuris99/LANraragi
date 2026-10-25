@@ -92,6 +92,7 @@ h3{font-size:16px;font-weight:600}
 .batch-toolbar .quiet{min-height:32px;padding:4px 12px;font-size:13px}
 .tag-strip{display:flex;align-items:flex-start;gap:6px;margin:0 0 14px}
 .tag-strip-list{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.tag-kind{flex:none;min-height:32px;padding:4px 10px;border-radius:999px;font-size:13px}
 .tag-search{flex:none;width:180px;height:32px;padding:0 12px;border-radius:999px;gap:6px}
 .tag-search .icon{width:15px;height:15px}
 .tag-search input{font-size:13px}
@@ -279,7 +280,7 @@ summary:hover{color:var(--text)}
   .card-select,.grid.list .card-select{width:44px;height:44px;background:none}
   .card-select input{width:22px;height:22px}
   .tag{min-height:36px}
-  .tag-chip{min-height:44px}
+  .tag-chip,.tag-kind{min-height:44px}
   .batch-toolbar .quiet,.source-actions .quiet,.detail-section h3 .quiet,.source-header a.quiet{min-height:44px}
   .search{height:44px}
 }
@@ -317,6 +318,7 @@ summary:hover{color:var(--text)}
   .tag-strip{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px 12px;padding:0 16px}
   .tag-strip-list{flex-wrap:nowrap}
   .tag-search{width:150px}
+  .tag-kind{max-width:130px}
   .tag-chip{flex:none}
   .privacy-mode #privacy-state{display:none}
   .library-meta{flex-wrap:nowrap;align-items:flex-start}
