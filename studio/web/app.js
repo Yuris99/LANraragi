@@ -596,6 +596,62 @@ document.addEventListener('change', guard(async event => {
 }));
 $("#previous").onclick = guard(async () => { state.page -= 1; await load(); }); $("#next").onclick = guard(async () => { state.page += 1; await load(); });
 $("#reader-prev").onclick = () => turnPage(-1); $("#reader-next").onclick = () => turnPage(1);
+const readerSurface = $("#reader .reader-canvas");
+let readerTouch = null, readerMouse = null, readerIgnoreClickUntil = 0;
+function readerInputReady(target) {
+    return state.reader && $("#reader").open && readerSurface.contains(target) &&
+        !target.closest?.("button,a,input,select,textarea") &&
+        (window.visualViewport?.scale || 1) <= 1.01 && readerSurface.scrollWidth <= readerSurface.clientWidth + 1;
+}
+function readerTurnAt(x) {
+    const rect = readerSurface.getBoundingClientRect();
+    if (!rect.width) return;
+    const position = (x - rect.left) / rect.width;
+    if (position < 0 || position > 1) return;
+    if (position < 1 / 3 || position > 2 / 3) {
+        turnPage((position < 1 / 3 ? -1 : 1) * (settings.direction === "rtl" ? -1 : 1));
+    }
+}
+document.addEventListener("touchstart", (event) => {
+    readerTouch = null; readerMouse = null;
+    if (event.touches.length !== 1) { readerIgnoreClickUntil = Date.now() + 500; return; }
+    if (!readerInputReady(event.target)) return;
+    readerIgnoreClickUntil = 0;
+    const touch = event.touches[0];
+    // Leave the browser's edge navigation and native zoom/panning available.
+    readerTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY, reader: state.reader, page: state.reader.page,
+        edge: touch.clientX < 24 || touch.clientX > window.innerWidth - 24 };
+}, { passive: true });
+document.addEventListener("touchend", (event) => {
+    const start = readerTouch; readerTouch = null;
+    if (!start || event.touches.length || state.reader !== start.reader || state.reader.page !== start.page ||
+        !$("#reader").open || (window.visualViewport?.scale || 1) > 1.01) {
+        if (readerSurface.contains(event.target)) readerIgnoreClickUntil = Date.now() + 500;
+        return;
+    }
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === start.id);
+    if (!touch) { readerIgnoreClickUntil = Date.now() + 500; return; }
+    const dx = touch.clientX - start.x, dy = touch.clientY - start.y;
+    // A swipe/scroll must not also turn a page through its compatibility click.
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) readerIgnoreClickUntil = Date.now() + 500;
+    if (!start.edge && Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        turnPage((dx < 0 ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1));
+    }
+}, { passive: true });
+document.addEventListener("touchcancel", () => { readerTouch = null; readerMouse = null; readerIgnoreClickUntil = Date.now() + 500; }, { passive: true });
+document.addEventListener("mousedown", (event) => {
+    readerMouse = null;
+    if (event.button !== 0 || Date.now() < readerIgnoreClickUntil || !readerInputReady(event.target)) return;
+    readerMouse = { x: event.clientX, y: event.clientY, reader: state.reader, page: state.reader.page, scroll: $("#reader").scrollTop };
+});
+document.addEventListener("dragstart", () => { readerMouse = null; });
+document.addEventListener("click", (event) => {
+    const start = readerMouse; readerMouse = null;
+    if (!start || event.button !== 0 || event.detail > 1 || event.defaultPrevented || Date.now() < readerIgnoreClickUntil ||
+        !readerInputReady(event.target) || state.reader !== start.reader || state.reader.page !== start.page ||
+        $("#reader").scrollTop !== start.scroll || Math.abs(event.clientX - start.x) > 10 || Math.abs(event.clientY - start.y) > 10) return;
+    readerTurnAt(event.clientX);
+});
 document.addEventListener("keydown", (e) => { if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) return; if (e.key === "/" && !$("#detail").open && !$("#reader").open) { e.preventDefault(); $("#search").focus(); } if ($("#reader").open && ["ArrowLeft", "ArrowRight"].includes(e.key)) { e.preventDefault(); turnPage((e.key === "ArrowRight" ? 1 : -1) * (settings.direction === "rtl" ? -1 : 1)); } });
 // Phone navigation sheet; presentation only.
 function setNav(open) { document.body.classList.toggle("nav-open", open); $("#nav-scrim").hidden = !open; $("#nav-toggle").setAttribute("aria-expanded", String(open)); }
