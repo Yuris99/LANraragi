@@ -993,6 +993,7 @@ $('#visual-file').onchange = guard(async event => {
 // typed text nor session cookies are stored in the catalog/localStorage.
 let loginSession = null, loginTimer = null, loginBusy = false, loginFrameRequest = null;
 let loginOperations = Promise.resolve(), loginInputDraining = false, loginComposing = false;
+let loginLastActivity = 0;
 const loginInputs = [];
 const connectionStateName = { not_configured: '로그인 서비스 설치 필요', not_saved: '저장된 세션 없음', saved_unverified: '세션 저장됨 · 실제 접근 미검증', unavailable: '세션 만료 또는 파일 확인 필요' };
 function clearLoginPreview() {
@@ -1004,7 +1005,7 @@ function renderLoginFrame(frame) {
     if (!$('#connections-dialog').open) return;
     loginSession = frame.session;
     $('#login-controls').hidden = false;
-    $('#login-screen').src = frame.image;
+    if ($('#login-screen').src !== frame.image) $('#login-screen').src = frame.image;
     $('#login-location').textContent = frame.location;
     $('#login-save').textContent = frame.browser_mode === 'desktop' ? '일반 브라우저 계정 세션 저장' : '로그인 완료 · 세션 저장';
     $('#login-restriction').hidden = !frame.restricted_request;
@@ -1058,9 +1059,11 @@ async function connectionStatus() {
         await loginOperation({ op: 'frame' });
     } else clearLoginPreview();
 }
-function scheduleLoginFrame(delay = 1500) {
+function scheduleLoginFrame(delay) {
+    if (delay === undefined) delay = performance.now()-loginLastActivity < 10000 ? 150 : 1500;
     clearTimeout(loginTimer);
     if (loginSession && $('#connections-dialog').open) loginTimer = setTimeout(() => {
+        if (document.hidden) { scheduleLoginFrame(1500); return; }
         if (loginBusy || loginInputDraining) { scheduleLoginFrame(); return; }
         guard(() => loginOperation({ op: 'frame' }))();
     }, delay);
@@ -1077,6 +1080,7 @@ async function performLoginOperation(operation) {
     if (loginBusy) return;
     loginBusy = true; clearTimeout(loginTimer);
     const lockControls = operation.op !== 'frame';
+    if (lockControls) loginLastActivity = performance.now();
     if (lockControls) $('#login-controls').querySelectorAll('button:not(#login-keyboard),input:not(#login-direct-input)').forEach(el => el.disabled = true);
     let savedNow = false;
     try {
@@ -1166,6 +1170,7 @@ $('#login-cancel').onclick = guard(async () => { await loginOperation({ op: 'can
 // explicit input is queued; no keys are captured elsewhere in the Studio.
 function sendLoginInput(operation) {
     if (!loginSession || !$('#connections-dialog').open) return;
+    loginLastActivity = performance.now();
     const last = loginInputs.at(-1);
     if (last && last.session === loginSession && last.operation.op === 'text' && operation.op === 'text'
         && last.operation.text.length + operation.text.length <= 2000) last.operation.text += operation.text;
@@ -1183,7 +1188,7 @@ async function drainLoginInputs() {
             if (input.session === loginSession && $('#connections-dialog').open) await loginOperation(input.operation);
         }
     } catch (error) { loginInputs.length = 0; throw error; }
-    finally { loginInputDraining = false; scheduleLoginFrame(100); }
+    finally { loginInputDraining = false; scheduleLoginFrame(0); }
 }
 const loginDirectInput = $('#login-direct-input');
 function sendLoginText() {

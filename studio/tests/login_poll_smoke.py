@@ -19,12 +19,14 @@ const esc = value => String(value);
 const guard = fn => (...args) => Promise.resolve(fn(...args)).catch(error => { throw error; });
 const toast = () => {};
 let releaseFrame = null;
-const fixture = {calls: [], hold: false, release: () => releaseFrame({})};
+const fixture = {calls: [], hold: false, frameDelay:0, frameTimes:[], release: () => releaseFrame({})};
 const frame = {session:'generated-window', image:'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700"><rect width="1000" height="700" fill="white"/></svg>'),location:'Generated page',browser_mode:'desktop'};
 async function api(url, data) {
     fixture.calls.push(data);
     if (data.op === 'frame') {
+        fixture.frameTimes.push(performance.now());
         if (fixture.hold) await new Promise(resolve => { releaseFrame = resolve; });
+        if (fixture.frameDelay) await new Promise(resolve => setTimeout(resolve,fixture.frameDelay));
         return frame;
     }
     return {accepted:true};
@@ -149,6 +151,13 @@ async function api(url, data) {
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             assert page.locator('#connections-dialog').evaluate('el=>el.scrollWidth<=el.clientWidth+1')
             page.screenshot(path=str(output/'mobile.png'))
+            # The measured NAS preview takes ~140ms: active interaction must not
+            # add another 1.5 seconds between every returned frame.
+            page.evaluate("fixture.frameDelay=140;fixture.frameTimes=[];sendLoginInput({op:'key',key:'Tab'});")
+            page.wait_for_function('() => fixture.frameTimes.length >= 4', timeout=2000)
+            intervals=page.evaluate('fixture.frameTimes.slice(1).map((t,i)=>t-fixture.frameTimes[i])')
+            assert max(intervals)<550, intervals
+            print('ACTIVE_PREVIEW_INTERVAL_MS='+str(round(max(intervals))))
             assert not errors, errors
             browser.close()
         print('LOGIN_DIRECT=PASS slow_poll_focus=true ordered_typing=true paste=true ime_once=true keys=true wheel=true trusted_touch_scroll=true escape_releases=true desktop_mobile=true')
