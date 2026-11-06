@@ -991,7 +991,7 @@ $('#visual-file').onchange = guard(async event => {
 
 // Credentials travel only to the operator-configured NAS login service. Neither
 // typed text nor session cookies are stored in the catalog/localStorage.
-let loginSession = null, loginTimer = null, loginBusy = false;
+let loginSession = null, loginTimer = null, loginBusy = false, loginFrameRequest = null;
 const connectionStateName = { not_configured: '로그인 서비스 설치 필요', not_saved: '저장된 세션 없음', saved_unverified: '세션 저장됨 · 실제 접근 미검증', unavailable: '세션 만료 또는 파일 확인 필요' };
 function clearLoginPreview() {
     clearTimeout(loginTimer); loginSession = null;
@@ -1063,12 +1063,19 @@ function scheduleLoginFrame() {
     }, 2000);
 }
 async function loginOperation(operation) {
+    // A slow automatic preview must not blur text input or discard a user action.
+    if (operation.op !== 'frame' && loginFrameRequest) {
+        try { await loginFrameRequest; } catch (_) { /* The action reports its own result. */ }
+    }
     if (loginBusy) return;
     loginBusy = true; clearTimeout(loginTimer);
-    $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = true);
+    const lockControls = operation.op !== 'frame';
+    if (lockControls) $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = true);
     let savedNow = false;
     try {
-        const result = await api('/api/site-connections', { ...operation, session: loginSession });
+        const request = api('/api/site-connections', { ...operation, session: loginSession });
+        if (!lockControls) loginFrameRequest = request;
+        const result = await request;
         if (result.image) renderLoginFrame(result);
         if (result.save_error) $('#connections-status').textContent = '브라우저의 세션 저장 응답이 없습니다. 로그인 상태를 확인하고 다시 저장하세요.';
         if (result.saving) $('#connections-status').textContent = '일반 브라우저의 계정 세션을 NAS에 저장하는 중입니다. 사람 인증 쿠키는 작업자로 전달하지 않습니다.';
@@ -1085,8 +1092,9 @@ async function loginOperation(operation) {
     } catch (error) {
         clearTimeout(loginTimer); throw error;
     } finally {
+        if (!lockControls) loginFrameRequest = null;
         loginBusy = false;
-        $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = false);
+        if (lockControls) $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = false);
     }
     if (savedNow) await connectionStatus();
     scheduleLoginFrame();
@@ -1126,19 +1134,19 @@ $('#connections-sites').onclick = guard(async event => {
     }
 });
 $('#login-screen').onclick = guard(async event => {
-    if (loginBusy || !loginSession) return;
+    if ((loginBusy && !loginFrameRequest) || !loginSession) return;
     const box = event.currentTarget.getBoundingClientRect();
     await loginOperation({ op: 'click', x: Math.min(999, Math.max(0, (event.clientX - box.left) * 1000 / box.width)), y: Math.min(699, Math.max(0, (event.clientY - box.top) * 700 / box.height)) });
     $('#login-text').focus();
 });
 $('#login-text-form').onsubmit = guard(async event => {
-    event.preventDefault(); if (loginBusy || !loginSession) return;
+    event.preventDefault(); if ((loginBusy && !loginFrameRequest) || !loginSession) return;
     const text = $('#login-text').value; $('#login-text').value = '';
     if (text) await loginOperation({ op: 'text', text });
 });
 $('#login-controls').addEventListener('click', guard(async event => {
     const button = event.target.closest('button');
-    if (!button || loginBusy) return;
+    if (!button || (loginBusy && !loginFrameRequest)) return;
     if (button.dataset.loginKey) await loginOperation({ op: 'key', key: button.dataset.loginKey });
     if (button.dataset.loginScroll) await loginOperation({ op: 'scroll', delta: Number(button.dataset.loginScroll) });
 }));
