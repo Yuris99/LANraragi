@@ -25,6 +25,7 @@ from site_sessions import CookieVault, SITES, allowed_domain, site, read_service
 
 KEYS = {'Tab','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'}
 LOGIN_ERRORS = {'browser_start_failed','login_site_timeout','login_site_unreachable','login_preview_failed'}
+LOGIN_IDLE_TIMEOUT = 30 * 60
 
 
 class LoginFailure(ValueError):
@@ -49,9 +50,14 @@ class LoginBrowser:
     def expire(self):
         if self.session and time.monotonic()>=self.deadline: self.close()
 
+    def touch_activity(self):
+        self.deadline=time.monotonic()+LOGIN_IDLE_TIMEOUT
+
     def status(self):
         self.expire()
         return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
+                'idle_timeout_seconds':LOGIN_IDLE_TIMEOUT,
+                'idle_remaining_seconds':max(0,int(self.deadline-time.monotonic())) if self.session else None,
                 'active':{'provider':self.provider,'session':self.session} if self.session else None}
 
     def route(self, route):
@@ -81,7 +87,7 @@ class LoginBrowser:
         from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
         self.provider=provider; self.session=secrets.token_hex(16); self.denied=False
         self.blocked_navigation=False; self.response_status=None
-        self.deadline=time.monotonic()+600
+        self.touch_activity()
         phase='browser'
         try:
             self.pw=sync_playwright().start()
@@ -156,6 +162,7 @@ class LoginBrowser:
                  'nhentai':'https://nhentai.net/'}[self.provider]
             response=self.page.goto(url,wait_until='domcontentloaded',timeout=15000)
             self.response_status=response.status if response else None
+            self.touch_activity()
             return self.frame()
         if op=='click':
             if any(type(data[k]) not in (float,int) or not math.isfinite(data[k]) for k in ('x','y')) or not (0<=data['x']<1000 and 0<=data['y']<700):
@@ -171,6 +178,7 @@ class LoginBrowser:
         elif op=='scroll':
             if type(data['delta']) is not int or not -700<=data['delta']<=700: raise ValueError('잘못된 스크롤입니다.')
             self.page.mouse.wheel(0,data['delta'])
+        self.touch_activity()
         return {'accepted':True}
 
 
@@ -246,7 +254,7 @@ class DesktopBrowser(LoginBrowser):
         if not configuration['login']:raise ValueError('이 출처에는 지원하는 로그인 화면이 없습니다.')
         if self.session:raise ValueError('열린 로그인 창을 먼저 저장하거나 취소하세요.')
         if not self.available():raise LoginFailure('browser_start_failed')
-        self.provider=provider;self.session=secrets.token_hex(16);self.deadline=time.monotonic()+600
+        self.provider=provider;self.session=secrets.token_hex(16);self.touch_activity()
         try:
             self.directory=tempfile.TemporaryDirectory(prefix='studio-desktop-')
             root=Path(self.directory.name);root.chmod(0o700)
@@ -319,6 +327,7 @@ class DesktopBrowser(LoginBrowser):
         if op=='save':
             self.saving_until=time.monotonic()+15;self.saved=False
             self.run(['xdotool','key','--clearmodifiers','alt+shift+s'])
+            self.touch_activity()
             return {'saving':True}
         if op=='click':
             if any(type(data[k]) not in (int,float) or not math.isfinite(data[k]) for k in ('x','y')) or not (0<=data['x']<1000 and 0<=data['y']<700):raise ValueError('화면 안을 선택하세요.')
@@ -339,6 +348,7 @@ class DesktopBrowser(LoginBrowser):
             self.run(['xdotool','key','--clearmodifiers','ctrl+l'])
             self.run(['xdotool','type','--clearmodifiers','--file','-'],input=url.encode())
             self.run(['xdotool','key','Return'])
+        self.touch_activity()
         return {'accepted':True}
 
 

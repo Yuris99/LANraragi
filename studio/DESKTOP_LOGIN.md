@@ -33,7 +33,9 @@ remains unverified until tested normally. ExHentai downloading remains disabled.
 Only confirmed account save closes the preview and refreshes saved status.
 An extension response timeout is visible and preserves an older saved session.
 Profile, display key, screenshots and extension token use private temporary files
-and are destroyed on cancel/save or the ten-minute expiry. Screenshots are
+and are destroyed on cancel/save or after thirty minutes without user input.
+Valid clicks, text, keys, scrolls, site visits and Save renew this idle deadline;
+automatic screenshot/status polling and cookie export callbacks do not. Screenshots are
 unlinked immediately after capture. Container interruption loses its tmpfs.
 The account vault retains existing 0700/0600 and atomic-save rules.
 
