@@ -994,15 +994,18 @@ $('#visual-file').onchange = guard(async event => {
 let loginSession = null, loginTimer = null, loginBusy = false, loginFrameRequest = null;
 let loginOperations = Promise.resolve(), loginInputDraining = false, loginComposing = false;
 let loginLastActivity = 0;
+let loginSaveError = '';
 const loginInputs = [];
 const connectionStateName = { not_configured: '로그인 서비스 설치 필요', not_saved: '저장된 세션 없음', saved_unverified: '세션 저장됨 · 실제 접근 미검증', unavailable: '세션 만료 또는 파일 확인 필요' };
 function clearLoginPreview() {
     clearTimeout(loginTimer); loginSession = null;
+    loginSaveError = '';
     loginInputs.length = 0; loginComposing = false; $('#login-direct-input').value = '';
     $('#login-controls').hidden = true; $('#login-screen').removeAttribute('src'); $('#login-text').value = '';
 }
 function renderLoginFrame(frame) {
     if (!$('#connections-dialog').open) return;
+    if (loginSession !== frame.session) loginSaveError = '';
     loginSession = frame.session;
     $('#login-controls').hidden = false;
     if ($('#login-screen').src !== frame.image) $('#login-screen').src = frame.image;
@@ -1015,6 +1018,7 @@ function renderLoginFrame(frame) {
     $('#connections-status').textContent = frame.response_status >= 400
         ? `로그인 사이트가 HTTP ${frame.response_status}을 반환했습니다. 사이트가 접근을 거부하거나 오류가 난 상태일 수 있습니다.`
         : frame.browser_mode === 'desktop' ? '일반 Chromium 원격 화면입니다. 사이트 인증과 로그인은 화면에서 직접 진행하세요.' : 'NAS 브라우저 화면이 열렸습니다. 아래 화면의 입력란을 선택해 로그인하세요.';
+    if (loginSaveError) $('#connections-status').textContent = loginSaveError;
 }
 function sessionRequestNote(request) {
     if (!request) return ' · 최근 정보 조회 기록 없음';
@@ -1080,6 +1084,7 @@ async function performLoginOperation(operation) {
     if (loginBusy) return;
     loginBusy = true; clearTimeout(loginTimer);
     const lockControls = operation.op !== 'frame';
+    if (operation.op === 'save') loginSaveError = '';
     if (lockControls) loginLastActivity = performance.now();
     if (lockControls) $('#login-controls').querySelectorAll('button:not(#login-keyboard),input:not(#login-direct-input)').forEach(el => el.disabled = true);
     let savedNow = false;
@@ -1088,7 +1093,14 @@ async function performLoginOperation(operation) {
         if (!lockControls) loginFrameRequest = request;
         const result = await request;
         if (result.image) renderLoginFrame(result);
-        if (result.save_error) $('#connections-status').textContent = '브라우저의 세션 저장 응답이 없습니다. 로그인 상태를 확인하고 다시 저장하세요.';
+        if (result.save_error) {
+            loginSaveError = result.save_error_kind === 'no_account_cookies'
+                ? '계정 쿠키를 받지 못해 저장하지 못했습니다. 로그인 창을 유지하고 이 상태를 알려주세요.'
+                : result.save_error_kind === 'session_rejected'
+                    ? '계정 세션을 검증하지 못해 저장하지 않았습니다. 로그인 창과 기존 저장 세션은 유지됩니다.'
+                    : '저장 확장의 완료 응답이 없어 저장하지 못했습니다. 로그인 창을 유지하고 다시 저장하세요.';
+            $('#connections-status').textContent = loginSaveError;
+        }
         if (result.saving) $('#connections-status').textContent = '일반 브라우저의 계정 세션을 NAS에 저장하는 중입니다. 사람 인증 쿠키는 작업자로 전달하지 않습니다.';
         if (result.session_saved) {
             await api('/api/site-connections', { op: 'cancel', session: loginSession });

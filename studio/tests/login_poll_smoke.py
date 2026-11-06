@@ -158,6 +158,13 @@ async function api(url, data) {
             intervals=page.evaluate('fixture.frameTimes.slice(1).map((t,i)=>t-fixture.frameTimes[i])')
             assert max(intervals)<550, intervals
             print('ACTIVE_PREVIEW_INTERVAL_MS='+str(round(max(intervals))))
+            page.evaluate("frame.save_error=true;frame.save_error_kind='no_account_cookies';")
+            page.evaluate("() => loginOperation({op:'frame'})")
+            error=page.locator('#connections-status').inner_text()
+            assert '\uc800\uc7a5\ud558\uc9c0 \ubabb' in error,error
+            page.evaluate("frame.save_error=false;frame.save_error_kind=null;")
+            page.evaluate("() => loginOperation({op:'frame'})")
+            assert page.locator('#connections-status').inner_text()==error,'A later preview must not erase the save failure'
             assert not errors, errors
             browser.close()
         print('LOGIN_DIRECT=PASS slow_poll_focus=true ordered_typing=true paste=true ime_once=true keys=true wheel=true trusted_touch_scroll=true escape_releases=true desktop_mobile=true')

@@ -26,6 +26,10 @@ disabled. Managed-cloud proxy/CA policy is preserved, not bypassed.
 
 A private ephemeral extension has only the cookies permission and fixed host
 permissions. It changes no website scripts, browser APIs or fingerprint signals.
+Cookie read permissions cover both HTTP and HTTPS for the selected provider:
+Chromium filters Secure=false cookies against HTTP host permissions, including
+cookies originally set during HTTPS login. Navigation remains HTTPS-only under
+the unchanged browser policy. This grants no unrelated host or arbitrary URL.
 Studio's Save button opens a 15-second server-side save window and sends the
 extension's keyboard command. Only then are selected-provider account cookies
 sent to a token-protected NAS-loopback endpoint. A current window nonce and
@@ -38,7 +42,9 @@ A blocked download endpoint stays blocked: real site login/download support
 remains unverified until tested normally. ExHentai downloading remains disabled.
 
 Only confirmed account save closes the preview and refreshes saved status.
-An extension response timeout is visible and preserves an older saved session.
+An extension response timeout or rejected empty cookie export remains visible
+across preview refreshes and preserves an older saved session. Retrying Save
+clears the previous failure. Callback failures never imply successful storage.
 Profile, display key, screenshots and extension token use private temporary files
 and are destroyed on cancel/save or after thirty minutes without user input.
 Valid clicks, text, keys, scrolls, site visits and Save renew this idle deadline;

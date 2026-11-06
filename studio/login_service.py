@@ -195,7 +195,7 @@ class DesktopBrowser(LoginBrowser):
         super().__init__(vault)
         self.bridge_token=bridge_token;self.bridge_url=bridge_url
         self.processes=[];self.directory=None;self.env=None;self.window=None
-        self.saving_until=0;self.saved=False
+        self.saving_until=0;self.saved=False;self.save_failure=None
 
     def available(self):
         return all(shutil.which(tool) for tool in ('Xvfb','xauth','xdotool','scrot')) and bool(shutil.which(os.environ.get('STUDIO_CHROMIUM','chromium')))
@@ -205,7 +205,7 @@ class DesktopBrowser(LoginBrowser):
                               timeout=kwargs.pop('timeout',5),check=True,**kwargs).stdout
 
     def status(self):
-        value=super().status();value.update(browser_mode='desktop',desktop_available=self.available())
+        value=super().status();value.update(browser_mode='desktop',desktop_available=self.available(),nonsecure_cookie_export=True)
         return value
 
     def close(self):
@@ -218,7 +218,7 @@ class DesktopBrowser(LoginBrowser):
         self.processes=[]
         if self.directory:self.directory.cleanup()
         self.directory=self.env=self.window=None
-        self.provider=self.session=None;self.deadline=0;self.saving_until=0;self.saved=False
+        self.provider=self.session=None;self.deadline=0;self.saving_until=0;self.saved=False;self.save_failure=None
 
     def extension(self, directory):
         token=self.bridge_token or read_service_token(os.environ['STUDIO_LOGIN_TOKEN_FILE'])
@@ -230,7 +230,10 @@ class DesktopBrowser(LoginBrowser):
                   'commands':{'save-account-session':{'suggested_key':{'default':'Alt+Shift+S'},'description':'Save this provider account session to Studio'}}}
         # Domain permissions are generated from the fixed server configuration.
         # Fixture domains exist only in isolated tests, never in a web argument.
-        manifest['host_permissions']=[('http://'+d+'/*' if d in ('127.0.0.1','localhost') else 'https://*.'+d+'/*') for d in config['domains']]+['http://127.0.0.1/*']
+        # Cookie permissions use HTTP for Secure=false cookies even when the
+        # account was created over HTTPS. Browsing remains HTTPS-only by policy.
+        manifest['host_permissions']=[scheme+'://'+('' if d in ('127.0.0.1','localhost') else '*.')+d+'/*'
+            for d in config['domains'] for scheme in (('http',) if d in ('127.0.0.1','localhost') else ('https','http'))]+['http://127.0.0.1/*']
         (directory/'manifest.json').write_text(json.dumps(manifest))
         script='const config='+json.dumps(config)+';\n'+'''chrome.commands.onCommand.addListener(async command => {
   if (command !== 'save-account-session') return;
@@ -244,9 +247,10 @@ class DesktopBrowser(LoginBrowser):
         secure:c.secure, httpOnly:c.httpOnly, expires:c.expirationDate ?? -1
       });
     }
-    await fetch(config.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.token},
+    const response = await fetch(config.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+config.token},
       body:JSON.stringify({op:'desktop-session',session:config.session,cookies:[...unique.values()]})});
-  } catch (_) { /* The Studio Save operation times out visibly; no secret logs. */ }
+    if (!response.ok) console.error('Studio account session save rejected');
+  } catch (_) { console.error('Studio account session save unavailable'); }
 });'''
         (directory/'save.js').write_text(script)
         for path in directory.iterdir():path.chmod(0o600)
@@ -301,12 +305,13 @@ class DesktopBrowser(LoginBrowser):
             if len(raw)>2*1024*1024 or not raw.startswith(b'\x89PNG\r\n\x1a\n'):raise ValueError('preview')
         except Exception:raise LoginFailure('login_preview_failed') from None
         finally:path.unlink(missing_ok=True)
-        error=bool(self.saving_until and time.monotonic()>self.saving_until and not self.saved)
-        if error:self.saving_until=0
+        if self.saving_until and time.monotonic()>self.saving_until and not self.saved:
+            self.saving_until=0;self.save_failure='save_timeout'
         return {'session':self.session,'provider':self.provider,'width':1000,'height':700,
                 'location':site(self.provider)['name']+' · 일반 NAS 브라우저 (주소는 화면의 주소창에서 확인)',
                 'restricted_request':False,'response_status':None,'browser_mode':'desktop',
-                'saving':bool(self.saving_until and not self.saved),'save_error':error,'session_saved':self.saved,
+                'saving':bool(self.saving_until and not self.saved),'save_error':bool(self.save_failure),
+                'save_error_kind':self.save_failure,'session_saved':self.saved,
                 'image':'data:image/png;base64,'+base64.b64encode(raw).decode()}
 
     def call(self, data):
@@ -324,16 +329,20 @@ class DesktopBrowser(LoginBrowser):
             if not self.saving_until or time.monotonic()>self.saving_until:raise ValueError('먼저 세션 저장을 선택하세요.')
             cookies=data['cookies']
             if not isinstance(cookies,list) or any(not isinstance(c,dict) for c in cookies):raise ValueError('쿠키 형식을 확인하세요.')
-            result=self.vault.save(self.provider,cookies);self.saved=True;self.saving_until=0
+            try:result=self.vault.save(self.provider,cookies)
+            except ValueError:
+                self.saving_until=0;self.save_failure='no_account_cookies' if not cookies else 'session_rejected'
+                raise
+            self.saved=True;self.saving_until=0;self.save_failure=None
             return result
         if op=='save':
-            self.saving_until=time.monotonic()+15;self.saved=False
+            self.saving_until=time.monotonic()+15;self.saved=False;self.save_failure=None
             self.run(['xdotool','key','--clearmodifiers','alt+shift+s'])
             self.touch_activity()
             return {'saving':True}
         if op=='click':
             if any(type(data[k]) not in (int,float) or not math.isfinite(data[k]) for k in ('x','y')) or not (0<=data['x']<1000 and 0<=data['y']<700):raise ValueError('화면 안을 선택하세요.')
-            self.run(['xdotool','mousemove','--sync',str(int(data['x'])),str(int(data['y'])),'click','1'])
+            self.run(['xdotool','mousemove',str(int(data['x'])),str(int(data['y'])),'click','1'])
         elif op=='text':
             text=data['text']
             if not isinstance(text,str) or not 1<=len(text)<=2000 or '\x00' in text:raise ValueError('입력 문자를 확인하세요.')

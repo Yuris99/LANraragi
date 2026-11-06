@@ -64,6 +64,24 @@ class DesktopLoginTests(unittest.TestCase):
         script=(folder/'save.js').read_text()
         self.assertNotIn('navigator.webdriver',script)
         self.assertNotIn('chrome.debugger',script)
+        self.assertIn('https://*.e-hentai.org/*',manifest['host_permissions'])
+        self.assertIn('http://*.e-hentai.org/*',manifest['host_permissions'])
+        self.assertNotIn('<all_urls>',manifest['host_permissions'])
+
+    def test_empty_account_callback_keeps_failure_and_previous_session(self):
+        self.vault.save('ehentai',[dict(domain='.e-hentai.org',name='ipb_member_id',value='generated-old')])
+        before=self.vault.path('ehentai').read_bytes();b=self.browser
+        b.provider='ehentai';b.session='generated-window';b.deadline=time.monotonic()+30;b.saving_until=time.monotonic()+15
+        with self.assertRaises(ValueError):b.call({'op':'desktop-session','session':b.session,'cookies':[]})
+        self.assertEqual(b.save_failure,'no_account_cookies')
+        self.assertEqual(b.saving_until,0);self.assertFalse(b.saved)
+        self.assertEqual(before,self.vault.path('ehentai').read_bytes())
+
+    def test_repeated_click_does_not_wait_for_nonexistent_motion(self):
+        b=self.browser;b.provider='ehentai';b.session='generated-window';b.deadline=time.monotonic()+30
+        with patch.object(b,'run',return_value=b'') as run:
+            for _ in range(2):b.call({'op':'click','session':b.session,'x':400,'y':300})
+            self.assertEqual(run.call_args.args[0],['xdotool','mousemove','400','300','click','1'])
 
     def test_text_is_stdin_and_actions_reject_invalid_input(self):
         b=self.browser;b.provider='ehentai';b.session='generated-window';b.deadline=time.monotonic()+30
