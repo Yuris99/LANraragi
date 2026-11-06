@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "enabled": true,
-  "generation": 8,
-  "revision": "05fc898a25aabb374da49557980f5a192ec598ee",
+  "generation": 9,
+  "revision": "be67762d741c3cc9bd08484200350a862d494556",
   "worker": false,
   "files": {
-    "login_service.py": "72b7e27646737b901ae5bfe9b508373825239aeea68f92e375a692cb9483fcca",
+    "login_service.py": "ef9198cece62c536273ea7927974f67fcd4009b9e32e4e988e598277d709ff00",
     "site_sessions.py": "eb07b4b3f4dd090e972e191355e926691177f3b8bc74065349b537254eba0f03",
     "init_login.py": "801ae821b624d73885cb172e35f9fff417f918c3ade77743798d5d2be39d14de",
     "worker.py": "2f35e9fc5f60f46802da909ac348cf3e9b507c877b8fa35755e4ba64cf2c34a7",
