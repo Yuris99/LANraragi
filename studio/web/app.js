@@ -992,9 +992,12 @@ $('#visual-file').onchange = guard(async event => {
 // Credentials travel only to the operator-configured NAS login service. Neither
 // typed text nor session cookies are stored in the catalog/localStorage.
 let loginSession = null, loginTimer = null, loginBusy = false, loginFrameRequest = null;
+let loginOperations = Promise.resolve(), loginInputDraining = false, loginComposing = false;
+const loginInputs = [];
 const connectionStateName = { not_configured: '로그인 서비스 설치 필요', not_saved: '저장된 세션 없음', saved_unverified: '세션 저장됨 · 실제 접근 미검증', unavailable: '세션 만료 또는 파일 확인 필요' };
 function clearLoginPreview() {
     clearTimeout(loginTimer); loginSession = null;
+    loginInputs.length = 0; loginComposing = false; $('#login-direct-input').value = '';
     $('#login-controls').hidden = true; $('#login-screen').removeAttribute('src'); $('#login-text').value = '';
 }
 function renderLoginFrame(frame) {
@@ -1055,22 +1058,26 @@ async function connectionStatus() {
         await loginOperation({ op: 'frame' });
     } else clearLoginPreview();
 }
-function scheduleLoginFrame() {
+function scheduleLoginFrame(delay = 1500) {
     clearTimeout(loginTimer);
     if (loginSession && $('#connections-dialog').open) loginTimer = setTimeout(() => {
-        if (loginBusy) { scheduleLoginFrame(); return; }
+        if (loginBusy || loginInputDraining) { scheduleLoginFrame(); return; }
         guard(() => loginOperation({ op: 'frame' }))();
-    }, 2000);
+    }, delay);
 }
-async function loginOperation(operation) {
-    // A slow automatic preview must not blur text input or discard a user action.
-    if (operation.op !== 'frame' && loginFrameRequest) {
-        try { await loginFrameRequest; } catch (_) { /* The action reports its own result. */ }
-    }
+function loginOperation(operation) {
+    const session = loginSession;
+    const request = loginOperations.catch(() => {}).then(() => {
+        if (session === loginSession && $('#connections-dialog').open) return performLoginOperation(operation);
+    });
+    loginOperations = request;
+    return request;
+}
+async function performLoginOperation(operation) {
     if (loginBusy) return;
     loginBusy = true; clearTimeout(loginTimer);
     const lockControls = operation.op !== 'frame';
-    if (lockControls) $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = true);
+    if (lockControls) $('#login-controls').querySelectorAll('button:not(#login-keyboard),input:not(#login-direct-input)').forEach(el => el.disabled = true);
     let savedNow = false;
     try {
         const request = api('/api/site-connections', { ...operation, session: loginSession });
@@ -1094,7 +1101,7 @@ async function loginOperation(operation) {
     } finally {
         if (!lockControls) loginFrameRequest = null;
         loginBusy = false;
-        if (lockControls) $('#login-controls').querySelectorAll('button,input').forEach(el => el.disabled = false);
+        if (lockControls) $('#login-controls').querySelectorAll('button:not(#login-keyboard),input:not(#login-direct-input)').forEach(el => el.disabled = false);
     }
     if (savedNow) await connectionStatus();
     scheduleLoginFrame();
@@ -1102,6 +1109,7 @@ async function loginOperation(operation) {
 $('#connections-open').onclick = guard(async () => { $('#connections-dialog').showModal(); await connectionStatus(); });
 $('#connections-refresh').onclick = guard(connectionStatus);
 $('#connections-dialog').addEventListener('close', () => {
+    loginInputs.length = 0; loginComposing = false; $('#login-direct-input').value = '';
     clearTimeout(loginTimer); $('#session-import-text').value = ''; $('#session-import-file').value = ''; $('#login-text').value = ''; $('#login-screen').removeAttribute('src');
 });
 $('#connections-sites').onclick = guard(async event => {
@@ -1134,10 +1142,10 @@ $('#connections-sites').onclick = guard(async event => {
     }
 });
 $('#login-screen').onclick = guard(async event => {
-    if ((loginBusy && !loginFrameRequest) || !loginSession) return;
+    if (!loginSession || Date.now() < loginIgnoreClickUntil) return;
     const box = event.currentTarget.getBoundingClientRect();
-    await loginOperation({ op: 'click', x: Math.min(999, Math.max(0, (event.clientX - box.left) * 1000 / box.width)), y: Math.min(699, Math.max(0, (event.clientY - box.top) * 700 / box.height)) });
-    $('#login-text').focus();
+    $('#login-direct-input').focus({preventScroll:true});
+    sendLoginInput({ op: 'click', x: Math.min(999, Math.max(0, (event.clientX - box.left) * 1000 / box.width)), y: Math.min(699, Math.max(0, (event.clientY - box.top) * 700 / box.height)) });
 });
 $('#login-text-form').onsubmit = guard(async event => {
     event.preventDefault(); if ((loginBusy && !loginFrameRequest) || !loginSession) return;
@@ -1153,3 +1161,75 @@ $('#login-controls').addEventListener('click', guard(async event => {
 $('#login-visit').onclick = guard(() => loginOperation({ op: 'visit' }));
 $('#login-save').onclick = guard(async () => { await loginOperation({ op: 'save' }); await connectionStatus(); });
 $('#login-cancel').onclick = guard(async () => { await loginOperation({ op: 'cancel' }); await connectionStatus(); });
+
+// Native input captures paste, mobile keyboards and committed IME text. Only
+// explicit input is queued; no keys are captured elsewhere in the Studio.
+function sendLoginInput(operation) {
+    if (!loginSession || !$('#connections-dialog').open) return;
+    const last = loginInputs.at(-1);
+    if (last && last.session === loginSession && last.operation.op === 'text' && operation.op === 'text'
+        && last.operation.text.length + operation.text.length <= 2000) last.operation.text += operation.text;
+    else if (last && last.session === loginSession && last.operation.op === 'scroll' && operation.op === 'scroll'
+        && Math.abs(last.operation.delta + operation.delta) <= 700) last.operation.delta += operation.delta;
+    else loginInputs.push({session:loginSession, operation});
+    guard(drainLoginInputs)();
+}
+async function drainLoginInputs() {
+    if (loginInputDraining) return;
+    loginInputDraining = true;
+    try {
+        while (loginInputs.length) {
+            const input = loginInputs.shift();
+            if (input.session === loginSession && $('#connections-dialog').open) await loginOperation(input.operation);
+        }
+    } catch (error) { loginInputs.length = 0; throw error; }
+    finally { loginInputDraining = false; scheduleLoginFrame(100); }
+}
+const loginDirectInput = $('#login-direct-input');
+function sendLoginText() {
+    if (loginComposing) return;
+    const text = loginDirectInput.value;
+    loginDirectInput.value = '';
+    if (text) sendLoginInput({op:'text',text});
+}
+loginDirectInput.oncompositionstart = () => { loginComposing = true; };
+loginDirectInput.oncompositionend = () => { loginComposing = false; sendLoginText(); };
+loginDirectInput.oninput = event => { if (!event.isComposing) sendLoginText(); };
+loginDirectInput.onbeforeinput = event => {
+    if (event.isComposing || loginComposing) return;
+    const key = {deleteContentBackward:'Backspace',deleteContentForward:'Delete',insertLineBreak:'Enter',insertParagraph:'Enter'}[event.inputType];
+    if (key) { event.preventDefault(); sendLoginInput({op:'key',key}); }
+};
+loginDirectInput.onkeydown = event => {
+    if (event.isComposing || loginComposing || event.keyCode === 229) return;
+    let key = event.key;
+    if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === 'a') key = 'Control+A';
+    else if (event.ctrlKey || event.metaKey || event.altKey) return;
+    else if (key === 'Tab' && event.shiftKey) key = 'Shift+Tab';
+    if (!['Tab','Shift+Tab','Control+A','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(key)) return;
+    event.preventDefault(); event.stopPropagation(); sendLoginInput({op:'key',key});
+    if (key === 'Escape') $('#login-keyboard').focus();
+};
+loginDirectInput.onfocus = () => { $('#login-input-status').textContent = '직접 입력 중 · Esc로 종료'; };
+loginDirectInput.onblur = () => { $('#login-input-status').textContent = '화면을 클릭한 뒤 바로 입력하세요. 휠·세로 밀기로 스크롤합니다.'; };
+$('#login-keyboard').onclick = () => loginDirectInput.focus({preventScroll:true});
+$('#login-screen').addEventListener('wheel', event => {
+    if (!loginSession || !event.deltaY) return;
+    event.preventDefault();
+    sendLoginInput({op:'scroll',delta:Math.max(-700,Math.min(700,Math.round(event.deltaY * (event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? 600 : 1)))) || Math.sign(event.deltaY)});
+}, {passive:false});
+let loginTouch = null, loginIgnoreClickUntil = 0;
+$('#login-screen').addEventListener('pointerdown', event => {
+    if (event.pointerType === 'touch') {
+        loginTouch = {x:event.clientX,y:event.clientY};
+        event.currentTarget.setPointerCapture(event.pointerId);
+    }
+});
+$('#login-screen').addEventListener('pointerup', event => {
+    if (!loginTouch || event.pointerType !== 'touch') return;
+    const dx = event.clientX-loginTouch.x, dy = loginTouch.y-event.clientY; loginTouch = null;
+    if (Math.hypot(dx,dy) < 20) return;
+    loginIgnoreClickUntil = Date.now()+500;
+    if (Math.abs(dy) > Math.abs(dx)) sendLoginInput({op:'scroll',delta:Math.max(-700,Math.min(700,Math.round(dy*3)))});
+});
+$('#login-screen').addEventListener('pointercancel', () => { loginTouch = null; });

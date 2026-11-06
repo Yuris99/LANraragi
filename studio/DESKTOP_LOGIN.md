@@ -6,6 +6,13 @@ through X11. No CDP, WebDriver, headless, stealth or challenge-solving connectio
 is attached. Playwright is used only for explicit generated-route fixtures and
 the test's separate Studio client browser.
 
+Click the preview to type or paste directly; a native private input captures
+committed IME text and mobile keyboard input. Explicit actions are serialized,
+adjacent queued text is combined, and preview polling never disables capture.
+Wheel and vertical touch gestures scroll remotely. Escape releases keyboard
+capture to the visible keyboard button; the collapsed text tool remains a fallback.
+No keyboard events are captured outside this focused input.
+
 The existing nonroot UID, read-only root, 1GiB memory, private tmpfs, dropped
 capabilities and no-host-port configuration remain. There is no VNC/debug port,
 Docker socket or original-library mount. X11 uses a private Xauthority cookie

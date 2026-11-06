@@ -70,6 +70,7 @@ def main():
                 assert 'generated-private-value' not in page.content()
                 assert verification_requests
                 def input_at(y,text):
+                    page.locator('#login-text-tools').evaluate('el => el.open = true')
                     page.wait_for_function('()=>!document.querySelector("#login-text").disabled')
                     scale=page.locator('#login-screen').bounding_box()['width']/1000
                     page.locator('#login-screen').click(position={'x':100*scale,'y':y*scale})

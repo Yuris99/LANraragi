@@ -23,7 +23,8 @@ from urllib.parse import urlsplit
 from site_sessions import CookieVault, SITES, allowed_domain, site, read_service_token
 
 
-KEYS = {'Tab','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'}
+KEYS = {'Tab','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End',
+        'Control+A','Shift+Tab'}
 LOGIN_ERRORS = {'browser_start_failed','login_site_timeout','login_site_unreachable','login_preview_failed'}
 LOGIN_IDLE_TIMEOUT = 30 * 60
 
@@ -56,6 +57,7 @@ class LoginBrowser:
     def status(self):
         self.expire()
         return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
+                'editing_shortcuts':True,
                 'idle_timeout_seconds':LOGIN_IDLE_TIMEOUT,
                 'idle_remaining_seconds':max(0,int(self.deadline-time.monotonic())) if self.session else None,
                 'active':{'provider':self.provider,'session':self.session} if self.session else None}
@@ -338,7 +340,8 @@ class DesktopBrowser(LoginBrowser):
             self.run(['xdotool','type','--clearmodifiers','--file','-'],input=text.encode())
         elif op=='key':
             if data['key'] not in KEYS:raise ValueError('지원하지 않는 키입니다.')
-            key={'Enter':'Return','Backspace':'BackSpace','ArrowLeft':'Left','ArrowRight':'Right','ArrowUp':'Up','ArrowDown':'Down'}.get(data['key'],data['key'])
+            key={'Enter':'Return','Backspace':'BackSpace','ArrowLeft':'Left','ArrowRight':'Right','ArrowUp':'Up','ArrowDown':'Down',
+                 'Control+A':'ctrl+a','Shift+Tab':'shift+Tab'}.get(data['key'],data['key'])
             self.run(['xdotool','key','--clearmodifiers',key])
         elif op=='scroll':
             if type(data['delta']) is not int or not -700<=data['delta']<=700:raise ValueError('스크롤 범위를 확인하세요.')

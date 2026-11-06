@@ -75,5 +75,13 @@ class DesktopLoginTests(unittest.TestCase):
                         {'op':'scroll','delta':10000},{'op':'text','text':'\0'}):
                 with self.assertRaises(ValueError):b.call({**bad,'session':b.session})
 
+    def test_direct_input_editing_shortcuts_are_fixed_allowlist(self):
+        b=self.browser;b.provider='ehentai';b.session='generated-window';b.deadline=time.monotonic()+30
+        with patch.object(b,'run',return_value=b'') as run:
+            for key,expected in [('Control+A','ctrl+a'),('Shift+Tab','shift+Tab')]:
+                b.call({'op':'key','session':b.session,'key':key})
+                self.assertEqual(run.call_args.args[0],['xdotool','key','--clearmodifiers',expected])
+            with self.assertRaises(ValueError):b.call({'op':'key','session':b.session,'key':'ctrl+alt+Delete'})
+
 
 if __name__=='__main__':unittest.main()
