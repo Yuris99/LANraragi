@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name, clean_title
 from metadata import canonical_tag, visible_tag
+from tag_display import tag_words, NAMESPACES
 
 
 def uid():
@@ -112,6 +113,7 @@ class Store(EditionCatalog,AutomaticSources):
         db = sqlite3.connect(self.path, timeout=20)
         db.create_function('studio_tag',1,canonical_tag,deterministic=True)
         db.create_function('visible_tag',1,visible_tag,deterministic=True)
+        db.create_function('tag_words',1,tag_words,deterministic=True)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:
@@ -302,17 +304,25 @@ class Store(EditionCatalog,AutomaticSources):
             rows=db.execute("SELECT u.tag,count(*) AS count FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL AND u.tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
         return [dict(row) for row in rows]
 
-    def library_tags(self,query=''):
+    def library_tags(self,query='',kind=''):
         if not isinstance(query,str) or len(query)>300:raise ValueError('태그 검색어가 너무 깁니다.')
-        query=canonical_tag(query)
+        kind={'tag':'other','series':'parody'}.get(kind,kind)
+        if kind and kind not in NAMESPACES:raise ValueError('태그 분류를 확인하세요.')
+        query=canonical_tag(query.strip()).casefold()
+        prefix,separator,value=query.partition(':')
+        if separator and prefix in NAMESPACES:
+            if kind and kind!=prefix:return []
+            kind,query=prefix,value
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
             rows=db.execute('''SELECT studio_tag(tag) AS tag,count(DISTINCT work_id) AS count FROM (
                 SELECT u.work_id,u.tag FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL UNION
                 SELECT w.id,t.value FROM works w,json_each(w.tags) t WHERE w.merged_into IS NULL UNION
                 SELECT s.work_id,t.value FROM sources s JOIN works w ON w.id=s.work_id,json_each(s.tags) t WHERE w.merged_into IS NULL)
-                WHERE visible_tag(tag) AND studio_tag(tag) LIKE ? ESCAPE ? GROUP BY studio_tag(tag)
-                ORDER BY count DESC,tag LIMIT 100''',(term,'\\')).fetchall()
+                WHERE visible_tag(tag) AND tag_words(studio_tag(tag)) LIKE ? ESCAPE ?
+                AND (?='' OR CASE WHEN instr(studio_tag(tag),':')>0
+                    THEN lower(substr(studio_tag(tag),1,instr(studio_tag(tag),':')-1)) ELSE 'user' END=?)
+                GROUP BY studio_tag(tag) ORDER BY count DESC,tag LIMIT 100''',(term,'\\',kind,kind)).fetchall()
         return [dict(row) for row in rows]
 
     def rename_user_tag(self,source,target):

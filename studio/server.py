@@ -25,10 +25,11 @@ from editions import VoiceAssets
 from site_sessions import LoginClient
 from source_record import archive_evidence,preferred_evidence
 from source_finder import candidates as find_candidates,preview_image
+from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=30
+STUDIO_UPDATE=31
 
 
 class LRR:
@@ -458,7 +459,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(raw);return
         match=re.fullmatch('/api/works/([0-9a-f]{32})/source-record',path)
         if match:return self.respond(store.get_source_record(match[1]))
-        if path=='/api/library/tags':return self.respond(store.library_tags(q('q')))
+        if path=='/api/tag-dictionary':return self.respond(tag_dictionary())
+        if path=='/api/library/tags':return self.respond(store.library_tags(q('q'),q('kind')))
         match=re.fullmatch(r'/api/short/([^/]+)',path)
         if match:return self.respond(store.resolve_short_id(match[1]))
         if path=='/api/works':

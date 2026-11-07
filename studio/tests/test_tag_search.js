@@ -13,13 +13,13 @@ function node(selector) {
 }
 let options = [], pendingTags, navigations = 0;
 const context = {
-    $: node, state: {}, esc: value => String(value),
+    $: node, state: {}, settings:{tagLanguage:'en'}, esc: value => String(value),
     api: async () => pendingTags ? await pendingTags : [
         { tag: 'female:sample', count: 3 }, { tag: 'male:sample', count: 2 }, { tag: 'saved', count: 1 }
     ],
     guard: handler => handler, navigateLibrary: async () => { navigations++; },
     load: async () => {}, setTimeout: () => 1, clearTimeout: () => {},
-    document: { activeElement: node('#search'), querySelectorAll: () => options }
+    document: { activeElement: node('#search'), querySelectorAll: () => options, addEventListener() {} }
 };
 vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf('const tagKinds ='), source.indexOf('async function refreshLibraryStatus()')), context);
@@ -27,6 +27,8 @@ vm.runInContext(source.slice(source.indexOf('let suggestionRequest ='), source.i
 const event = key => ({ key, preventDefault() {} });
 const option = { dataset: { suggestTag: 'male:sample' }, getAttribute: () => 'true' };
 (async () => {
+    assert.equal(context.tagScope('tag:sample').kind,'other');
+    assert.equal(context.tagScope('series:sample').kind,'parody');
     assert.deepEqual(Array.from(await context.matchingTags({ kind: 'male', term: 'sample' }), t => t.tag), ['male:sample']);
     node('#search').value = 'male:sample';
     await context.refreshSuggestions('male:sample');

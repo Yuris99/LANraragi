@@ -358,3 +358,43 @@ summary:hover{color:var(--text)}
   dialog{padding:22px 18px}
 }
 @media(prefers-reduced-motion:reduce){.sidebar{transition:none}}
+
+/* Bilingual tags: separate the classification, name, count and explanation. */
+label.tag-language-control:not(.search){display:flex;flex-direction:row;align-items:center;gap:10px;width:fit-content;margin:0 0 12px;color:var(--muted);font-size:13px}
+.tag-language-control select{min-height:36px;padding:5px 28px 5px 10px;color:var(--text)}
+.tag-strip{flex-wrap:wrap;overflow:visible;margin:0 0 18px;padding:0;gap:10px}
+.tag-strip-list{flex-wrap:wrap;width:100%;gap:8px}
+.tags{gap:8px}
+.tag-pair{display:inline-flex;align-items:stretch;max-width:100%;min-width:0;background:var(--raised);border:1px solid var(--control);border-radius:8px}
+.tag-pair>.tag,.tag-pair>.tag-chip{flex:1 1 auto;border-radius:7px 0 0 7px;background:transparent;white-space:normal;min-width:0;max-width:100%;padding:7px 10px;font-size:14px;line-height:1.5;text-align:start}
+.tag-pair>.selected{background:var(--text);color:var(--bg)}
+.tag-pair>.selected .tag-namespace,.tag-pair>.selected .count{color:#4a4642}
+.tag-label{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0;overflow-wrap:anywhere}
+.tag-namespace{color:var(--muted);font-size:13px;line-height:1.5}
+.tag-value{font-weight:550}
+.tag-pair .count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-inline-start:5px}
+.tag-info{display:grid;place-items:center;flex:none;width:34px;min-height:36px;border-inline-start:1px solid var(--control);border-radius:0 7px 7px 0;color:var(--muted)}
+.tag-info .icon{width:17px;height:17px}
+.tag-info:hover{background:var(--hover);color:var(--text)}
+.tag-explanation{position:fixed;inset:auto 16px 16px auto;margin:0;width:420px;max-width:calc(100vw - 32px);max-height:75dvh;overflow:auto;padding:20px;border:1px solid var(--control);border-radius:12px;background:var(--surface);color:var(--text);box-shadow:0 12px 36px #0008}
+.tag-explanation-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.tag-explanation-heading h3{margin:3px 0;font-size:18px;line-height:1.5;overflow-wrap:anywhere}
+.tag-explanation-heading button{flex:none}
+.tag-explanation p{margin:12px 0;line-height:1.65}
+.tag-original{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.tag-explanation small{display:block;margin-top:16px}
+.tag-explanation a{text-decoration:underline;text-underline-offset:3px}
+.source-shortcut{display:inline-flex;align-items:center;gap:6px;min-height:32px;max-width:100%;padding:2px 4px;border-radius:4px;overflow-wrap:anywhere}
+.source-shortcut:hover{background:var(--hover);text-decoration:underline;text-underline-offset:3px}
+.site-icon{width:24px;height:24px;flex:none}
+.source-pill{display:inline-flex;flex-wrap:wrap;gap:4px;max-width:100%}
+.card-sources{position:relative}
+.card-title{padding:0;text-align:start;font:inherit;color:inherit}
+@media(max-width:700px){
+  .tag-strip{flex-wrap:wrap;overflow:visible;margin:0 0 18px;padding:0}
+  .tag-strip-list{flex-wrap:wrap}
+  .tag-pair>.tag,.tag-pair>.tag-chip,.tag-info{min-height:44px}
+  .tag-info{width:40px}
+  .tag-language-control select{min-height:44px}
+  .source-shortcut{min-height:44px}
+}

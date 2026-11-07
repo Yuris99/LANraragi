@@ -4,7 +4,8 @@ let tagTargets = [];
 const state = { page: 1, view: "library", provider: "", query: "", tag: "", sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
-settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", ...settings };
+settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", tagLanguage: "ko", ...settings };
+if (!['ko','en'].includes(settings.tagLanguage)) settings.tagLanguage = 'ko';
 if (typeof settings.thumbnailBlur !== "boolean") settings.thumbnailBlur = settings.thumbnailMosaic !== false;
 delete settings.mosaic;
 delete settings.thumbnailMosaic;
@@ -12,6 +13,22 @@ delete settings.thumbnailMosaic;
 if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailBlur = false;
 const providerName = { ehentai: "E-Hentai", exhentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
 const sourceFamily = provider => provider === 'exhentai' ? 'ehentai' : provider;
+const siteNames = {ehentai:'이헨',exhentai:'익헨',hitomi:'히토미',nhentai:'nHentai'};
+function sourceURL(source) {
+    try {
+        const url = new URL(source.url);
+        const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la',nhentai:'nhentai.net'}[source.provider];
+        if (host && url.protocol === 'https:' && url.hostname === host && !url.username && !url.password && !url.port) return url.href;
+    } catch {}
+    return '';
+}
+function siteIcon(provider) {
+    return ['ehentai','exhentai','hitomi'].includes(provider) ? `<svg class="site-icon" aria-hidden="true"><use href="#i-${provider}"/></svg>` : '';
+}
+function sourceShortcut(source) {
+    const url = sourceURL(source), label = `${siteNames[source.provider] || source.provider} #${source.external_id}`;
+    return url ? `<a class="source-shortcut" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(label)} 원본 열기">${siteIcon(source.provider)}<span>${esc(label)}</span></a>` : `<span>${esc(label)}</span>`;
+}
 function sourceGroups(values) {
     const groups = new Map();
     for (const value of values) {
@@ -38,7 +55,7 @@ function renderSourceFinder(work) {
             const m=item.metadata,c=item.comparison;
             const mismatch=Boolean(finder.baseline?.languages?.length && m.languages?.length && !c.language_match);
             const cover=/^https:\/\/ehgt\.org\/[A-Za-z0-9_./-]+\.(?:jpe?g|png|webp)$/i.test(m.cover_url || '') && !m.cover_url.includes('..') ? `<img class="source-find-image" src="/api/source-preview?url=${encodeURIComponent(m.cover_url)}" loading="lazy" alt="${esc(m.title)} 후보 표지">` : '';
-            return `<div class="source-row">${cover}<div class="source-header"><strong>${esc(item.display_title || m.title)}</strong><a class="quiet" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">원본 열기</a></div><p>${esc(providerName[m.provider])} · ${esc(m.artists.join(', ') || '작가 미확인')} · ${esc(m.languages.join(', ') || '언어 미확인')}</p><p>페이지 ${m.pages ?? '미확인'} / 보관본 ${finder.baseline?.pages ?? '미확인'} · 제목 유사도 ${Math.round(c.title_similarity*100)}% · ${c.page_match?'페이지 수 일치':'페이지 수 비교 필요'}</p><div class="tags">${m.tags.slice(0,12).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><button class="quiet" type="button" data-source-finder-select="${index}" ${mismatch?'disabled':''}>${mismatch?'언어가 달라 판본 확인 필요':'이 작품에 출처 연결'}</button></div>`;
+            return `<div class="source-row">${cover}<div class="source-header"><strong>${esc(item.display_title || m.title)}</strong><a class="quiet" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">원본 열기</a></div><p>${esc(providerName[m.provider])} · ${esc(m.artists.join(', ') || '작가 미확인')} · ${esc(m.languages.join(', ') || '언어 미확인')}</p><p>페이지 ${m.pages ?? '미확인'} / 보관본 ${finder.baseline?.pages ?? '미확인'} · 제목 유사도 ${Math.round(c.title_similarity*100)}% · ${c.page_match?'페이지 수 일치':'페이지 수 비교 필요'}</p><div class="tags">${m.tags.slice(0,12).map(t=>`${tagPair(t,`<span class="tag">${tagLabel(t)}</span>`)}`).join('')}</div><button class="quiet" type="button" data-source-finder-select="${index}" ${mismatch?'disabled':''}>${mismatch?'언어가 달라 판본 확인 필요':'이 작품에 출처 연결'}</button></div>`;
         }).join('');
     };
     draw();
@@ -103,7 +120,7 @@ async function refreshAutomaticSources() {
         state.detail = {...work,autoLinkUpdated:value.updated}; cacheWork(work);
         // Refresh source data only; never replace an open editor or media player.
         if ($('#connected-source-list')) $('#connected-source-list').innerHTML = sourceRows(work.sources);
-        if ($('#combined-source-tags')) $('#combined-source-tags').innerHTML = work.all_tags.map(tag => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('');
+        if ($('#combined-source-tags')) $('#combined-source-tags').innerHTML = work.all_tags.map(tag => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join('');
     }
 }
 const statusName = { queued: "대기 중", running: "진행 중", complete: "완료", failed: "실패", blocked: "확인 필요" };
@@ -296,7 +313,7 @@ function updateView() {
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("selected", button.dataset.filter === state.provider));
     $("#search").value = state.query; $("#sort").value = state.sort;
     const activeTag = state.allTag || state.tag;
-    $("#active-tag").hidden = !activeTag; $("#active-tag-name").textContent = activeTag ? `태그: ${activeTag}` : "";
+    $("#active-tag").hidden = !activeTag; $("#active-tag-name").textContent = activeTag ? `태그: ${tagText(activeTag)}` : "";
     $("#direction").textContent = state.direction === "desc" ? "↓" : "↑";
 }
 async function navigateRoute(route, { replace = false, refresh = false } = {}) {
@@ -384,6 +401,7 @@ function closeReader() { return state.reader && navigateRoute({ kind: "detail", 
 
 function saveSettings() { localStorage.setItem("studio-view", JSON.stringify(settings)); applySettings(); }
 function applySettings() {
+    document.querySelectorAll('[data-tag-language]').forEach(el=>{el.value=settings.tagLanguage;});
     document.documentElement.classList.toggle("media-masked", settings.thumbnailBlur);
     $("#privacy-state").textContent = settings.thumbnailBlur ? "목록 썸네일 블러 켜짐 · 작품을 열면 원본 표시" : "목록 썸네일 원본 표시";
     $("#privacy-route").textContent = settings.thumbnailBlur ? "블러 끄기" : "블러 켜기";
@@ -393,7 +411,7 @@ function applySettings() {
     $("#grid").classList.toggle("list", settings.layout === "list");
     $("#card-size").value = settings.size; $("#page-size").value = String(settings.limit); $("#read-direction").value = settings.direction;
 }
-function sources(work) { return sourceGroups(work.sources).map(([family,members]) => `<span class="source-pill ${family}">${providerName[family]} · ${esc([...new Set(members.map(s => s.external_id))].join(', '))}</span>`).join(''); }
+function sources(work) { return sourceGroups(work.sources).map(([family,members]) => `<span class="source-pill ${family}">${members.map(sourceShortcut).join('')}</span>`).join(''); }
 function workCoverURL(work) { return work.cover_asset_id ? `/api/voice/assets/${work.cover_asset_id}` : work.lrr_id ? `/api/media/${work.lrr_id}/thumbnail` : null; }
 function cover(work) {
     const thumbnail = workCoverURL(work); const editionKind = (work.edition_summary || work.edition)?.kind || "comic";
@@ -410,7 +428,7 @@ async function load({ fromRoute = false } = {}) {
     result.items.forEach(cacheWork);
     $("#total").textContent = `${result.total.toLocaleString()} 작품`;
     selectedWorks.clear();
-    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" tabindex="0" role="button" aria-label="${esc(work.display_title || work.title)} 상세 보기"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3>${esc(work.display_title || work.title)}</h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
+    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" aria-labelledby="work-title-${work.id}"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3><button class="card-title" id="work-title-${work.id}" data-id="${work.id}" type="button">${esc(work.display_title || work.title)}</button></h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
     updateSelection();
     $("#empty").hidden = result.items.length > 0;
     const filtered = Boolean(state.query || state.tag || state.allTag || state.provider || state.view === "favorite");
@@ -425,21 +443,77 @@ async function load({ fromRoute = false } = {}) {
 }
 // Hitomi-style tag matching: "gender" matches every kind, "male:gender" only male: tags.
 const tagKinds = ["artist", "group", "parody", "character", "female", "male", "mixed", "other", "language", "tag", "cosplayer", "reclass"];
+let tagDictionary = {labels:{},descriptions:{},namespaces:{}};
+const generalTagKinds = new Set(['','female','male','mixed','other','tag']);
+function tagData(tag) {
+    const i = tag.indexOf(':'), namespace = i > 0 ? tag.slice(0,i).toLowerCase() : '', value = i > 0 ? tag.slice(i+1) : tag;
+    const key = tag.toLowerCase(), general = generalTagKinds.has(namespace);
+    const text = (map,key) => Object.hasOwn(map,key) && typeof map[key] === 'string' ? map[key] : '';
+    const aliases = (text(tagDictionary.labels,key) || (general ? text(tagDictionary.labels,value.toLowerCase()) : '')).split('|').filter(Boolean);
+    const ko = aliases[0] || value, ns = Object.hasOwn(tagDictionary.namespaces,namespace) ? tagDictionary.namespaces[namespace] : null;
+    const description = text(tagDictionary.descriptions,key) || (general ? text(tagDictionary.descriptions,value.toLowerCase()) : '') ||
+        (namespace === 'language' && aliases.length ? `작품의 언어가 ${ko}로 분류되어 있습니다.` : '이 태그의 개별 설명은 아직 등록되지 않았습니다.');
+    return {namespace,value,ko,aliases,description,scope:ns?.[1] || '분류가 없는 태그입니다.',
+        label:settings.tagLanguage === 'ko' ? ko : value,
+        kind:settings.tagLanguage === 'ko' ? ns?.[0] || namespace : namespace};
+}
+function tagText(tag) { const data=tagData(tag); return (data.kind ? data.kind+': ' : '')+data.label; }
+function tagLabelContent(tag) {
+    const data=tagData(tag);
+    return `${data.kind ? `<span class="tag-namespace">${esc(data.kind)}</span>` : ''}<span class="tag-value">${esc(data.label)}</span>`;
+}
+const tagLabel = tag => `<span class="tag-label" data-tag-label="${esc(tag)}">${tagLabelContent(tag)}</span>`;
+const tagInfo = tag => `<button class="tag-info" type="button" data-tag-info="${esc(tag)}" aria-label="태그 설명: ${esc(tagText(tag))}" aria-controls="tag-explanation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button>`;
+const tagPair = (tag,body) => `<span class="tag-pair">${body}${tagInfo(tag)}</span>`;
+function drawTagExplanation(tag) {
+    const data=tagData(tag);
+    $('#tag-explanation-title').textContent=tagText(tag);
+    $('#tag-explanation-original').textContent=tag;
+    $('#tag-explanation-translation').textContent=data.aliases.length ? '한국어: '+data.aliases.join(' · ') : '한국어 번역 미등록 · 원문으로 표시합니다.';
+    $('#tag-explanation-description').textContent=data.description;
+    $('#tag-explanation-scope').textContent=data.scope;
+}
+document.addEventListener('click',event=>{
+    const button=event.target.closest('[data-tag-info]');if (!button) return;
+    const panel=$('#tag-explanation');
+    if (panel.matches(':popover-open')) panel.hidePopover();
+    (button.closest('dialog') || document.body).append(panel);
+    panel.dataset.tag=button.dataset.tagInfo;drawTagExplanation(panel.dataset.tag);
+    panel.tagInvoker=button;button.setAttribute('aria-expanded','true');panel.showPopover();
+    $('#tag-explanation-title').focus({preventScroll:true});
+});
+$('#tag-explanation').addEventListener('toggle',event=>{
+    if (event.newState==='closed') {
+        const button=event.target.tagInvoker;button?.setAttribute('aria-expanded','false');
+        if (event.target.contains(document.activeElement) && button?.isConnected) button.focus({preventScroll:true});
+    }
+});
+$('#close-tag-explanation').onclick=()=>$('#tag-explanation').hidePopover();
+document.addEventListener('change',event=>{
+    if (!event.target.matches('[data-tag-language]')) return;
+    settings.tagLanguage=event.target.value;saveSettings();
+    document.querySelectorAll('[data-tag-label]').forEach(el=>{el.innerHTML=tagLabelContent(el.dataset.tagLabel);});
+    document.querySelectorAll('[data-tag-info]').forEach(el=>el.setAttribute('aria-label','태그 설명: '+tagText(el.dataset.tagInfo)));
+    const active=state.allTag || state.tag;$('#active-tag-name').textContent=active ? '태그: '+tagText(active) : '';
+    if ($('#tag-explanation').dataset.tag) drawTagExplanation($('#tag-explanation').dataset.tag);
+});
 function tagScope(text, kind = "") {
-    const typed = /^([a-z]+):(.*)$/i.exec(text.trim());
-    if (typed && tagKinds.includes(typed[1].toLowerCase())) return { kind: typed[1].toLowerCase(), term: typed[2].trim() };
+    const typed = /^([^:]+):(.*)$/.exec(text.trim());
+    const aliases = {tag:'other',series:'parody'};
+    const prefix = typed && (Object.hasOwn(aliases,typed[1].toLowerCase()) ? aliases[typed[1].toLowerCase()] : tagKinds.includes(typed[1].toLowerCase()) ? typed[1].toLowerCase() : Object.keys(tagDictionary.namespaces).find(key=>tagDictionary.namespaces[key][0]===typed[1]));
+    if (prefix) return { kind: aliases[prefix] || prefix, term: typed[2].trim() };
+    if (kind==='tag') kind='other';
     return { kind, term: text.trim() };
 }
 async function matchingTags({ kind, term }) {
-    // shortcut: the endpoint returns the top 100 by count before the kind filter; rare tags of a kind may need a longer term.
-    const tags = await api(`/api/library/tags?q=${encodeURIComponent(term || (kind && kind !== "user" ? kind + ":" : ""))}`);
+    const tags = await api(`/api/library/tags?q=${encodeURIComponent(term)}&kind=${encodeURIComponent(kind || '')}`);
     const lower = term.toLowerCase();
     return tags.filter(({ tag }) => {
         const i = tag.indexOf(":"), ns = i > 0 ? tag.slice(0, i).toLowerCase() : "user";
-        return kind ? ns === kind && (i > 0 ? tag.slice(i + 1) : tag).toLowerCase().includes(lower) : tag.toLowerCase().includes(lower);
+        const translated=tagData(tag).aliases.join(' ').toLowerCase();
+        return (!kind || ns === kind) && (tag.toLowerCase().includes(lower) || translated.includes(lower));
     });
 }
-const tagLabel = (tag) => { const i = tag.indexOf(":"); return i > 0 ? `<span class="ns">${esc(tag.slice(0, i + 1))}</span>${esc(tag.slice(i + 1))}` : esc(tag); };
 // Quick tag filter on the library screen: user tags first, then source tags by count.
 let tagStripRequest = 0;
 async function refreshTagStrip() {
@@ -450,7 +524,7 @@ async function refreshTagStrip() {
     const active = state.allTag || state.tag;
     let shown = [...matches.filter((t) => !t.tag.includes(":")), ...matches.filter((t) => t.tag.includes(":"))].slice(0, filtering ? 30 : 14);
     if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
-    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => `<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => tagPair(t.tag,`<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`)).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
     $("#tag-strip").hidden = !shown.length && !filtering;
 }
 $("#tag-strip-kind").onchange = guard(refreshTagStrip);
@@ -483,17 +557,16 @@ function sourceRows(values) {
         const tags = [...new Set(members.flatMap(s => s.tags || []))].filter(visibleTag);
         const comments = [...new Map(members.flatMap(s => s.comments || []).map(c => [JSON.stringify([c.id,c.author,c.posted_at,c.text]),c])).values()];
         const links = members.map(s => {
-            const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la',nhentai:'nhentai.net'}[s.provider];
-            return `<div class="source-header"><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${host} #${esc(s.external_id)} ↗</a><span class="source-actions"><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></span></div><small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ''}${s.status === 'fetched' ? `수집 ${new Date(s.fetched * 1000).toLocaleString('ko-KR')}` : '수동 등록 · 원격 정보 미확인'}</small>`;
+            return `<div class="source-header">${sourceShortcut(s)}<span class="source-actions"><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></span></div><small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ''}${s.status === 'fetched' ? `수집 ${new Date(s.fetched * 1000).toLocaleString('ko-KR')}` : '수동 등록 · 원격 정보 미확인'}</small>`;
         }).join('');
-        return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `<span class="tag">${esc(tag)}</span>`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
+        return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `${tagPair(tag,`<span class="tag">${tagLabel(tag)}</span>`)}`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
     }).join('') || '<p class="muted">작품 원본 주소를 연결하세요. 이헨·익헨은 하나의 출처 계열로 표시합니다.</p>';
 }
 function renderDetail(work) {
     pauseVoicePlayers();
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
-    <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
-    <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
+    <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
+    <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
     <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(익헨 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
     renderSourceFinder(work);
@@ -587,7 +660,7 @@ document.addEventListener("click", guard(async (event) => {
         await navigateLibrary();
     }
 }));
-$("#grid").addEventListener("keydown", guard(async (e) => { if (e.key === "Enter" && e.target.dataset.id) await showDetail(e.target.dataset.id); }));
+
 document.addEventListener("submit", guard(async (event) => {
     event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
     if (form.id === "short-form") {
@@ -667,9 +740,9 @@ $("#detail").addEventListener("cancel", (event) => { event.preventDefault(); clo
 $("#reader").addEventListener("cancel", (event) => { event.preventDefault(); closeReader(); });
 async function refreshTagFilter() {
     const query = $("#filter-tag-search").value;
-    const tags = await api(`/api/library/tags?q=${encodeURIComponent(query)}`);
+    const tags = await matchingTags(tagScope(query));
     if (query !== $("#filter-tag-search").value) return;
-    $("#filter-tag-list").innerHTML = tags.map((item) => `<button class="tag" type="button" data-filter-tag="${esc(item.tag)}">${esc(item.tag)} · ${item.count}</button>`).join("") || '<p class="muted">일치하는 태그가 없습니다.</p>';
+    $("#filter-tag-list").innerHTML = tags.map((item) => tagPair(item.tag,`<button class="tag" type="button" data-filter-tag="${esc(item.tag)}">${tagLabel(item.tag)} <span class="count">${item.count}</span></button>`)).join("") || '<p class="muted">일치하는 태그가 없습니다.</p>';
 }
 $("#filter-tags-nav").onclick = guard(async () => { $("#tag-filter").showModal(); await refreshTagFilter(); });
 $("#filter-tag-search").oninput = () => { clearTimeout(state.filterTagTimer); state.filterTagTimer = setTimeout(guard(refreshTagFilter), 200); };
@@ -815,6 +888,8 @@ $("#nav-toggle").onclick = () => setNav(!document.body.classList.contains("nav-o
 $("#nav-scrim").onclick = () => setNav(false);
 $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("button,a")) setNav(false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("nav-open")) { setNav(false); $("#nav-toggle").focus(); } });
+try { tagDictionary=await api('/api/tag-dictionary',undefined,{signal:AbortSignal.timeout(10000)}); }
+catch { toast('태그 번역을 불러오지 못했습니다. 원문으로 표시합니다. 새로고침해서 다시 시도하세요.'); }
 applySettings();
 applyRoute(); guard(showJobs)();
 guard(async () => { const health = await api("/api/health"); $("#studio-version").textContent = Number.isInteger(health.studio_update) ? `Studio 업데이트 ${health.studio_update}` : "Studio 버전 표시 업데이트 대기"; $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
