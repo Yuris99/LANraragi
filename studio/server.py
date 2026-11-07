@@ -14,11 +14,12 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from contextlib import contextmanager
 
 from connectors import fetch_comments, source_candidates
 from sources import parse_source,supported_source,SUPPORTED_PROVIDERS
 from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates,result as embedded_metadata
-from auto_sources import AutoLinker
+from auto_sources import AutoLinker,ManualSearchPending
 from store import Store
 from uploads import Uploads,UploadError
 from editions import VoiceAssets
@@ -29,7 +30,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=37
+STUDIO_UPDATE=38
 
 
 def supports_download(plugins,url):
@@ -105,10 +106,36 @@ class Studio:
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
         self.source_search_at=0
         self.sync_lock=threading.Lock();self.upload_cursor='';self.match_lock=threading.Lock()
+        self.source_waiter_lock=threading.Lock();self.source_waiter_count=0;self.manual_source_pending=threading.Event()
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
         self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
         self.login=LoginClient(config_root=Path(store.path).parent)
+
+    @contextmanager
+    def manual_source_access(self):
+        with self.source_waiter_lock:
+            self.source_waiter_count+=1;self.manual_source_pending.set()
+        acquired=False
+        try:
+            acquired=self.match_lock.acquire(timeout=45)
+            if not acquired:raise ValueError('진행 중인 사이트 응답이 지연되고 있습니다. 잠시 후 다시 검색해 주세요.')
+            yield
+        finally:
+            if acquired:self.match_lock.release()
+            with self.source_waiter_lock:
+                self.source_waiter_count-=1
+                if not self.source_waiter_count:self.manual_source_pending.clear()
+
+    def acquire_automatic_source_slot(self):
+        with self.source_waiter_lock:
+            return not self.manual_source_pending.is_set() and self.match_lock.acquire(blocking=False)
+
+    def automatic_source_pause(self,seconds):
+        if self.manual_source_pending.is_set():raise ManualSearchPending()
+        stopped=self.stop.wait(seconds)
+        if self.manual_source_pending.is_set():raise ManualSearchPending()
+        return stopped
 
     def extract_source_record(self,work_id):
         work=self.store.get_work(work_id)
@@ -139,8 +166,7 @@ class Studio:
         if not isinstance(data,dict) or set(data)-{'method','cursor','page','from_url'} or 'method' not in data:raise ValueError('후보 검색 방법을 지정하세요.')
         method=data['method']
         if method not in ('embedded','image','title','hitomi'):raise ValueError('지원하는 검색 방법을 선택하세요.')
-        if not self.match_lock.acquire(blocking=False):raise ValueError('다른 출처 검색이 진행 중입니다.')
-        try:
+        with self.manual_source_access():
             if time.monotonic()-self.source_search_at<3:raise ValueError('검색은 3초 간격으로 실행하세요.')
             self.source_search_at=time.monotonic()
             work=self.store.get_work(work_id);record=self.store.get_source_record(work_id)
@@ -152,7 +178,6 @@ class Studio:
                 if any(s['provider']=='exhentai' and s.get('target_session_available') for s in status.get('sites',[])):default_provider='exhentai'
             fetch,index,blocked=self.source_transport()
             return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1),default_provider,data.get('from_url'))
-        finally:self.match_lock.release()
 
     def source_transport(self):
         from connectors import public_document
@@ -194,7 +219,7 @@ class Studio:
         return fetch,index,{} if ex.get('state')=='saved_unverified' and ex.get('target_session_available',True) else {'exhentai':'session_required'}
 
     def automatic_source_loop(self):
-        linker=AutoLinker(self.store,self.source_transport,pause=self.stop.wait);checked=0
+        linker=AutoLinker(self.store,self.source_transport,pause=self.automatic_source_pause);checked=0
         while not self.stop.wait(2):
             if not self.store.automatic_enabled():continue
             if time.monotonic()-checked>60:
@@ -205,7 +230,7 @@ class Studio:
                     self.store.automatic_session_changed(fingerprint)
                 except (ValueError,OSError):pass
                 checked=time.monotonic()
-            if not self.match_lock.acquire(blocking=False):continue
+            if not self.acquire_automatic_source_slot():continue
             try:linker.run_one()
             except Exception:
                 # Durable leases permit recovery; never log source data or secrets.
@@ -267,11 +292,9 @@ class Studio:
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
         if source['provider'] in ('hitomi','ehentai','exhentai'):
-            if not self.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
-            try:
+            with self.manual_source_access():
                 self.store.begin_matching(work_id)
                 return self.store.import_metadata(work_id,direct_metadata(source['url'],self.source_transport()[0]),remote=True,schedule=schedule)
-            finally:self.match_lock.release()
         raise ValueError('현재 지원하지 않는 출처입니다.')
 
     def fetch_comments(self, work_id, source_id):
@@ -669,8 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             work=store.get_work(match[1])
             source=next((s for s in work['sources'] if s['id']==data['source_id']),None)
             if not source or source['provider'] not in ('hitomi','ehentai','exhentai'):raise ValueError('E-Hentai 계열 또는 Hitomi 기준 출처를 선택하세요.')
-            if not self.app.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
-            try:
+            with self.app.manual_source_access():
                 store.begin_matching(work['id'])
                 metadata=source['metadata']
                 fetch,index,access=self.app.source_transport()
@@ -688,7 +710,6 @@ class Handler(BaseHTTPRequestHandler):
                     except ValueError:
                         result['message']='다른 작품에 이미 연결됐거나 판본 확인이 필요합니다. 자동 연결하지 않았습니다.'
                 return self.respond(result)
-            finally:self.app.match_lock.release()
         match=re.fullmatch('/api/works/([0-9a-f]{32})/metadata',path)
         if match:
             if set(data)!={'url','html'}:raise ValueError('출처 URL과 HTML만 지정하세요.')
@@ -758,11 +779,9 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             if set(data)!={'number'}:raise ValueError('확인할 번호만 지정하세요.')
             if not isinstance(data['number'],str) or not re.fullmatch(r'[0-9]{1,12}',data['number']):raise ValueError('번호 형식을 확인하세요.')
-            if not self.app.match_lock.acquire(blocking=False):raise ValueError('다른 작품의 사이트 확인이 진행 중입니다.')
-            try:
+            with self.app.manual_source_access():
                 store.begin_matching(match[1])
                 return self.respond({'items':source_candidates(data['number'])})
-            finally:self.app.match_lock.release()
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
         if match:
             supported_source(data.get('url'))

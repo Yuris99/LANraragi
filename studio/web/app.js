@@ -48,10 +48,10 @@ function renderSourceFinder(work) {
     const finder=sourceFinders.get(work.id) || {items:[],method:'embedded',page:1}; sourceFinders.set(work.id,finder);
     root.innerHTML=`<h3>원본 출처 · 정보 찾기</h3><p class="muted">압축 안의 원본 기록을 유리 스튜디오 양식으로 가져옵니다. 기록이 없는 작품은 이미지·제목으로 후보를 찾아 비교하세요.</p>
         <div class="source-finder-controls"><button class="quiet" id="restore-original-source" type="button">원본 출처 복원 · 정보 갱신</button><button class="quiet" id="export-source-record" type="button">출처 기록 JSON 저장</button></div>
-        <div class="source-finder-controls"><label>찾는 방법<select id="source-find-method"><option value="embedded">원본 기록으로 찾기</option><option value="image">페이지 이미지로 이헨·익헨 검색</option><option value="title">제목으로 이헨·익헨 검색</option><option value="hitomi">작가·제목으로 히토미 검색</option></select></label><label>이미지 검색 페이지<input id="source-find-page" type="number" min="1" max="${work.pages || 20000}" value="${finder.page}"></label><button class="primary" id="source-find-start" type="button">후보 찾기</button><button class="quiet" id="source-find-more" type="button" ${finder.cursor?'':'hidden'}>후보 더 보기</button></div>
+        <fieldset class="source-methods" id="source-find-method"><legend>찾는 방법</legend><div class="source-method-options">${[['embedded','원본 기록'],['image','익헨 이미지'],['title','익헨 제목'],['hitomi','히토미']].map(([value,label])=>`<label><input type="radio" name="source-find-method" value="${value}" ${finder.method===value?'checked':''}><span>${label}</span></label>`).join('')}</div></fieldset>
+        <div class="source-finder-controls"><label id="source-find-page-control" ${finder.method==='image'?'':'hidden'}>이미지 검색 페이지<input id="source-find-page" type="number" min="1" max="${work.pages || 20000}" value="${finder.page}"></label><button class="primary" id="source-find-start" type="button">후보 찾기</button><button class="quiet" id="source-find-more" type="button" ${finder.cursor?'':'hidden'}>후보 더 보기</button></div>
         <p id="source-find-note" class="muted" role="status">${esc(finder.message || '이미지 검색은 선택한 페이지의 파일 지문을 검색 사이트에 보냅니다. 같은 작품인지 확인한 뒤 연결하세요.')}</p>
         <div id="source-find-results"></div>`;
-    $('#source-find-method').value=finder.method;
     const draw=() => {
         $('#source-find-results').innerHTML=(finder.image?`<img class="source-find-image" src="${esc(finder.image)}" alt="검색에 사용한 만화 페이지">`:'')+finder.items.map((item,index)=>{
             const m=item.metadata,c=item.comparison;
@@ -61,13 +61,21 @@ function renderSourceFinder(work) {
         }).join('');
     };
     draw();
+    root.querySelectorAll('[name=source-find-method]').forEach(input=>input.onchange=()=>{
+        if (!input.checked) return;
+        finder.method=input.value;finder.cursor=null;finder.items=[];finder.image=null;finder.seedUrl='';
+        $('#source-find-more').hidden=true;$('#source-find-page-control').hidden=input.value!=='image';
+        finder.message={embedded:'압축 안에 저장된 원본 기록으로 출처를 찾습니다.',image:'선택한 페이지의 파일 지문으로 익헨·이헨에서 비슷한 작품을 찾습니다.',title:'작품 제목으로 익헨·이헨 후보를 찾습니다.',hitomi:'작가·제목으로 히토미 후보를 찾습니다. 작가가 없으면 제목을 사용합니다.'}[input.value];
+        $('#source-find-note').textContent=finder.message;draw();
+    });
     async function search(more=false,seed='') {
         if (finder.busy) return;
-        if (seed) $('#source-find-method').value='hitomi';
-        const method=$('#source-find-method').value,page=Number($('#source-find-page').value);
-        if (more && (method!==finder.method || page!==finder.page)) throw new Error('검색 조건이 바뀌었습니다. 후보 찾기를 다시 누르세요.');
+        if (seed) {finder.method='hitomi';finder.cursor=null;root.querySelector('[name=source-find-method][value=hitomi]').checked=true;$('#source-find-page-control').hidden=true;$('#source-find-more').hidden=true;}
+        const method=root.querySelector('[name=source-find-method]:checked').value,page=Number($('#source-find-page').value);
+        if (more && (!finder.cursor || method!==finder.method || page!==finder.page)) throw new Error('검색 조건이 바뀌었습니다. 후보 찾기를 다시 누르세요.');
         finder.busy=true;$('#source-find-start').disabled=true;$('#source-find-more').disabled=true;
-        $('#source-find-note').textContent='원본 정보와 후보를 확인하고 있습니다.';
+        root.querySelectorAll('[name=source-find-method],#source-find-page').forEach(input=>input.disabled=true);
+        $('#source-find-note').textContent='원본 정보와 후보를 확인하고 있습니다. 자동 검색 중이면 현재 응답이 끝난 뒤 먼저 처리합니다.';
         try {
             const fromUrl=seed || (more?finder.seedUrl:'');
             const result=await api(`/api/works/${work.id}/source-candidates`,{method,page,...(more?{cursor:finder.cursor}:{}),...(fromUrl?{from_url:fromUrl}:{})});
@@ -79,7 +87,7 @@ function renderSourceFinder(work) {
         } catch (error) {
             finder.message=error.message;if (state.detail?.id===work.id) $('#source-find-note').textContent=finder.message;
             throw error;
-        } finally { finder.busy=false;if (state.detail?.id===work.id) {$('#source-find-start').disabled=false;$('#source-find-more').disabled=false;} }
+        } finally { finder.busy=false;if (state.detail?.id===work.id) {$('#source-find-start').disabled=false;$('#source-find-more').disabled=false;root.querySelectorAll('[name=source-find-method],#source-find-page').forEach(input=>input.disabled=false);} }
     }
     $('#source-find-start').onclick=guard(()=>search());$('#source-find-more').onclick=guard(()=>search(true));
     root.onclick=guard(event=>{

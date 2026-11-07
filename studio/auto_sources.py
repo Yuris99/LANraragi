@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS source_link_circuits(provider TEXT PRIMARY KEY,until 
 
 
 class LeaseLost(ValueError):pass
+class ManualSearchPending(RuntimeError):pass
 
 
 class AutomaticSources:
@@ -251,6 +252,10 @@ class AutoLinker:
                 if result['status'] in ('access_required','unavailable','partial'):
                     self.store.automatic_circuit(target,result['status']);state='waiting'
                 elif result['status']!='connected' and state!='waiting':state='review'
+        except ManualSearchPending:
+            # Yield at a request boundary without losing the saved cursor or counting a failure.
+            self.store.finish_automatic({**job,'attempts':max(0,job['attempts']-1)},previous,'queued')
+            return True
         except LeaseLost:
             state='queued';scanning=False
         except urllib.error.HTTPError as error:
