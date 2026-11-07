@@ -337,6 +337,26 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             row=db.execute("SELECT value FROM settings WHERE key='tag-presets'").fetchone()
         return json.loads(row[0]) if row else []
 
+    def bookmarks(self):
+        with self.db() as db:row=db.execute("SELECT value FROM settings WHERE key='bookmarks'").fetchone()
+        return json.loads(row[0]) if row else []
+
+    def set_bookmark(self,kind,value,saved):
+        if kind not in ('tag','artist') or not isinstance(value,str) or not 1<=len(value.strip())<=300 or any(ord(c)<32 for c in value) or type(saved) is not bool:
+            raise ValueError('북마크 종류와 이름을 확인하세요.')
+        value=value.strip()
+        if kind=='tag' and not visible_tag(value):raise ValueError('내부 관리 태그는 북마크할 수 없습니다.')
+        def same(item):return item['kind']==kind and item['value']==value
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute("SELECT value FROM settings WHERE key='bookmarks'").fetchone();items=json.loads(row[0]) if row else []
+            if saved and not any(same(item) for item in items):
+                if len(items)>=500:raise ValueError('북마크는 최대500개까지 저장할 수 있습니다.')
+                items.append({'kind':kind,'value':value})
+            elif not saved:items=[item for item in items if not same(item)]
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('bookmarks',?)",(json.dumps(items,ensure_ascii=False),))
+        return items
+
     def save_tag_preset(self,name,tags,preset_id=None):
         if not isinstance(name,str) or not 1<=len(name.strip())<=60 or any(ord(c)<32 for c in name):raise ValueError('프리셋 이름은 1~60자로 입력하세요.')
         tags=self.combination_tags(tags)
@@ -728,6 +748,13 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
             raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
         value=reference.strip();origin='url'
+        code=re.fullmatch(r'([EXex]?)([1-9][0-9]{0,19})[/:]([0-9a-fA-F]{10})/?',value)
+        if code and provider in ('ehentai','exhentai','ehentai-family'):
+            variant={'e':'ehentai','x':'exhentai'}.get(code[1].lower(),'exhentai' if provider=='ehentai-family' else provider)
+            if provider!='ehentai-family' and variant!=provider:raise ValueError('번호 접두사와 선택한 출처가 다릅니다.')
+            host='e-hentai.org' if variant=='ehentai' else 'exhentai.org'
+            resolved=self.resolve_reference(provider,f'https://{host}/g/{code[2]}/{code[3].lower()}/')
+            return {**resolved,'origin':'code'}
         prefix=re.fullmatch(r'([EXex])([0-9]{1,20})',value)
         if provider=='ehentai-family':
             if prefix:return self.resolve_reference({'e':'ehentai','x':'exhentai'}[prefix[1].lower()],value)
@@ -757,7 +784,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
                 saved=db.execute('SELECT url FROM sources WHERE provider=? AND external_id=?',(provider,number)).fetchone()
             if saved:value=saved[0];origin='saved'
             elif provider in ('ehentai','exhentai'):
-                raise ValueError('E-Hentai의 처음 등록하는 번호에는 전체 작품 URL이 필요합니다. 번호 외 URL 식별값을 추측하지 않습니다.')
+                raise ValueError('처음 등록하는 ExHentai 번호에는 번호/토큰 코드 또는 전체 작품 URL이 필요합니다.')
             else:
                 value=f'https://hitomi.la/galleries/{number}.html'
                 origin='number'
@@ -926,7 +953,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
     def export(self):
         with self.db() as db:
             ids=[x[0] for x in db.execute('SELECT id FROM works WHERE merged_into IS NULL ORDER BY added')]
-        return {'schema_version':1,'exported_at':time.time(),'works':[self.get_work(i) for i in ids]}
+        return {'schema_version':1,'exported_at':time.time(),'works':[self.get_work(i) for i in ids],'bookmarks':self.bookmarks()}
 
     @staticmethod
     def folder_public(row):

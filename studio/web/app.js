@@ -12,9 +12,9 @@ delete settings.thumbnailMosaic;
 // Keep old original-view bookmarks usable; normal visits use the saved choice.
 const originalView = /^\/unsen\/?$/.test(location.pathname) || history.state?.studioOriginalView === true;
 if (originalView) settings.thumbnailBlur = false;
-const providerName = { ehentai: "E-Hentai", exhentai: "E-Hentai", hitomi: "Hitomi" };
+const providerName = { ehentai: "ExHentai", exhentai: "ExHentai", hitomi: "Hitomi" };
 const sourceFamily = provider => provider === 'exhentai' ? 'ehentai' : provider;
-const siteNames = {ehentai:'이헨',exhentai:'익헨',hitomi:'히토미'};
+const siteNames = {ehentai:'E-Hentai',exhentai:'ExHentai',hitomi:'Hitomi'};
 function sourceURL(source) {
     try {
         const url = new URL(source.url);
@@ -48,7 +48,7 @@ function renderSourceFinder(work) {
     const finder=sourceFinders.get(work.id) || {items:[],method:'embedded',page:1}; sourceFinders.set(work.id,finder);
     root.innerHTML=`<h3>원본 출처 · 정보 찾기</h3><p class="muted">압축 안의 원본 기록을 유리 스튜디오 양식으로 가져옵니다. 기록이 없는 작품은 이미지·제목으로 후보를 찾아 비교하세요.</p>
         <div class="source-finder-controls"><button class="quiet" id="restore-original-source" type="button">원본 출처 복원 · 정보 갱신</button><button class="quiet" id="export-source-record" type="button">출처 기록 JSON 저장</button></div>
-        <fieldset class="source-methods" id="source-find-method"><legend>찾는 방법</legend><div class="source-method-options">${[['embedded','원본 기록'],['image','익헨 이미지'],['title','익헨 제목'],['hitomi','히토미']].map(([value,label])=>`<label><input type="radio" name="source-find-method" value="${value}" ${finder.method===value?'checked':''}><span>${label}</span></label>`).join('')}</div></fieldset>
+        <fieldset class="source-methods" id="source-find-method"><legend>찾는 방법</legend><div class="source-method-options">${[['embedded','원본 기록'],['image','ExHentai 이미지'],['title','ExHentai 제목'],['hitomi','Hitomi']].map(([value,label])=>`<label><input type="radio" name="source-find-method" value="${value}" ${finder.method===value?'checked':''}><span>${label}</span></label>`).join('')}</div></fieldset>
         <div class="source-finder-controls"><label id="source-find-page-control" ${finder.method==='image'?'':'hidden'}>이미지 검색 페이지<input id="source-find-page" type="number" min="1" max="${work.pages || 20000}" value="${finder.page}"></label><button class="primary" id="source-find-start" type="button">후보 찾기</button><button class="quiet" id="source-find-more" type="button" ${finder.cursor?'':'hidden'}>후보 더 보기</button></div>
         <p id="source-find-note" class="muted" role="status">${esc(finder.message || '이미지 검색은 선택한 페이지의 파일 지문을 검색 사이트에 보냅니다. 같은 작품인지 확인한 뒤 연결하세요.')}</p>
         <div id="source-find-results"></div>`;
@@ -57,7 +57,7 @@ function renderSourceFinder(work) {
             const m=item.metadata,c=item.comparison;
             const mismatch=Boolean(finder.baseline?.languages?.length && m.languages?.length && !c.language_match);
             const cover=/^https:\/\/ehgt\.org\/[A-Za-z0-9_./-]+\.(?:jpe?g|png|webp)$/i.test(m.cover_url || '') && !m.cover_url.includes('..') ? `<img class="source-find-image" src="/api/source-preview?url=${encodeURIComponent(m.cover_url)}" loading="lazy" alt="${esc(m.title)} 후보 표지">` : '';
-            return `<div class="source-row">${cover}<div class="source-header"><strong>${esc(item.display_title || m.title)}</strong><a class="quiet" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">원본 열기</a></div><p>${esc(providerName[m.provider])} · ${esc(m.artists.join(', ') || '작가 미확인')} · ${esc(m.languages.join(', ') || '언어 미확인')}</p><p>페이지 ${m.pages ?? '미확인'} / 보관본 ${finder.baseline?.pages ?? '미확인'} · 제목 유사도 ${Math.round(c.title_similarity*100)}% · ${c.page_match?'페이지 수 일치':'페이지 수 비교 필요'}</p><div class="tags">${m.tags.filter(visibleTag).slice(0,12).map(t=>`${tagPair(t,`<span class="tag">${tagLabel(t)}</span>`)}`).join('')}</div><button class="quiet" type="button" data-source-finder-select="${index}" ${mismatch?'disabled':''}>${mismatch?'언어가 달라 판본 확인 필요':'이 작품에 출처 연결'}</button>${['ehentai','exhentai'].includes(m.provider)?` <button class="quiet" type="button" data-source-hitomi="${index}">이 후보로 히토미 찾기</button>`:''}</div>`;
+            return `<div class="source-row">${cover}<div class="source-header"><strong>${esc(item.display_title || m.title)}</strong><a class="quiet" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">원본 열기</a></div><p>${esc(providerName[m.provider])} · ${esc(m.artists.join(', ') || '작가 미확인')} · ${esc(m.languages.join(', ') || '언어 미확인')}</p><p>페이지 ${m.pages ?? '미확인'} / 보관본 ${finder.baseline?.pages ?? '미확인'} · 제목 유사도 ${Math.round(c.title_similarity*100)}% · ${c.page_match?'페이지 수 일치':'페이지 수 비교 필요'}</p><div class="tags">${m.tags.filter(visibleTag).slice(0,12).map(t=>`${tagPair(t,`<span class="tag">${tagLabel(t)}</span>`)}`).join('')}</div><button class="quiet" type="button" data-source-finder-select="${index}" ${mismatch?'disabled':''}>${mismatch?'언어가 달라 판본 확인 필요':'이 작품에 출처 연결'}</button>${['ehentai','exhentai'].includes(m.provider)?` <button class="quiet" type="button" data-source-hitomi="${index}">이 후보로 Hitomi 찾기</button>`:''}</div>`;
         }).join('');
     };
     draw();
@@ -65,7 +65,7 @@ function renderSourceFinder(work) {
         if (!input.checked) return;
         finder.method=input.value;finder.cursor=null;finder.items=[];finder.image=null;finder.seedUrl='';
         $('#source-find-more').hidden=true;$('#source-find-page-control').hidden=input.value!=='image';
-        finder.message={embedded:'압축 안에 저장된 원본 기록으로 출처를 찾습니다.',image:'선택한 페이지의 파일 지문으로 익헨·이헨에서 비슷한 작품을 찾습니다.',title:'작품 제목으로 익헨·이헨 후보를 찾습니다.',hitomi:'작가·제목으로 히토미 후보를 찾습니다. 작가가 없으면 제목을 사용합니다.'}[input.value];
+        finder.message={embedded:'압축 안에 저장된 원본 기록으로 출처를 찾습니다.',image:'선택한 페이지의 파일 지문으로 ExHentai·E-Hentai에서 비슷한 작품을 찾습니다.',title:'작품 제목으로 ExHentai·E-Hentai 후보를 찾습니다.',hitomi:'작가·제목으로 Hitomi 후보를 찾습니다. 작가가 없으면 제목을 사용합니다.'}[input.value];
         $('#source-find-note').textContent=finder.message;draw();
     });
     async function search(more=false,seed='') {
@@ -510,7 +510,16 @@ function tagHint(tag) {
 }
 const tagLabel = tag => `<span class="tag-label" data-tag-label="${esc(tag)}" title="${esc(tagHint(tag))}">${tagLabelContent(tag)}</span>`;
 const tagInfo = tag => `<button class="tag-info" type="button" data-tag-info="${esc(tag)}" aria-label="태그 설명: ${esc(tagText(tag))}" aria-controls="tag-explanation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button>`;
-const tagPair = (tag,body) => `<span class="tag-pair" title="${esc(tagHint(tag))}">${body}${tagInfo(tag)}</span>`;
+let bookmarkItems=[];
+const bookmarkSaved=(kind,value)=>bookmarkItems.some(item=>item.kind===kind && item.value===value);
+const bookmarkButton=(kind,value)=>`<button type="button" class="bookmark-toggle" data-bookmark-kind="${kind}" data-bookmark-value="${esc(value)}" aria-label="${kind==='artist'?'작가':'태그'} 북마크: ${esc(value)}" aria-pressed="${bookmarkSaved(kind,value)}" title="북마크 저장·해제"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`;
+const tagPair = (tag,body) => `<span class="tag-pair" title="${esc(tagHint(tag))}">${body}${tagInfo(tag)}${bookmarkButton('tag',tag)}</span>`;
+function renderBookmarks() {
+    $('#bookmark-list').innerHTML=['tag','artist'].map(kind=>{
+        const items=bookmarkItems.filter(item=>item.kind===kind);
+        return `<section><h3>${kind==='tag'?'태그':'작가'}</h3>${items.length?items.map(item=>`<div class="bookmark-row"><button type="button" class="quiet" data-bookmark-open="${kind}" data-bookmark-value="${esc(item.value)}">${kind==='tag'?tagLabel(item.value):esc(item.value)}</button>${bookmarkButton(kind,item.value)}</div>`).join(''):`<p class="muted">${kind==='tag'?'태그':'작가'} 옆 별표를 눌러 북마크하세요.</p>`}</section>`;
+    }).join('');
+}
 function drawTagExplanation(tag) {
     const data=tagData(tag);
     $('#tag-explanation-title').textContent=tagText(tag);
@@ -519,6 +528,7 @@ function drawTagExplanation(tag) {
     $('#tag-explanation-description').textContent=data.description;
     $('#tag-explanation-scope').textContent=data.scope;
 }
+$('#bookmarks-open').onclick=guard(async()=>{bookmarkItems=await api('/api/bookmarks');renderBookmarks();$('#bookmarks-dialog').showModal();});
 document.addEventListener('click',event=>{
     const button=event.target.closest('[data-tag-info]');if (!button) return;
     const panel=$('#tag-explanation');
@@ -693,7 +703,7 @@ function sourceRows(values) {
             return `<div class="source-header">${sourceShortcut(s)}<span class="source-actions"><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></span></div>${rating}<small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ''}${s.status === 'fetched' ? `수집 ${new Date(s.fetched * 1000).toLocaleString('ko-KR')}` : '수동 등록 · 원격 정보 미확인'}</small>`;
         }).join('');
         return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `${tagPair(tag,`<button class="tag" type="button" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)}`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
-    }).join('') || '<p class="muted">작품 원본 주소를 연결하세요. 이헨·익헨은 하나의 출처 계열로 표시합니다.</p>';
+    }).join('') || '<p class="muted">작품 원본 주소를 연결하세요. E-Hentai·ExHentai은 하나의 출처 계열로 표시합니다.</p>';
 }
 function readingActions(work) {
     const voice = work.edition?.kind && work.edition.kind !== 'comic';
@@ -709,7 +719,7 @@ function detailFacets(work) {
         if (name.trim() && !artists.has(name.trim().toLocaleLowerCase())) artists.set(name.trim().toLocaleLowerCase(),name.trim());
     }
     const series=work.all_tags.filter(t=>t.startsWith('parody:') || t.startsWith('series:'));
-    return `<div class="detail-facets"><div><strong>작가</strong><div class="tags">${[...artists.values()].map(name=>`<button class="tag" type="button" data-browse-artist="${esc(name)}">${esc(name)}</button>`).join('') || '<span class="muted">작가 미등록</span>'}</div></div><div><strong>원작·시리즈</strong><div class="tags">${series.map(tag=>tagPair(tag,`<button class="tag" type="button" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join('') || '<span class="muted">원작·시리즈 정보 없음</span>'}</div></div></div>`;
+    return `<div class="detail-facets"><div><strong>작가</strong><div class="tags">${[...artists.values()].map(name=>`<span class="tag-pair"><button class="tag" type="button" data-browse-artist="${esc(name)}">${esc(name)}</button>${bookmarkButton('artist',name)}</span>`).join('') || '<span class="muted">작가 미등록</span>'}</div></div><div><strong>원작·시리즈</strong><div class="tags">${series.map(tag=>tagPair(tag,`<button class="tag" type="button" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join('') || '<span class="muted">원작·시리즈 정보 없음</span>'}</div></div></div>`;
 }
 async function renderWorkSeries(work) {
     const root=$('#work-series');
@@ -747,7 +757,7 @@ function renderDetail(work) {
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.filter(visibleTag).map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section" id="work-series"></section><section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
-    <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(익헨 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
+    <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(ExHentai 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
     renderSourceFinder(work);
     renderWorkSeries(work);
     renderEdition(work);
@@ -799,6 +809,17 @@ function guard(fn) { return (...args) => Promise.resolve().then(() => fn(...args
 document.addEventListener("click", guard(async (event) => {
     if (event.target.closest(".card-select")) return;
     const button = event.target.closest("button,a,.card"); if (!button) return;
+    if (button.dataset.bookmarkKind) {
+        event.preventDefault();button.disabled=true;
+        try {
+            const kind=button.dataset.bookmarkKind,value=button.dataset.bookmarkValue;
+            bookmarkItems=await api('/api/bookmarks',{kind,value,saved:!bookmarkSaved(kind,value)});
+            document.querySelectorAll('[data-bookmark-kind]').forEach(el=>el.setAttribute('aria-pressed',String(bookmarkSaved(el.dataset.bookmarkKind,el.dataset.bookmarkValue))));
+            if ($('#bookmarks-dialog').open) renderBookmarks();
+        } finally {button.disabled=false;}
+        return;
+    }
+    if (button.dataset.bookmarkOpen) {$('#bookmarks-dialog').close();await browseFacet(button.dataset.bookmarkOpen==='artist'?{artist:button.dataset.bookmarkValue}:{tag:button.dataset.bookmarkValue});return;}
     if (button.dataset.browseArtist!==undefined) {event.preventDefault();await browseFacet({artist:button.dataset.browseArtist});return;}
     if (button.dataset.browseSeries) {event.preventDefault();await browseFacet({series:button.dataset.browseSeries});return;}
     if (button.dataset.clearFacet) {
@@ -851,7 +872,7 @@ document.addEventListener("submit", guard(async (event) => {
     event.preventDefault(); const form = event.target; const data = Object.fromEntries(new FormData(form));
     if (form.id === "short-form") {
         const short = String(data.number || "").trim().toUpperCase();
-        if (!/^[EXNL]?[0-9]{1,32}$/.test(short)) throw new Error("히토미 숫자, E번호, X번호, N번호 또는 L번호를 입력하세요.");
+        if (!/^[EXNL]?[0-9]{1,32}$/.test(short)) throw new Error("Hitomi 숫자, E번호, X번호, N번호 또는 L번호를 입력하세요.");
         await navigateRoute({ kind: "detail", short });
     }
     if (form.id === "reader-jump") {
@@ -901,8 +922,8 @@ function refreshDownloadMethod() {
     $('#download-method').textContent=`다운로드 방식: 외부 엔진 · ${target==='nas'?'NAS':'내 PC'}`;
     $('#download-support').textContent=!worker ? '다운로드 작업자 미연결 · 저장할 기기의 작업자를 연결해 주세요.'
         : provider==='ehentai-family' && !downloadCapabilities?.exhentai_workers?.[target]
-        ? '익헨 계정·작업자 연결을 확인해 주세요. 이미 저장된 작품은 바로 열 수 있습니다.'
-        : `다운로드 작업자 연결됨 · ${provider==='hitomi'?'히토미 작품과 정보를 함께 저장합니다.':'저장한 계정 세션으로 익헨 작품을 받습니다.'}`;
+        ? 'ExHentai 계정·작업자 연결을 확인해 주세요. 이미 저장된 작품은 바로 열 수 있습니다.'
+        : `다운로드 작업자 연결됨 · ${provider==='hitomi'?'Hitomi 작품과 정보를 함께 저장합니다.':'저장한 계정 세션으로 ExHentai 작품을 받습니다.'}`;
 }
 $("#queue").onclick = $("#download-open").onclick = guard(async () => {
     $("#download-dialog").showModal();
@@ -915,7 +936,8 @@ let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
     const provider = $('#download-form').elements.provider.value;
-    $("#download-reference-help").textContent = provider==='ehentai-family' ? '이헨·익헨 주소를 모두 사용할 수 있습니다. 처음 받는 작품은 전체 URL, 저장된 작품은 번호·E번호·X번호를 입력하세요.' : '히토미 작품 번호 또는 전체 URL을 입력하세요.';
+    $('#download-form [name=reference]').placeholder=provider==='ehentai-family'?'예: 1234567/abcdef0123':'예: 1234567';
+    $("#download-reference-help").textContent = provider==='ehentai-family' ? '새 작품은 번호/토큰 코드, 저장된 작품은 번호·E번호·X번호로 추가하세요. E-Hentai·ExHentai URL도 붙여 넣을 수 있습니다.' : 'Hitomi는 작품 번호만 입력하면 됩니다. URL도 붙여 넣을 수 있습니다.';
     refreshDownloadMethod();
 }
 $("#download-form [name=reference]").oninput = resetDownloadPreview;
@@ -926,7 +948,7 @@ $("#download-preview").onclick = guard(async () => {
     const data = Object.fromEntries(new FormData($("#download-form")));
     const result = await api("/api/downloads/resolve", data);
     if (revision !== downloadRevision) return;
-    $("#download-resolution").textContent = `${result.provider==='hitomi'?'히토미':'익헨'} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
+    $("#download-resolution").textContent = `${result.provider==='hitomi'?'Hitomi':'ExHentai'} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
 });
 $("#close-detail").onclick = guard(closeDetail); $("#close-reader").onclick = guard(closeReader);
 $("#detail").addEventListener("cancel", (event) => { event.preventDefault(); closeDetail(); });
@@ -1091,7 +1113,6 @@ let readerWheel = {at:0,total:0,turned:false,reader:null};
 document.addEventListener('wheel', event => {
     if (event.ctrlKey || event.metaKey || !readerInputReady(event.target) || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
     const surface=$('#reader'),down=event.deltaY>0;
-    if ((down && surface.scrollTop+surface.clientHeight<surface.scrollHeight-2) || (!down && surface.scrollTop>2)) return;
     event.preventDefault();
     const now=Date.now();
     if (readerWheel.reader!==state.reader || now-readerWheel.at>180 || Math.sign(readerWheel.total)!==Math.sign(event.deltaY)) {
@@ -1110,6 +1131,7 @@ $("#nav-toggle").onclick = () => setNav(!document.body.classList.contains("nav-o
 $("#nav-scrim").onclick = () => setNav(false);
 $("#sidebar").addEventListener("click", (e) => { if (e.target.closest("button,a")) setNav(false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("nav-open")) { setNav(false); $("#nav-toggle").focus(); } });
+try { bookmarkItems=await api('/api/bookmarks',undefined,{signal:AbortSignal.timeout(10000)}); } catch {}
 try { tagDictionary=await api('/api/tag-dictionary',undefined,{signal:AbortSignal.timeout(10000)}); }
 catch { toast('태그 번역을 불러오지 못했습니다. 원문으로 표시합니다. 새로고침해서 다시 시도하세요.'); }
 applySettings();
@@ -1467,7 +1489,7 @@ function renderLoginFrame(frame) {
     $('#login-location').textContent = frame.location;
     $('#login-save').textContent = frame.browser_mode === 'desktop' ? '일반 브라우저 계정 세션 저장' : '로그인 완료 · 세션 저장';
     $('#login-visit-ex').hidden = sourceFamily(frame.provider) !== 'ehentai';
-    $('#login-visit').textContent = sourceFamily(frame.provider) === 'ehentai' ? '이헨 열기' : '대상 사이트 열기';
+    $('#login-visit').textContent = sourceFamily(frame.provider) === 'ehentai' ? 'E-Hentai 열기' : '대상 사이트 열기';
     $('#login-restriction').hidden = !frame.restricted_request;
     $('#login-restriction').textContent = frame.blocked_navigation
         ? '허용 범위 밖으로 이동하려는 요청이 차단됐습니다. 로그인 진행이 안 되면 취소하고 이 상태를 알려주세요.'
@@ -1518,8 +1540,8 @@ async function connectionStatus() {
         if (s.provider !== 'ehentai') return s;
         const members = status.sites.filter(value => sourceFamily(value.provider) === 'ehentai');
         const latest = members.filter(value => value.last_request).sort((a,b) => b.last_request.at-a.last_request.at)[0];
-        return {...s,name:'E-Hentai · 익헨 포함',last_request:latest?.last_request,
-            access_note:members.find(value => value.provider === 'exhentai')?.target_session_available === false ? ' · 익헨 주소는 브라우저에서 접근 확인 필요' : ''};
+        return {...s,name:'E-Hentai · ExHentai 포함',last_request:latest?.last_request,
+            access_note:members.find(value => value.provider === 'exhentai')?.target_session_available === false ? ' · ExHentai 주소는 브라우저에서 접근 확인 필요' : ''};
     });
     $('#connections-sites').innerHTML = accountSites.map(s => `<div class="connection-site${s.last_request && s.last_request.status !== 'ok' ? ' failed' : ''}"><span><strong>${esc(s.name)}</strong> · ${esc(connectionStateName[s.state] || s.state)}${esc(sessionRequestNote(s.last_request))}${esc(s.access_note || '')}</span><button class="quiet" data-site-start="${esc(s.provider)}" ${!status.configured || !s.login_available || desktopMissing ? 'disabled' : ''}>로그인 열기</button><button class="quiet" data-site-forget="${esc(s.provider)}" ${!status.configured || s.state === 'not_saved' ? 'disabled' : ''}>저장 세션 해제</button></div>`).join('');
     if (status.active) {
@@ -1616,7 +1638,7 @@ $('#connections-sites').onclick = guard(async event => {
         } finally { clearInterval(timer); clearTimeout(deadline); loginBusy = false; button.disabled = false; button.textContent = originalLabel; }
     }
     if (button.dataset.siteForget) {
-        if (!confirm(sourceFamily(button.dataset.siteForget) === 'ehentai' ? '이헨·익헨 공용 계정 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.' : '이 사이트의 NAS 저장 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.')) return;
+        if (!confirm(sourceFamily(button.dataset.siteForget) === 'ehentai' ? 'E-Hentai·ExHentai 공용 계정 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.' : '이 사이트의 NAS 저장 세션을 해제할까요? 원본 파일과 작품 정보는 유지됩니다.')) return;
         await api('/api/site-connections', { op: 'forget', provider: button.dataset.siteForget });
         await connectionStatus();
     }

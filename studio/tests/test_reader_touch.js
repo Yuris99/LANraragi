@@ -75,7 +75,7 @@ f=fixture();assert.equal(wheel(f),true);assert.equal(f.state.reader.page,2);whee
 f.advance();wheel(f,{deltaY:-60});assert.equal(f.state.reader.page,1);
 f=fixture();wheel(f,{deltaY:20});assert.equal(f.routes.length,0);wheel(f,{deltaY:20});assert.equal(f.routes.length,1,'Trackpad deltas accumulate');
 for(const extra of [{ctrlKey:true},{metaKey:true},{deltaX:100},{target:'toolbar'}]) {f=fixture();assert.equal(wheel(f,extra),false);assert.equal(f.routes.length,0);}
-f=fixture();f.reader.scrollHeight=1000;assert.equal(wheel(f),false);f.reader.scrollTop=300;assert.equal(wheel(f),true);
+f=fixture();f.reader.scrollHeight=1000;assert.equal(wheel(f),true);assert.equal(f.state.reader.page,2,'Normal wheel input turns even if stale layout metrics overflow');
 f=fixture();f.window.visualViewport.scale=2;assert.equal(wheel(f),false);
 assert.equal(f.options.wheel.passive,false);
 console.log('Reader input: swipe, image/rapid click, wheel bursts, scroll/zoom preservation, bounds and gesture guards passed');

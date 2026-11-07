@@ -42,7 +42,7 @@ def main():
                 page.goto('http://127.0.0.1:'+str(server.server_port))
                 page.locator('#download-open').click();form=page.locator('#download-form')
                 expect(form.get_by_role('radio')).to_have_count(2)
-                expect(form.get_by_role('radio',name='익헨',exact=True)).to_be_checked()
+                expect(form.get_by_role('radio',name='ExHentai',exact=True)).to_be_checked()
                 expect(form.locator('[name=engine]')).to_have_value('command')
                 form.locator('[name=reference]').fill('456');page.locator('#download-submit').click()
                 page.locator('#toast').get_by_text('전체 작품 URL',exact=False).wait_for()
@@ -54,7 +54,7 @@ def main():
                 page.locator('#download-submit').click();page.locator('#jobs-view').wait_for(state='visible')
                 assert len(store.jobs())==1 and store.jobs()[0]['state']=='queued'
                 assert store.jobs()[0]['url']=='https://e-hentai.org/g/123/abcdef/'
-                page.locator('#download-open').click();form.get_by_role('radio',name='히토미',exact=True).check()
+                page.locator('#download-open').click();form.get_by_role('radio',name='Hitomi',exact=True).check()
                 form.locator('[name=target]').select_option('nas')
                 expect(form.locator('[name=engine]')).to_have_value('command')
                 expect(page.locator('#download-method')).to_contain_text('외부 엔진')
@@ -62,33 +62,34 @@ def main():
                 form.locator('[name=reference]').fill('123');page.locator('#download-submit').click()
                 expect(page.locator('#download-dialog')).not_to_be_visible()
                 assert len(store.jobs())==2
-                page.locator('#download-open').click();form.get_by_role('radio',name='히토미',exact=True).check()
+                page.locator('#download-open').click();form.get_by_role('radio',name='Hitomi',exact=True).check()
                 form.locator('[name=reference]').fill('999');page.locator('#download-submit').click()
                 page.locator('#detail[open]').wait_for();assert len(store.jobs())==2
                 page.locator('#close-detail').click();page.locator('#download-open').click()
                 ex=store.create_work('Existing EX',lrr_id='b'*40)
                 store.upsert_source(ex['id'],{'url':'https://exhentai.org/g/456/abcdef/'})
-                form.get_by_role('radio',name='익헨',exact=True).check();form.locator('[name=reference]').fill('X456')
+                form.get_by_role('radio',name='ExHentai',exact=True).check();form.locator('[name=reference]').fill('X456')
                 page.locator('#download-preview').click();expect(page.locator('#download-resolution')).to_contain_text('이미 보관함에 있음')
                 page.locator('#download-submit').click();page.locator('#detail[open]').wait_for()
                 assert len(store.jobs())==2
                 page.locator('#close-detail').click();page.locator('#download-open').click()
                 runtime={'adapter':'same-source-1','gallery_engine_sha256':hashlib.sha256((Path(__file__).resolve().parents[1]/'gallery_engine.py').read_bytes()).hexdigest(),'worker_sha256':'a'*64,'gallery_dl_version':'1.32.16','sessions_available':True}
                 store.worker_seen('nas',runtime)
-                form.get_by_role('radio',name='익헨',exact=True).check();form.locator('[name=target]').select_option('nas')
+                form.get_by_role('radio',name='ExHentai',exact=True).check();form.locator('[name=target]').select_option('nas')
                 expect(form.locator('[name=engine]')).to_have_value('command')
-                form.locator('[name=reference]').fill('https://exhentai.org/g/789/0123456789/')
+                form.locator('[name=reference]').fill('789/0123456789')
+                page.locator('#download-preview').click();expect(page.locator('#download-resolution')).to_contain_text('789')
                 page.locator('#download-submit').click();expect(page.locator('#download-dialog')).not_to_be_visible()
-                assert len(store.jobs())==3 and store.jobs()[0]['url'].startswith('https://exhentai.org/')
+                assert len(store.jobs())==3 and store.jobs()[0]['url']=='https://exhentai.org/g/789/0123456789/'
                 page.locator('#download-open').click()
                 for width in [1440,390]:
                     page.set_viewport_size({'width':width,'height':900})
                     assert page.locator('#download-open').is_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                    form.get_by_role('radio',name='익헨',exact=True).focus();page.keyboard.press('ArrowRight')
-                    expect(form.get_by_role('radio',name='히토미',exact=True)).to_be_checked()
+                    form.get_by_role('radio',name='ExHentai',exact=True).focus();page.keyboard.press('ArrowRight')
+                    expect(form.get_by_role('radio',name='Hitomi',exact=True)).to_be_checked()
                     expect(form.locator('[name=engine]')).to_have_value('command')
-                    page.keyboard.press('ArrowLeft');expect(form.get_by_role('radio',name='익헨',exact=True)).to_be_checked()
+                    page.keyboard.press('ArrowLeft');expect(form.get_by_role('radio',name='ExHentai',exact=True)).to_be_checked()
                     assert form.locator('.download-source-options span').first.bounding_box()['height']>=44
                     page.screenshot(path=str(output/f'download-toggle-{width}.png'))
                     box=form.locator('[name=reference]').bounding_box()

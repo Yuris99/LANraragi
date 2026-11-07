@@ -82,17 +82,17 @@ def main():
                 expect(methods.get_by_role('radio',name='원본 기록',exact=True)).to_be_checked()
                 expect(page.locator('#source-find-page-control')).to_be_hidden()
                 methods.get_by_role('radio',name='원본 기록',exact=True).focus()
-                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='익헨 이미지',exact=True)).to_be_checked()
+                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='ExHentai 이미지',exact=True)).to_be_checked()
                 expect(page.locator('#source-find-page-control')).to_be_visible()
-                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='익헨 제목',exact=True)).to_be_checked()
+                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='ExHentai 제목',exact=True)).to_be_checked()
                 expect(page.locator('#source-find-page-control')).to_be_hidden()
-                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='히토미',exact=True)).to_be_checked()
+                page.keyboard.press('ArrowRight');expect(methods.get_by_role('radio',name='Hitomi',exact=True)).to_be_checked()
                 page.keyboard.press('ArrowLeft');page.keyboard.press('ArrowLeft')
                 app.match_lock.acquire()
                 try:
                     page.locator('#source-find-start').click()
                     assert app.manual_source_pending.wait(2)
-                    expect(methods.get_by_role('radio',name='익헨 이미지',exact=True)).to_be_disabled()
+                    expect(methods.get_by_role('radio',name='ExHentai 이미지',exact=True)).to_be_disabled()
                     expect(page.locator('#source-find-note')).to_contain_text('현재 응답이 끝난 뒤 먼저 처리')
                 finally:app.match_lock.release()
                 expect(page.locator('#source-find-results .source-row')).to_have_count(5)
@@ -111,21 +111,21 @@ def main():
                 app.source_search_at=0
                 page.locator('[data-source-hitomi="0"]').click()
                 expect(page.locator('#source-find-results .source-row')).to_have_count(1)
-                expect(methods.get_by_role('radio',name='히토미',exact=True)).to_be_checked()
+                expect(methods.get_by_role('radio',name='Hitomi',exact=True)).to_be_checked()
                 expect(page.locator('#source-find-note')).to_contain_text('이미지 후보의 작가·제목')
                 assert store.get_work(b['id'])['sources']==[], 'Searching via an image candidate must not silently link it'
                 page.locator('[data-source-finder-select="0"]').click()
                 expect(page.locator('#connected-source-list [data-fetch]')).to_have_count(1)
                 assert store.get_work(b['id'])['title']=='Image search local title'
                 app.source_search_at=0
-                methods.get_by_role('radio',name='익헨 이미지',exact=True).check();page.locator('#source-find-start').click()
+                methods.get_by_role('radio',name='ExHentai 이미지',exact=True).check();page.locator('#source-find-start').click()
                 expect(page.locator('#source-find-results .source-row')).to_have_count(5)
                 page.locator('[data-source-finder-select="0"]').click()
                 expect(page.locator('#connected-source-list [data-fetch]')).to_have_count(2)
                 page.locator('#close-detail').click()
                 page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga/L'+str(title_only['local_number']))
                 app.source_search_at=0
-                methods.get_by_role('radio',name='히토미',exact=True).check();page.locator('#source-find-start').click()
+                methods.get_by_role('radio',name='Hitomi',exact=True).check();page.locator('#source-find-start').click()
                 expect(page.locator('#source-find-results .source-row')).to_have_count(1)
                 assert store.get_work(title_only['id'])['artist']=='', 'Title-only search must not invent or save an artist'
                 page.mouse.click(2,2);expect(page.locator('#detail')).not_to_be_visible()

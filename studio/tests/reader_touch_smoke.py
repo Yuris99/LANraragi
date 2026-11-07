@@ -40,7 +40,7 @@ function update(){
     $('#reader-position').textContent=n+' / 3';
     $('#reader-title').textContent='Generated touch test';
     $('#reader-prev').disabled=n===1; $('#reader-next').disabled=n===3;
-    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="360" height="620"><rect width="360" height="620" fill="#e6e8ed"/><text x="180" y="300" text-anchor="middle" font-size="44">Page '+n+'</text></svg>';
+    const svg='<svg xmlns="http://www.w3.org/2000/svg" width="240" height="620"><rect width="240" height="620" fill="#e6e8ed"/><text x="120" y="300" text-anchor="middle" font-size="44">Page '+n+'</text></svg>';
     $('#reader-image').src='data:image/svg+xml,'+encodeURIComponent(svg);
 }
 function navigateRoute(route){turns++;state.reader.page=route.page-1;location.hash='#/L1/'+route.page;update();}
@@ -108,8 +108,10 @@ window.testReader={
             assert info()['page']==1 and info()['turns']==2,info();results['ltr_surface_taps']=True
             page.touchscreen.tap(380,300);assert info()['page']==2,info()
             page.touchscreen.tap(10,300);assert info()['page']==1 and info()['turns']==4,info();results['edge_surface_taps']=True
-            page.touchscreen.tap(195,300)
+            page.touchscreen.tap(195,80)
             assert info()['page']==1 and info()['turns']==4,info();results['center_tap_no_turn']=True
+            page.touchscreen.tap(195,300)
+            assert info()['page']==2 and info()['turns']==5,info();results['image_tap_next']=True
             page.evaluate("testReader.reset('rtl')")
             page.touchscreen.tap(340,300);assert info()['page']==0,info()
             page.touchscreen.tap(60,300);assert info()['page']==1,info();results['rtl_surface_taps']=True
@@ -118,11 +120,11 @@ window.testReader={
             page.mouse.click(60,300);assert info()['page']==1,info();results['mouse_surface_clicks']=True
             page.mouse.move(340,300);page.mouse.down();page.mouse.move(300,300,steps=6);page.mouse.up()
             assert info()['page']==1 and info()['turns']==2,info();results['mouse_drag_no_turn']=True
-            page.evaluate("testReader.reset();document.querySelector('.reader-canvas').style.minHeight='2200px'")
-            drag((220,600),(200,200));assert info()['page']==1 and info()['scroll']>50,info();results['native_vertical_scroll']=True
+            page.evaluate('testReader.reset()')
+            drag((220,600),(200,200));assert info()['page']==1 and info()['scroll']==0,info();results['normal_vertical_drag_no_scroll']=True
             page.mouse.click(340,300)
             assert info()['page']==1 and info()['turns']==0,info();results['scroll_click_no_turn']=True
-            page.evaluate("document.querySelector('.reader-canvas').style.minHeight='';testReader.reset()")
+            page.evaluate('testReader.reset()')
             pinch(cdp)
             current=info();assert current['page']==1 and current['maxTouches']==2,current
             baseline_page=context.new_page();baseline_page.goto('http://127.0.0.1:'+str(server.server_port)+'/baseline')

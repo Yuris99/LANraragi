@@ -22,6 +22,25 @@ class ReferenceTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.store=Store(Path(self.temp.name)/'studio.db')
 
+    def test_compact_codes_preserve_host_and_token_without_network_or_catalog_changes(self):
+        for code,host in [('123/ABCDEF0123','exhentai.org'),('X123:abcdef0123','exhentai.org'),('E123/abcdef0123/','e-hentai.org')]:
+            with self.subTest(code=code):
+                resolved=self.store.resolve_reference('ehentai-family',code)
+                self.assertEqual(resolved['url'],f'https://{host}/g/123/abcdef0123/')
+                self.assertEqual(resolved['origin'],'code')
+        result=self.store.request_download('ehentai-family','123/abcdef0123','nas','command')
+        self.assertEqual(result['job']['url'],'https://exhentai.org/g/123/abcdef0123/')
+        self.assertEqual(self.store.list_works()['total'],0)
+
+    def test_invalid_compact_codes_cannot_queue_or_cross_selected_provider(self):
+        for provider,code in [('exhentai','E123/abcdef0123'),('ehentai','X123/abcdef0123'),
+                              ('hitomi','123/abcdef0123'),('ehentai-family','0/abcdef0123'),
+                              ('ehentai-family','123/abcdef'),('ehentai-family','123/abcdef0123;pwd'),
+                              ('ehentai-family','123/abcdef0123?x=1')]:
+            with self.subTest(code=code),self.assertRaises(ValueError):
+                self.store.request_download(provider,code,'nas','command')
+        self.assertEqual(self.store.jobs(),[])
+
     def test_family_input_accepts_both_hosts_and_saved_prefixes(self):
         work=self.store.create_work('Generated family')
         eh='https://e-hentai.org/g/123/0123456789/';ex='https://exhentai.org/g/123/0123456789/'

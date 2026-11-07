@@ -30,7 +30,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=38
+STUDIO_UPDATE=39
 
 
 def supports_download(plugins,url):
@@ -507,6 +507,7 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.download_upload(match[1])
         if path=='/api/tags':return self.respond(store.tag_catalog(q('q')))
         if path=='/api/tag-presets':return self.respond(store.tag_presets())
+        if path=='/api/bookmarks':return self.respond(store.bookmarks())
         if path=='/api/source-preview':
             raw=preview_image(q('url'));mime=image_content_type(raw[:32])
             if not mime:raise ValueError('후보 표지 이미지 형식을 확인하세요.')
@@ -674,6 +675,9 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/tag-presets':
             if set(data)-{'id','name','tags'}:raise ValueError('프리셋 이름과 태그만 지정하세요.')
             return self.respond(store.save_tag_preset(data.get('name'),data.get('tags'),data.get('id')))
+        if path=='/api/bookmarks':
+            if set(data)!={'kind','value','saved'}:raise ValueError('북마크 종류·값·저장 여부만 지정하세요.')
+            return self.respond(store.set_bookmark(data['kind'],data['value'],data['saved']))
         match=re.fullmatch('/api/tag-presets/([0-9a-f]{32})/delete',path)
         if match:
             if data:raise ValueError('추가 필드는 지정하지 마세요.')
