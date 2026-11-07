@@ -1,5 +1,6 @@
 """Browser reference entry with local synthetic metadata; no external requests."""
 import json
+import hashlib
 import mimetypes
 import os
 from pathlib import Path
@@ -63,10 +64,24 @@ def main():
                 page.locator('#download-submit').click();page.locator('#detail[open]').wait_for()
                 assert len(store.jobs())==2
                 page.locator('#close-detail').click();page.locator('#download-open').click()
+                runtime={'adapter':'same-source-1','gallery_engine_sha256':hashlib.sha256((Path(__file__).resolve().parents[1]/'gallery_engine.py').read_bytes()).hexdigest(),'worker_sha256':'a'*64,'gallery_dl_version':'1.32.16','sessions_available':True}
+                store.worker_seen('nas',runtime)
+                form.locator('[name=provider]').select_option('exhentai');form.locator('[name=target]').select_option('nas')
+                expect(form.locator('[name=engine]')).to_have_value('command')
+                form.locator('[name=reference]').fill('https://exhentai.org/g/789/0123456789/')
+                page.locator('#download-submit').click();expect(page.locator('#download-dialog')).not_to_be_visible()
+                assert len(store.jobs())==3 and store.jobs()[0]['url'].startswith('https://exhentai.org/')
+                page.locator('#download-open').click()
                 for width in [1440,390]:
                     page.set_viewport_size({'width':width,'height':900})
                     assert page.locator('#download-open').is_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                    box=form.locator('[name=reference]').bounding_box()
+                    page.mouse.move(box['x']+20,box['y']+10);page.mouse.down();page.mouse.move(2,2);page.mouse.up()
+                    expect(page.locator('#download-dialog')).to_be_visible()
+                    page.mouse.click(2,2);expect(page.locator('#download-dialog')).not_to_be_visible()
+                    assert len(store.jobs())==3
+                    page.locator('#download-open').click()
                 assert not errors,errors
                 browser.close()
             print(json.dumps(dict(number_entry=True,missing_token_no_queue=True,saved_url_reused=True,

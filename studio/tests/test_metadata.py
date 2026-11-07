@@ -161,7 +161,10 @@ class MetadataHTTPTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.env=patch.dict('os.environ',{'STUDIO_PASSWORD':'generated-metadata-test'});self.env.start();self.addCleanup(self.env.stop)
         self.store=Store(Path(self.temp.name)/'catalog.db');self.work=self.store.create_work('Local title')
-        self.server=make_server('127.0.0.1',0,Studio(self.store,None))
+        app=Studio(self.store,None)
+        def no_network(url):raise AssertionError('Generated API tests must not access a live service')
+        app.source_transport=lambda:(no_network,None,{'exhentai':'session_required'})
+        self.server=make_server('127.0.0.1',0,app)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.addCleanup(self.close)
 

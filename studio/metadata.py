@@ -232,12 +232,16 @@ def compare_metadata(first, second):
 
 def public_artist_index(artist,offset=None):
     """Read only the latest eight IDs from the normal public Hitomi artist index."""
+    if isinstance(artist,str) and artist.startswith('title:'):
+        from site_sessions import hitomi_title_index
+        result=hitomi_title_index(artist[6:],offset or 0)
+        return result if offset is not None else result['ids']
     import urllib.request
     import urllib.error
     from urllib.parse import quote
     from connectors import NoRedirect
     if not isinstance(artist,str) or not artist or len(artist)>150: raise ValueError('작가 이름을 확인하세요.')
-    url = 'https://ltn.gold-usergeneratedcontent.net/artist/' + quote(artist,safe='') + '-all.nozomi'
+    url = 'https://ltn.gold-usergeneratedcontent.net/n/artist/' + quote(artist,safe='') + '-all.nozomi'
     position=0 if offset is None else offset
     if type(position) is not int or not 0<=position<=100000:raise ValueError('작가 색인 범위를 확인하세요.')
     request = urllib.request.Request(url,headers={'Range':f'bytes={position*4}-{position*4+31}','User-Agent':'LibraryStudio/0.1'})
@@ -278,10 +282,11 @@ def counterpart_candidates(metadata,fetch=None,index_fetch=None,target=None,curs
     try:
         if cursor is not None and (not isinstance(cursor,dict) or any(type(v) is not int or v<0 for v in cursor.values())):raise ValueError('검색 위치를 확인하세요.')
         if target=='hitomi':
-            if not metadata.get('artists'):
-                return {**output,'status':'needs_artist','message':'Hitomi 작가 색인 검색에는 작가 정보가 필요합니다.'}
+            query=metadata['artists'][0] if metadata.get('artists') else 'title:'+clean_title(metadata['title'],[],[metadata.get('external_id','')])[:150]
+            if query=='title:':return {**output,'status':'needs_title','message':'Hitomi에서 검색할 제목이 필요합니다.'}
+            output['search_basis']='title' if query.startswith('title:') else 'artist'
             position=(cursor or {}).get('offset',0)
-            page=(index_fetch or public_artist_index)(metadata['artists'][0],position) if cursor is not None else (index_fetch or public_artist_index)(metadata['artists'][0])
+            page=(index_fetch or public_artist_index)(query,position) if cursor is not None else (index_fetch or public_artist_index)(query)
             ids=page['ids'] if isinstance(page,dict) else page
             if cursor is not None and not page.get('complete',False):
                 output['next_cursor']={'offset':position+8}

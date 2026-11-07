@@ -74,7 +74,7 @@ function renderSourceFinder(work) {
             if (state.detail?.id!==work.id) return;
             finder.items=more?[...finder.items,...result.items.filter(item=>!finder.items.some(old=>old.metadata.url===item.metadata.url))]:result.items;
             finder.method=method;finder.page=page;finder.cursor=result.next_cursor;finder.baseline=result.baseline;finder.image=result.image;finder.seedUrl=fromUrl;
-            finder.message=`후보 ${finder.items.length}개 · ${result.message}`;
+            finder.message=`후보 ${finder.items.length}개 · ${result.search_basis==='title'?'작가 정보가 없어 제목으로 검색했습니다. ':''}${result.message}`;
             $('#source-find-note').textContent=finder.message;$('#source-find-more').hidden=!finder.cursor;draw();
         } catch (error) {
             finder.message=error.message;if (state.detail?.id===work.id) $('#source-find-note').textContent=finder.message;
@@ -117,7 +117,7 @@ async function refreshAutomaticSources() {
         ...(members.some(site => site.status === 'connected') && members.some(site => site.status !== 'connected') ? {status:'partial'} : {}),
         items:members.flatMap(site => site.items || [])
     }));
-    const names = {connected:'연결됨',session_required:'로그인 필요',service_update_required:'로그인 서비스 업데이트 대기',service_unavailable:'로그인 서비스 연결 대기',access_required:'접근 제한',unavailable:'연결 확인 필요',partial:'일부 확인 실패',scanning:'다음 묶음 확인 중',search_limit:'검색 범위 검토 필요',review:'판본 확인 필요',ownership_conflict:'다른 작품에 연결된 출처',no_candidates:'이번 검색 범위에 후보 없음',needs_artist:'작가 정보 필요'};
+    const names = {connected:'연결됨',session_required:'로그인 필요',service_update_required:'로그인 서비스 업데이트 대기',service_unavailable:'로그인 서비스 연결 대기',access_required:'접근 제한',unavailable:'연결 확인 필요',partial:'일부 확인 실패',scanning:'다음 묶음 확인 중',search_limit:'검색 범위 검토 필요',review:'판본 확인 필요',ownership_conflict:'다른 작품에 연결된 출처',no_candidates:'이번 검색 범위에 후보 없음',needs_artist:'작가 정보 필요',needs_title:'제목 정보 필요',not_found:'해당 작품 없음'};
     $('#auto-source-state').textContent = (labels[value.state] || value.state) + ' ' + sites.map(site => `${providerName[site.provider]}: ${names[site.status] || site.status}`).join(' · ');
     const items = sites.filter(site => site.status !== 'connected').flatMap(site => site.items || []);
     sourceMatchCandidates.set(workId,items);
@@ -898,14 +898,17 @@ let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
     const provider = $("#download-form [name=provider]").value;
-    $("#download-reference-help").textContent = provider === "exhentai" ? "익헨은 저장된 번호·X번호 또는 전체 URL을 확인할 수 있습니다. 새 파일 다운로드는 검증 전입니다." : provider === "ehentai" ? "E-Hentai는 처음 등록할 때 전체 URL이 필요합니다. 저장된 출처는 번호·E번호로 확인할 수 있습니다." : "선택한 사이트의 작품 번호 또는 전체 URL을 입력하세요.";
+    $("#download-reference-help").textContent = provider === "exhentai" ? "저장된 번호·X번호 또는 전체 URL을 입력하세요. 저장된 익헨 세션을 사용하는 외부 작업자로 다운로드합니다." : provider === "ehentai" ? "E-Hentai는 처음 등록할 때 전체 URL이 필요합니다. 저장된 출처는 번호·E번호로 확인할 수 있습니다." : "선택한 사이트의 작품 번호 또는 전체 URL을 입력하세요.";
+    $('#download-form [name=engine] option[value=lanraragi]').disabled=provider==='exhentai' || $('#download-form [name=target]').value==='pc';
+    if(provider==='exhentai') $('#download-form [name=engine]').value='command';
 }
 $("#download-form [name=reference]").oninput = resetDownloadPreview;
 $("#download-form [name=provider]").onchange = resetDownloadPreview;
 $("#download-form [name=target]").onchange = () => {
     const pc = $("#download-form [name=target]").value === "pc";
-    $("#download-form [name=engine] option[value=lanraragi]").disabled = pc;
-    if (pc) $("#download-form [name=engine]").value = "command";
+    const ex=$('#download-form [name=provider]').value==='exhentai';
+    $("#download-form [name=engine] option[value=lanraragi]").disabled = pc || ex;
+    if (pc || ex) $("#download-form [name=engine]").value = "command";
 };
 $("#download-preview").onclick = guard(async () => {
     const revision = downloadRevision;
@@ -917,6 +920,17 @@ $("#download-preview").onclick = guard(async () => {
 $("#close-detail").onclick = guard(closeDetail); $("#close-reader").onclick = guard(closeReader);
 $("#detail").addEventListener("cancel", (event) => { event.preventDefault(); closeDetail(); });
 $("#reader").addEventListener("cancel", (event) => { event.preventDefault(); closeReader(); });
+let backdropPointer=null;
+const outsideDialog=(dialog,event)=>{const r=dialog.getBoundingClientRect();return event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom;};
+document.addEventListener('pointerdown',event=>{
+    const dialog=event.target;
+    backdropPointer=event.button===0 && dialog.tagName==='DIALOG' && dialog.open && outsideDialog(dialog,event)?dialog:null;
+});
+document.addEventListener('click',event=>{
+    const dialog=backdropPointer;backdropPointer=null;
+    if (!dialog || event.target!==dialog || !dialog.open || !outsideDialog(dialog,event)) return;
+    if (dialog.dispatchEvent(new Event('cancel',{cancelable:true}))) dialog.close();
+});
 async function refreshTagFilter() {
     const query = $("#filter-tag-search").value;
     const tags = await matchingTags(tagScope(query));

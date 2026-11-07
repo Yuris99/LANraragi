@@ -3,7 +3,7 @@ import json
 import secrets
 import time
 import urllib.error
-from metadata import fetch_metadata, counterpart_candidates
+from metadata import fetch_metadata, counterpart_candidates,compare_metadata
 from sources import clean_title,source_family
 
 PROVIDERS=('ehentai','exhentai','hitomi')
@@ -22,6 +22,15 @@ class LeaseLost(ValueError):pass
 
 
 class AutomaticSources:
+    @staticmethod
+    def upgrade_automatic_search(db):
+        version='ex-title-1'
+        row=db.execute("SELECT value FROM settings WHERE key='source_search_revision'").fetchone()
+        if row and row[0]==version:return
+        # Re-evaluate old finished searches once; automatic_enabled still governs execution.
+        db.execute("UPDATE source_link_jobs SET state='queued',epoch=epoch+1,attempts=0,next_at=?,lease=NULL,lease_until=NULL,result='{}'",(time.time(),))
+        db.execute("INSERT OR REPLACE INTO settings VALUES('source_search_revision',?)",(version,))
+
     @staticmethod
     def enqueue_source_link(db,work_id,now=None):
         now=time.time() if now is None else now
@@ -118,6 +127,17 @@ class AutomaticSources:
 
 
 class AutoLinker:
+    def connect_ex_alias(self,work,source,metadata,fetch,job):
+        url=source['url'].replace('https://e-hentai.org/','https://exhentai.org/',1)
+        candidate=fetch_metadata(url,fetch)
+        compared=compare_metadata(metadata,candidate)
+        eligible=compared['title_similarity']==1 and compared['artist_match'] and compared['language_match'] and compared['page_match'] and compared['tag_similarity']>=.7
+        if not eligible:return {'provider':'exhentai','status':'review','items':[{'metadata':{**candidate,'comments':[]},'comparison':compared}]}
+        try:self.store.import_metadata(work['id'],candidate,remote=True,schedule=False,lease_guard=job)
+        except LeaseLost:raise
+        except ValueError:return {'provider':'exhentai','status':'ownership_conflict','items':[]}
+        return {'provider':'exhentai','status':'connected','items':[]}
+
     def __init__(self,store,transport,pause=None):
         self.store,self.transport,self.pause=store,transport,pause
 
@@ -155,12 +175,29 @@ class AutoLinker:
                 # snapshot; never label it as remotely fetched page metadata.
                 metadata={**metadata,'pages':work['pages']}
                 output['baseline_pages']='local-library'
+            family_target=next((s['provider'] for s in sources if s['provider'] in ('ehentai','exhentai')),None) or ('exhentai' if not access.get('exhentai') else 'ehentai')
             for target in PROVIDERS:
                 old=next((s for s in previous.get('sites',[]) if s['provider']==target),{})
                 existing=next((s for s in sources if s['provider']==target),None)
-                # An explicit original URL may still need its own update, but
-                # never discover a second EH host or retry it after a denial.
-                if not existing and source_family(target)=='ehentai' and (target=='exhentai' or any(source_family(s['provider'])=='ehentai' for s in sources)):
+                if not existing and target=='exhentai' and source['provider']=='ehentai':
+                    circuit=self.store.automatic_circuit(target)
+                    if access.get(target) or circuit:
+                        output['sites'].append({'provider':target,'status':access.get(target) or circuit['status'],'items':[]})
+                        if not access.get(target):state='waiting'
+                        continue
+                    try:alias=self.connect_ex_alias(work,source,metadata,guarded_fetch,job)
+                    except LeaseLost:raise
+                    except urllib.error.HTTPError as error:
+                        alias={'provider':target,'status':'not_found' if error.code in (404,410) else 'access_required','items':[]}
+                    except (OSError,ValueError,KeyError,TypeError):alias={'provider':target,'status':'unavailable','items':[]}
+                    output['sites'].append(alias)
+                    if alias['status']=='connected':output['connected'].append(target)
+                    elif alias['status'] in ('access_required','unavailable'):
+                        self.store.automatic_circuit(target,alias['status']);state='waiting'
+                    elif alias['status']!='not_found' and state!='waiting':state='review'
+                    continue
+                # Pick one account-family host up front; never retry a denial on another host.
+                if not existing and source_family(target)=='ehentai' and target!=family_target:
                     continue
                 if existing:
                     if target==source['provider'] or (existing['metadata'] and existing['status']=='fetched'):
@@ -174,6 +211,12 @@ class AutoLinker:
                         self.store.import_metadata(work['id'],detail,remote=True,schedule=False,lease_guard=job)
                         output['sites'].append({'provider':target,'status':'connected','items':[]})
                     except LeaseLost:raise
+                    except urllib.error.HTTPError as error:
+                        if error.code in (404,410):
+                            output['sites'].append({'provider':target,'status':'not_found','items':[]});state='review'
+                        else:
+                            self.store.automatic_circuit(target,'access_required')
+                            output['sites'].append({'provider':target,'status':'access_required','items':[]});state='waiting'
                     except (ValueError,OSError,KeyError,TypeError):
                         self.store.automatic_circuit(target,'access_required')
                         output['sites'].append({'provider':target,'status':'access_required','items':[]});state='waiting'

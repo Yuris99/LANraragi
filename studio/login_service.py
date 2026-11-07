@@ -67,6 +67,7 @@ class LoginBrowser:
         return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
                 'shared_eh_account':True,
                 'source_image_search':True,
+                'hitomi_title_search':True,
                 'editing_shortcuts':True,
                 'idle_timeout_seconds':LOGIN_IDLE_TIMEOUT,
                 'idle_remaining_seconds':max(0,int(self.deadline-time.monotonic())) if self.session else None,
@@ -398,6 +399,13 @@ class BrowserActor:
         self.document_lock=threading.Lock()
         self.reaper=threading.Thread(target=self.reap,daemon=True); self.reaper.start()
     def call(self,data):
+        if isinstance(data,dict) and data.get('op')=='hitomi-title-index':
+            if set(data) not in ({'op','title'},{'op','title','offset'}):raise ValueError('invalid_title_index')
+            from site_sessions import hitomi_title_index
+            if not self.document_lock.acquire(blocking=False):return {'status':'busy'}
+            try:return {'status':'ok',**hitomi_title_index(data.get('title'),data.get('offset',0))}
+            except (ValueError,OSError,UnicodeError):return {'status':'unavailable','ids':[],'complete':False}
+            finally:self.document_lock.release()
         if isinstance(data,dict) and data.get('op')=='source-document':
             if set(data) not in ({'op','url'},{'op','url','offset'}):raise ValueError('invalid_source_document')
             from site_sessions import source_document

@@ -1,5 +1,6 @@
 """Reference resolution is local, source-scoped, and never guesses gallery tokens."""
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -37,7 +38,9 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(self.store.resolve_reference('exhentai','X123')['url'],url)
         with self.assertRaises(ValueError):self.store.resolve_reference('ehentai','000123')
         with self.assertRaises(ValueError):self.store.resolve_reference('ehentai','X123')
-        with self.assertRaisesRegex(ValueError,'검증 전'):self.store.request_download('exhentai','X123','nas','command')
+        queued=self.store.request_download('exhentai','X123','nas','command')
+        self.assertEqual(queued['job']['url'],url)
+        with self.assertRaisesRegex(ValueError,'외부 다운로드'):self.store.request_download('exhentai','X123','nas','lanraragi')
 
     def test_existing_ex_file_opens_without_new_download(self):
         work=self.store.create_work('Generated EX',lrr_id='a'*40)
@@ -45,6 +48,36 @@ class ReferenceTests(unittest.TestCase):
         result=self.store.request_download('exhentai','X123','nas','command')
         self.assertEqual(result,{'state':'available','work_id':work['id']})
         self.assertEqual(self.store.jobs(),[])
+
+    def test_ex_worker_capability_requires_current_code_and_preserves_heartbeat(self):
+        app=Studio(self.store,None)
+        runtime={'adapter':'same-source-1','gallery_engine_sha256':hashlib.sha256((Path(__file__).resolve().parents[1]/'gallery_engine.py').read_bytes()).hexdigest(),'worker_sha256':'a'*64,'gallery_dl_version':'1.32.16','sessions_available':True}
+        self.assertFalse(app.download_status()['exhentai_workers']['nas'])
+        self.store.worker_seen('nas',runtime)
+        self.assertTrue(app.download_status()['exhentai_workers']['nas'])
+        self.store.worker_seen('nas')
+        self.assertTrue(app.download_status()['exhentai_workers']['nas'])
+        with patch('store.time.time',return_value=__import__('time').time()+61):
+            self.store.worker_seen('nas')
+            self.assertFalse(app.download_status()['exhentai_workers']['nas'])
+        self.store.worker_seen('nas',runtime)
+        self.store.worker_seen('nas',reset_runtime=True)
+        self.assertFalse(app.download_status()['exhentai_workers']['nas'])
+        with self.assertRaises(ValueError):self.store.worker_seen('nas',{**runtime,'cookie':'do not accept'})
+
+    def test_legacy_worker_cannot_claim_ex_job(self):
+        ex=self.store.queue('https://exhentai.org/g/123/0123456789/','nas','command')
+        hitomi=self.store.queue('https://hitomi.la/galleries/456.html','nas','command')
+        self.assertEqual(self.store.claim('nas','command',exhentai_allowed=False)['id'],hitomi['id'])
+        self.assertIsNone(self.store.claim('nas','command',exhentai_allowed=False))
+        self.assertEqual(self.store.claim('nas','command',exhentai_allowed=True)['id'],ex['id'])
+
+    def test_verification_jobs_do_not_replace_requested_full_downloads(self):
+        url='https://exhentai.org/g/123/0123456789/'
+        job=self.store.queue(url,'nas','command',verification=True)
+        self.assertTrue(json.loads(job['result'])['verification'])
+        with self.assertRaises(ValueError):self.store.queue(url,'nas','command')
+        self.assertEqual(len(self.store.jobs()),1)
 
     def test_same_number_from_other_source_cannot_supply_a_missing_token(self):
         work=self.store.create_work('Synthetic different source')

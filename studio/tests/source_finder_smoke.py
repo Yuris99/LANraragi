@@ -41,6 +41,7 @@ def main():
         a=store.create_work('Accepted archive title','User artist',lrr_id='a'*40,pages=6)
         b=store.create_work('Image search local title','User artist',lrr_id='b'*40,pages=6)
         c=store.create_work('Bulk restore local title','User artist',lrr_id='c'*40,pages=6)
+        title_only=store.create_work('A Garden',pages=6)
         xml=b'<ComicInfo><Web>https://exhentai.org/g/987654/abcdefghij/</Web><Title>A Garden</Title><Writer>Fixture</Writer><Genre>artist:Fixture,language:korean,other:color</Genre><LanguageISO>ko</LanguageISO><PageCount>6</PageCount></ComicInfo>'
         books={'a'*40:archive([('.ehviewer',spider(987654,'abcdefghij',6)),('ComicInfo.xml',xml)],zip64=True),
                'b'*40:archive([('page.png',b'generated')]),'c'*40:archive([('.ehviewer',spider(222222,'abcdefghij',6))])}
@@ -102,6 +103,15 @@ def main():
                 expect(page.locator('#source-find-results .source-row')).to_have_count(5)
                 page.locator('[data-source-finder-select="0"]').click()
                 expect(page.locator('#connected-source-list [data-fetch]')).to_have_count(2)
+                page.locator('#close-detail').click()
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga/L'+str(title_only['local_number']))
+                app.source_search_at=0
+                page.locator('#source-find-method').select_option('hitomi');page.locator('#source-find-start').click()
+                expect(page.locator('#source-find-results .source-row')).to_have_count(1)
+                assert store.get_work(title_only['id'])['artist']=='', 'Title-only search must not invent or save an artist'
+                page.mouse.click(2,2);expect(page.locator('#detail')).not_to_be_visible()
+                assert '/manga/L'+str(title_only['local_number']) not in page.url
+                page.locator('#grid .card[data-id="'+b['id']+'"]').click()
                 page.locator('#close-detail').click();page.set_viewport_size({'width':1440,'height':1000})
                 page.locator('#refresh-metadata').click()
                 expect(page.locator('#metadata-refresh-status')).to_contain_text('완료',timeout=20000)

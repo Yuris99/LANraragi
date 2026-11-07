@@ -180,5 +180,15 @@ class EHSourceFamilyTests(unittest.TestCase):
         with self.assertRaises(ValueError):counterpart_candidates(e,fetch,target='exhentai')
         fetch.assert_not_called()
 
+    def test_same_family_alias_requires_verified_metadata_and_preserves_original_url(self):
+        work=self.store.create_work('Generated')
+        self.store.import_metadata(work['id'],parse_html(E,eh_html()))
+        linker=AutoLinker(self.store,lambda:(generated_fetch,generated_index,{}))
+        self.assertTrue(linker.run_one())
+        sources=self.store.get_work(work['id'])['sources']
+        self.assertIn(E,{s['url'] for s in sources})
+        self.assertIn(E.replace('e-hentai.org','exhentai.org'),{s['url'] for s in sources})
+        self.assertEqual(self.store.list_works()['total'],1)
+
 
 if __name__=='__main__':unittest.main()

@@ -16,9 +16,80 @@ import ssl
 import stat
 import tempfile
 import time
+import hashlib
+import bisect
 import urllib.error
 import urllib.parse
 import urllib.request
+
+
+def hitomi_title_index(title,offset=0,read=None):
+    """Read the public title B-tree with bounded ranges; no cookies or page scripts."""
+    if not isinstance(title,str) or not 1<=len(title.strip())<=150 or any(ord(c)<32 for c in title):raise ValueError('검색할 제목은 1~150자로 입력하세요.')
+    if type(offset) is not int or not 0<=offset<=100000:raise ValueError('검색 위치를 확인하세요.')
+    words=list(dict.fromkeys(title.lower().split()))[:4]
+    deadline=time.monotonic()+25;requests=0
+    def fetch(path,start=None,length=None):
+        nonlocal requests
+        requests+=1
+        if requests>40 or time.monotonic()>=deadline:raise ValueError('히토미 제목 검색 시간·요청 한도입니다.')
+        if read:return read(path,start,length)
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,*args):return None
+        headers={'User-Agent':'LibraryStudio/0.1','Accept':'application/octet-stream'}
+        if start is not None:headers['Range']=f'bytes={start}-{start+length-1}'
+        request=urllib.request.Request('https://ltn.gold-usergeneratedcontent.net/'+path,headers=headers)
+        with urllib.request.build_opener(NoRedirect()).open(request,timeout=max(1,min(8,deadline-time.monotonic()))) as response:
+            if start is not None:
+                scope=re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)',response.headers.get('Content-Range',''))
+                if response.status!=206 or not scope or (int(scope[1]),int(scope[2]))!=(start,start+length-1):raise ValueError('히토미 제목 색인의 범위 응답이 다릅니다.')
+            elif response.status!=200:raise ValueError('히토미 제목 색인 버전을 확인하지 못했습니다.')
+            raw=response.read((length if length is not None else 64)+1)
+        if len(raw)>(length if length is not None else 64) or start is not None and len(raw)!=length:raise ValueError('히토미 제목 색인 크기를 확인하세요.')
+        return raw
+    version=fetch('galleriesindex/version').decode('ascii').strip()
+    if not re.fullmatch('[0-9]{1,32}',version):raise ValueError('히토미 제목 색인 버전 형식이 다릅니다.')
+    nodes={}
+    def node(address):
+        if address in nodes:return nodes[address]
+        if not 0<=address<2**40:raise ValueError('히토미 제목 색인 위치를 확인하세요.')
+        raw=fetch(f'galleriesindex/galleries.{version}.index',address,464)
+        if len(raw)!=464:raise ValueError('히토미 제목 색인이 불완전합니다.')
+        pos=0
+        def integer(size):
+            nonlocal pos
+            if pos+size>len(raw):raise ValueError('히토미 제목 색인 구조가 다릅니다.')
+            value=int.from_bytes(raw[pos:pos+size],'big');pos+=size;return value
+        count=integer(4)
+        if count>16:raise ValueError('히토미 제목 색인 키 개수를 확인하세요.')
+        keys=[]
+        for _ in range(count):
+            if integer(4)!=4:raise ValueError('히토미 제목 색인 키 형식이 다릅니다.')
+            keys.append(raw[pos:pos+4]);pos+=4
+        if keys!=sorted(set(keys)) or integer(4)!=count:raise ValueError('히토미 제목 색인 순서·자료 개수가 다릅니다.')
+        records=[(integer(8),integer(4)) for _ in range(count)]
+        children=[integer(8) for _ in range(17)]
+        nodes[address]=(keys,records,children);return nodes[address]
+    result=None
+    for word in words:
+        key=hashlib.sha256(word.encode('utf-8')).digest()[:4];address=0;seen=set();record=None
+        for _ in range(12):
+            if address in seen:raise ValueError('히토미 제목 색인 순환을 확인하세요.')
+            seen.add(address);keys,records,children=node(address);position=bisect.bisect_left(keys,key)
+            if position<len(keys) and keys[position]==key:record=records[position];break
+            address=children[position]
+            if not address:break
+        else:raise ValueError('히토미 제목 색인 탐색 한도입니다.')
+        if record is None:return {'ids':[],'complete':True}
+        start,length=record
+        if not 4<=length<=1000004 or length%4 or start>=2**40:raise ValueError('제목 검색 범위가 너무 넓거나 색인 형식이 변경됐습니다.')
+        raw=fetch(f'galleriesindex/galleries.{version}.data',start,length)
+        if len(raw)!=length or int.from_bytes(raw[:4],'big')*4+4!=length:raise ValueError('히토미 제목 검색 결과가 불완전합니다.')
+        ids={int.from_bytes(raw[i:i+4],'big') for i in range(4,length,4)}
+        ids.discard(0);result=ids if result is None else result&ids
+        if not result:return {'ids':[],'complete':True}
+    values=sorted(result or (),reverse=True)
+    return {'ids':[str(value) for value in values[offset:offset+8]],'complete':offset+8>=len(values)}
 
 
 def session_family(provider):
@@ -114,7 +185,7 @@ def _source_document(vault,url,offset=0,trace=None):
         if not (gallery or searching):raise ValueError('invalid_source_url')
     elif host=='ltn.gold-usergeneratedcontent.net' and not value.query:
         provider='hitomi'
-        index=bool(re.fullmatch(r'/artist/[^/]+-all\.nozomi',value.path))
+        index=bool(re.fullmatch(r'/(?:n/)?artist/[^/]+-all\.nozomi',value.path))
         if not (index or re.fullmatch(r'/galleries/[0-9]+\.js',value.path)):
             raise ValueError('invalid_source_url')
     else:raise ValueError('invalid_source_url')
@@ -327,7 +398,7 @@ class CookieVault:
         return {'provider':name,'name':site(name)['name'],'state':state,'cookie_count':count,'session_revision':revision,
                 'session_family':session_family(name),'target_session_available':target_ready,'target_cookie_count':len(applicable),
                 'login_available':bool(site(name)['login']),'site_verified':False,
-                'download_enabled':name != 'exhentai','last_request':self.last_requests.get(name)}
+                'download_enabled':True,'last_request':self.last_requests.get(name)}
 
     def forget(self, name):
         if self.readonly: raise ValueError('읽기 전용 세션입니다.')

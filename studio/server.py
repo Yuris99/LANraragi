@@ -29,7 +29,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=33
+STUDIO_UPDATE=34
 
 
 def supported_login_status(value):
@@ -77,6 +77,12 @@ def verify_cleanup_downloads(lrr, request):
 
 
 class Studio:
+    def download_status(self):
+        workers=self.store.worker_status();runtime=self.store.worker_runtime()
+        expected=hashlib.sha256((HERE/'gallery_engine.py').read_bytes()).hexdigest()
+        ready={target:bool(workers[target] and runtime[target] and 0<=time.time()-runtime[target].get('seen_at',0)<60 and runtime[target].get('adapter')=='same-source-1' and runtime[target].get('gallery_engine_sha256')==expected and runtime[target].get('sessions_available')) for target in ('nas','pc')}
+        return {'command_workers':workers,'worker_runtime':runtime,'exhentai_workers':ready,'site_verified':False}
+
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
         self.source_search_at=0
@@ -152,8 +158,16 @@ class Studio:
             return result
         def fetch(url):return request(url)['document']
         def index(artist,offset=None):
-            if not isinstance(artist,str) or not 0<len(artist)<=150:raise ValueError('작가 정보가 필요합니다.')
-            url='https://ltn.gold-usergeneratedcontent.net/artist/'+urllib.parse.quote(artist,safe='')+'-all.nozomi'
+            if not isinstance(artist,str) or not 0<len(artist)<=156:raise ValueError('작가·제목 정보가 필요합니다.')
+            if artist.startswith('title:'):
+                if not status.get('hitomi_title_search'):raise ValueError('히토미 제목 검색 로그인 서비스 업데이트가 필요합니다.')
+                result=self.login.call({'op':'hitomi-title-index','title':artist[6:],'offset':offset or 0})
+                if result.get('status')!='ok':raise urllib.error.HTTPError('https://hitomi.la/',503,'title_index_unavailable',{},None)
+                ids=result.get('ids')
+                if not isinstance(ids,list) or len(ids)>8 or any(not isinstance(i,str) or not re.fullmatch('[1-9][0-9]{0,11}',i) for i in ids):raise ValueError('히토미 제목 검색 결과를 확인하세요.')
+                return result if offset is not None else ids
+            if len(artist)>150:raise ValueError('작가 이름을 확인하세요.')
+            url='https://ltn.gold-usergeneratedcontent.net/n/artist/'+urllib.parse.quote(artist,safe='')+'-all.nozomi'
             result=request(url,offset);raw=base64.b64decode(result['index'],validate=True)
             if len(raw)>32 or len(raw)%4:raise ValueError('작가 색인 형식을 확인하세요.')
             ids=[str(int.from_bytes(raw[i:i+4],'big')) for i in range(0,len(raw),4)]
@@ -168,7 +182,7 @@ class Studio:
             if time.monotonic()-checked>60:
                 try:
                     status=self.login.call({'op':'status'})
-                    fingerprint=json.dumps({'documents':status.get('source_documents',False),'eh_family':status.get('shared_eh_account',False),'sites':[
+                    fingerprint=json.dumps({'search_version':2,'title_search':status.get('hitomi_title_search',False),'documents':status.get('source_documents',False),'eh_family':status.get('shared_eh_account',False),'sites':[
                         [s['provider'],s.get('state'),s.get('session_revision','')] for s in status.get('sites',[])]},sort_keys=True)
                     self.store.automatic_session_changed(fingerprint)
                 except (ValueError,OSError):pass
@@ -294,6 +308,7 @@ class Studio:
             try:
                 jobs=[j for j in self.store.jobs() if j['target']=='nas' and j['engine']=='command'
                       and j['state']=='complete' and not json.loads(j['result']).get('catalog_indexed')
+                      and not json.loads(j['result']).get('verification')
                       and not json.loads(j['result']).get('catalog_review_required')]
                 if not jobs:continue
                 archives=self.lrr.json('/api/archives')
@@ -419,7 +434,7 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.automatic_status(store.get_work(match[1])['id']))
         if path=='/api/site-connections':
             return self.respond(supported_login_status(self.app.login.call({'op':'status'})))
-        if path=='/api/downloads/status':return self.respond({'command_workers':store.worker_status(),'site_verified':False})
+        if path=='/api/downloads/status':return self.respond(self.app.download_status())
         if path=='/api/folders':return self.respond(store.folder_status())
         match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',path)
         if match:return self.download_voice(match[1],q('download')=='1')
@@ -640,10 +655,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 store.begin_matching(work['id'])
                 metadata=source['metadata']
+                fetch,index,access=self.app.source_transport()
                 if not metadata:
-                    metadata=direct_metadata(source['url'])
+                    metadata=direct_metadata(source['url'],fetch)
                     store.import_metadata(work['id'],metadata,remote=True)
-                result=counterpart_candidates(metadata)
+                target=('exhentai' if not access.get('exhentai') else 'ehentai') if source['provider']=='hitomi' else 'hitomi'
+                result=counterpart_candidates(metadata,fetch,index,target=target)
                 result['connected']=False
                 eligible=[item for item in result['items'] if item['comparison']['automatic_eligible']]
                 if data['automatic'] and len(eligible)==1 and result['status']=='checked':
@@ -698,7 +715,17 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.cancel_folder_import(match[1]))
         if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
         if path=='/api/downloads':
+            if data.get('provider')=='exhentai' and data.get('engine')=='command':
+                source=store.resolve_reference('exhentai',data.get('reference'))
+                if not source['available'] and not self.app.download_status()['exhentai_workers'].get(data.get('target')):
+                    raise ValueError('로그인 세션을 사용하는 익헨 다운로드 작업자의 연결·업데이트를 기다려 주세요.')
             return self.respond(store.request_download(data.get('provider'),data.get('reference'),data.get('target'),data.get('engine')))
+        if path=='/api/downloads/verify':
+            if set(data)!={'reference','target'}:raise ValueError('익헨 주소·번호와 저장 대상만 지정하세요.')
+            target=data['target']
+            if not self.app.download_status()['exhentai_workers'].get(target):raise ValueError('익헨 다운로드 작업자 연결·업데이트를 기다려 주세요.')
+            source=store.resolve_reference('exhentai',data['reference'])
+            return self.respond({'state':'queued','job':store.public_job(store.queue(source['url'],target,'command',source['work_id'],verification=True))})
         if path=='/api/tags/batch':return self.respond(store.edit_user_tags(data.get('work_ids'),data.get('add'),data.get('remove')))
         if path=='/api/tags/rename':return self.respond(store.rename_user_tag(data.get('source'),data.get('target')))
         if path=='/api/uploads/sync':return self.respond(self.app.sync_uploads())
@@ -755,12 +782,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond({'error':'Worker token required'},403)
             if path=='/api/worker/claim':
                 if scope!='*' and data.get('target')!=scope:return self.respond({'error':'Worker target mismatch'},403)
-                store.worker_seen(data.get('target'))
-                return self.respond(store.claim(data.get('target'),'command'))
+                store.worker_seen(data.get('target'),data.get('runtime'))
+                eligible=bool(data.get('runtime') and self.app.download_status()['exhentai_workers'].get(data.get('target')))
+                return self.respond(store.claim(data.get('target'),'command',exhentai_allowed=eligible))
             match=re.fullmatch('/api/worker/([0-9a-f]{32})/report',path)
             if match:
                 store.report(match[1],data.get('lease'),data.get('state'),data.get('message',''),data.get('result'),worker_target=scope)
-                store.worker_seen(store.job(match[1])['target'])
+                store.worker_seen(store.job(match[1])['target'],data.get('runtime'))
                 return self.respond({'success':True})
         return self.respond({'error':'찾을 수 없습니다.'},404)
 

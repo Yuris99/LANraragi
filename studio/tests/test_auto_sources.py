@@ -33,6 +33,7 @@ def generated_fetch(url):
     if url.startswith('https://e-hentai.org/?'):return '<a href="'+E+'">generated</a>'
     if url.startswith('https://exhentai.org/?'):return '<a href="'+X+'">generated</a>'
     if url==E:return eh_html()
+    if url==E.replace('e-hentai.org','exhentai.org'):return eh_html()
     if url==X:return ex_html()
     raise AssertionError('Unexpected generated request')
 
@@ -47,7 +48,36 @@ class AutoSourceTests(unittest.TestCase):
         self.work=self.store.create_work('Keep title','Keep artist')
 
     def linker(self,fetch=generated_fetch,index=generated_index,access=None):
-        return AutoLinker(self.store,lambda:(fetch,index,access or {}))
+        return AutoLinker(self.store,lambda:(fetch,index,{'exhentai':'session_required'} if access is None else access))
+
+    def test_available_ex_session_searches_ex_instead_of_skipping_it(self):
+        self.seed_h();calls=[]
+        def fetch(url):calls.append(url);return generated_fetch(url)
+        self.linker(fetch=fetch,access={}).run_one()
+        self.assertEqual({s['provider'] for s in self.store.get_work(self.work['id'])['sources']},{'hitomi','exhentai'})
+        self.assertTrue(any(url.startswith('https://exhentai.org/?') for url in calls))
+        self.assertFalse(any('e-hentai.org' in url for url in calls))
+
+    def test_one_deleted_ex_gallery_does_not_block_the_whole_site(self):
+        self.seed_h();self.store.upsert_source(self.work['id'],{'url':X})
+        def fetch(url):
+            if url==X:raise urllib.error.HTTPError(url,404,'gone',{},None)
+            return generated_fetch(url)
+        self.linker(fetch=fetch,access={}).run_one()
+        self.assertIsNone(self.store.automatic_circuit('exhentai'))
+        site=next(s for s in self.store.automatic_status(self.work['id'])['result']['sites'] if s['provider']=='exhentai')
+        self.assertEqual(site['status'],'not_found')
+
+    def test_new_search_revision_requeues_old_finished_searches_once(self):
+        self.seed_h();before=self.store.get_work(self.work['id'])
+        with self.store.db() as db:
+            db.execute("UPDATE source_link_jobs SET state='complete'")
+            db.execute("UPDATE settings SET value='old' WHERE key='source_search_revision'")
+        reopened=Store(self.path)
+        self.assertEqual(reopened.automatic_status(self.work['id'])['state'],'queued')
+        self.assertEqual(reopened.get_work(self.work['id']),before)
+        with reopened.db() as db:db.execute("UPDATE source_link_jobs SET state='review'")
+        self.assertEqual(Store(self.path).automatic_status(self.work['id'])['state'],'review')
 
     def seed_h(self,work=None,number='123456'):
         work=work or self.work
@@ -88,7 +118,9 @@ class AutoSourceTests(unittest.TestCase):
                 store=Store(Path(directory)/'catalog.db');work=store.create_work('Generated')
                 store.import_metadata(work['id'],parse_html(url,html))
                 AutoLinker(store,lambda:(generated_fetch,generated_index,{})).run_one()
-                self.assertEqual({s['provider'] for s in store.get_work(work['id'])['sources']},{parse_source(url)['provider'],'hitomi'})
+                expected={parse_source(url)['provider'],'hitomi'}
+                if url==E:expected.add('exhentai')
+                self.assertEqual({s['provider'] for s in store.get_work(work['id'])['sources']},expected)
 
     def test_legacy_ex_migration_preserves_saved_url_metadata_and_old_alias(self):
         self.store.import_metadata(self.work['id'],parse_html(X,ex_html()))

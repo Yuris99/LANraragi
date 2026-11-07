@@ -109,6 +109,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             db.execute('''INSERT INTO work_numbers(work_id)
                 SELECT w.id FROM works w WHERE NOT EXISTS
                 (SELECT 1 FROM work_numbers n WHERE n.work_id=w.id) ORDER BY w.added,w.id''')
+            self.upgrade_automatic_search(db)
 
     @contextlib.contextmanager
     def db(self):
@@ -682,12 +683,14 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         with self.db() as db:
             db.execute('UPDATE works SET progress=?,last_read=? WHERE id=?',(page,time.time(),work_id))
 
-    def queue(self, url, target, engine, work_id=None):
+    def queue(self, url, target, engine, work_id=None,verification=False):
         source = parse_source(url)
+        if type(verification) is not bool or verification and (source['provider']!='exhentai' or engine!='command'):raise ValueError('익헨 외부 작업자 연결 검증만 지원합니다.')
         if target not in ('nas','pc') or engine not in ('lanraragi','command'):
             raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')
         if engine=='lanraragi' and target!='nas':
             raise ValueError('LANraragi 엔진은 서버 저장 전용입니다.')
+        if source['provider']=='exhentai' and engine!='command':raise ValueError('익헨은 외부 다운로드 작업자를 선택하세요.')
         if work_id:self.get_work(work_id)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -696,12 +699,13 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
                 identity=parse_source(existing['url'])
                 if (identity['provider'],identity['external_id'])!=(source['provider'],source['external_id']):continue
                 remote=json.loads(existing['result'])
+                if existing['state'] in ('queued','running') and bool(remote.get('verification'))!=verification:raise ValueError('이 작품의 다른 다운로드·검증 작업이 진행 중입니다.')
                 if existing['state'] in ('queued','running'):return dict(existing)
                 if existing['engine']=='lanraragi' and (remote.get('remote_job') or remote.get('submission')=='pending'):
                     raise ValueError('기존 서버 작업의 접수 여부를 먼저 확인하세요. 다른 엔진으로도 중복 제출하지 않았습니다.')
             job_id=uid();now=time.time()
-            db.execute('INSERT INTO jobs(id,work_id,url,target,engine,state,created,updated) VALUES(?,?,?,?,?,?,?,?)',
-                       (job_id,work_id,source['url'],target,engine,'queued',now,now))
+            db.execute('INSERT INTO jobs(id,work_id,url,target,engine,state,created,updated,result) VALUES(?,?,?,?,?,?,?,?,?)',
+                       (job_id,work_id,source['url'],target,engine,'queued',now,now,json.dumps({'verification':True} if verification else {})))
         return self.job(job_id)
 
     def resolve_reference(self,provider,reference):
@@ -740,7 +744,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         source=self.resolve_reference(provider,reference)
         if source['available']:
             return {'state':'available','work_id':source['work_id']}
-        if provider=='exhentai':raise ValueError('익헨 번호·URL 확인은 지원하지만 새 파일 다운로드는 인증된 동일 출처 검증 전입니다.')
+        if provider=='exhentai' and engine!='command':raise ValueError('익헨은 로그인 세션을 사용하는 외부 다운로드 작업자를 선택하세요.')
         return {'state':'queued','job':self.public_job(self.queue(source['url'],target,engine,source['work_id']))}
 
     def job(self, job_id):
@@ -763,10 +767,26 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         with self.db() as db:
             return [dict(x) for x in db.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 200')]
 
-    def worker_seen(self,target):
+    def worker_seen(self,target,runtime=None,reset_runtime=False):
         if target not in ('nas','pc'):raise ValueError('잘못된 작업 대상입니다.')
+        if runtime is not None:
+            if not isinstance(runtime,dict) or set(runtime)!={'adapter','gallery_engine_sha256','worker_sha256','gallery_dl_version','sessions_available'} or runtime['adapter']!='same-source-1' or runtime['gallery_dl_version']!='1.32.16' or type(runtime['sessions_available']) is not bool or any(not isinstance(runtime[key],str) or not re.fullmatch('[0-9a-f]{64}',runtime[key]) for key in ('gallery_engine_sha256','worker_sha256')):
+                raise ValueError('다운로드 작업자 런타임 정보를 확인하세요.')
         with self.db() as db:
             db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',('command_worker_seen_'+target,str(time.time())))
+            if runtime is not None:db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',('command_worker_runtime_'+target,json.dumps(runtime)))
+            if runtime is not None:db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',('command_worker_runtime_seen_'+target,str(time.time())))
+            elif reset_runtime:
+                db.execute('DELETE FROM settings WHERE key IN (?,?)',('command_worker_runtime_'+target,'command_worker_runtime_seen_'+target))
+
+    def worker_runtime(self):
+        with self.db() as db:
+            result={}
+            for target in ('nas','pc'):
+                row=db.execute('SELECT value FROM settings WHERE key=?',('command_worker_runtime_'+target,)).fetchone()
+                seen=db.execute('SELECT value FROM settings WHERE key=?',('command_worker_runtime_seen_'+target,)).fetchone()
+                result[target]={**json.loads(row[0]),'seen_at':float(seen[0]) if seen else 0} if row else None
+            return result
 
     def worker_status(self):
         with self.db() as db:
@@ -799,7 +819,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
                        (json.dumps(result),'다운로드 및 보관함 연결 완료',job_id,'complete'))
         return work_id
 
-    def claim(self, target, engine):
+    def claim(self, target, engine,exhentai_allowed=True):
         if target not in ('nas','pc') or engine not in ('lanraragi','command'):
             raise ValueError('잘못된 작업 대상입니다.')
         now=time.time()
@@ -807,7 +827,8 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             db.execute('BEGIN IMMEDIATE')
             # Expired command tasks need explicit retry: a crashed engine might still be writing.
             db.execute("UPDATE jobs SET state='blocked',lease=NULL,lease_until=NULL,message='임대 만료: 출력 폴더와 원격 작업을 확인한 뒤 다시 시도하세요.',updated=? WHERE state='running' AND lease_until<?",(now,now))
-            row=db.execute("SELECT * FROM jobs WHERE target=? AND engine=? AND state='queued' ORDER BY created LIMIT 1",(target,engine)).fetchone()
+            eligible=" AND url NOT LIKE 'https://exhentai.org/%'" if engine=='command' and not exhentai_allowed else ''
+            row=db.execute("SELECT * FROM jobs WHERE target=? AND engine=? AND state='queued'"+eligible+" ORDER BY created LIMIT 1",(target,engine)).fetchone()
             if not row:return None
             lease=secrets.token_urlsafe(32)
             db.execute("UPDATE jobs SET state='running',lease=?,lease_until=?,updated=? WHERE id=?",(lease,now+120,now,row['id']))
