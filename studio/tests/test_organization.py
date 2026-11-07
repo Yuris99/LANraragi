@@ -121,13 +121,13 @@ class CandidateTests(unittest.TestCase):
             return json.dumps({'gmetadata':[{'gid':123456,'title':'Different E title','tags':['artist:E artist']}]})
         if 'gold-usergeneratedcontent' in url:
             return 'var galleryinfo = '+json.dumps({'id':123456,'title':'Different H title','artists':[{'artist':'H artist'}]})+';'
-        return json.dumps({'id':123456,'title':{'english':'Different N title'},'tags':[{'type':'artist','name':'N artist'}]})
+        raise AssertionError('Unexpected provider request: '+url)
 
-    def test_all_three_independent_candidates_return_distinct_metadata(self):
+    def test_supported_families_return_distinct_metadata_without_retired_requests(self):
         result=source_candidates('123456',self.fetch)
-        self.assertEqual([r['provider'] for r in result],['ehentai','hitomi','nhentai'])
+        self.assertEqual([r['provider'] for r in result],['ehentai','hitomi'])
         self.assertTrue(all(r['status']=='found' for r in result))
-        self.assertEqual(len({r['title'] for r in result}),3)
+        self.assertEqual(len({r['title'] for r in result}),2)
         self.assertTrue(all(r['artists'] for r in result))
 
     def test_blocked_site_is_not_substituted_by_another_site(self):
@@ -138,7 +138,6 @@ class CandidateTests(unittest.TestCase):
         self.assertEqual(result[0]['status'],'access_required')
         self.assertIsNone(result[0]['url'])
         self.assertEqual(result[1]['status'],'found')
-        self.assertEqual(result[2]['status'],'found')
 
     def test_ehentai_missing_token_and_wrong_identity_do_not_offer_selection(self):
         def fetch(url,payload=None):
@@ -146,7 +145,7 @@ class CandidateTests(unittest.TestCase):
             if 'gold-usergeneratedcontent' in url:return 'var galleryinfo = {"id":123457,"title":"Wrong"};'
             return '[]'
         result=source_candidates('123456',fetch)
-        self.assertEqual([r['status'] for r in result],['needs_url','invalid_response','invalid_response'])
+        self.assertEqual([r['status'] for r in result],['needs_url','invalid_response'])
         self.assertTrue(all(r['url'] is None for r in result))
 
     def test_number_validation_prevents_arbitrary_network_destinations(self):

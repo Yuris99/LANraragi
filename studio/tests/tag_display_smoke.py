@@ -27,6 +27,7 @@ def main():
             'constructor','other:<img src=x onerror=alert(1)>'])
         for provider,url in [('ehentai','https://e-hentai.org/g/123/abc/'),('exhentai','https://exhentai.org/g/123/abc/'),('hitomi','https://hitomi.la/manga/generated-456.html')]:
             store.upsert_source(work['id'],{'url':url,'tags':['female:glasses','language:korean']})
+        store.upsert_source(work['id'],{'url':'https://nhentai.net/g/123/','tags':['female:glasses']})
         store.edit_user_tags([work['id']],['소장'])
         snapshot=json.dumps(store.get_work(work['id']),sort_keys=True)
         server=make_server('127.0.0.1',0,Studio(store,FixtureLRR()))
@@ -41,6 +42,8 @@ def main():
                     context.route('https://**/*',lambda route:route.fulfill(status=200,body='Generated external destination'))
                     page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
                     page.goto(base);expect(page.locator('#grid .card')).to_have_count(1)
+                    assert page.locator('[data-provider="nhentai"],[data-filter="nhentai"],option[value="nhentai"]').count()==0
+                    assert page.locator('a[href*="nhentai.net"]').count()==0
                     label=page.locator('#tag-strip-list [data-tag-label="female:glasses"]')
                     expect(label).to_contain_text('안경')
                     expect(page.locator('#grid .source-shortcut')).to_have_count(3)

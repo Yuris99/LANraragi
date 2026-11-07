@@ -44,7 +44,7 @@ class ReferenceTests(unittest.TestCase):
     def test_numeric_sources_are_distinct_and_active_submissions_are_idempotent(self):
         one=self.store.request_download('hitomi','123','pc','command')
         again=self.store.request_download('hitomi','000123','pc','command')
-        other=self.store.request_download('nhentai','123','pc','command')
+        other=self.store.request_download('ehentai','https://e-hentai.org/g/123/abc/','pc','command')
         self.assertEqual(one['job']['id'],again['job']['id'])
         self.assertNotEqual(one['job']['id'],other['job']['id'])
         self.assertIsNone(one['job']['work_id']);self.assertNotIn('lease',one['job'])
@@ -53,7 +53,7 @@ class ReferenceTests(unittest.TestCase):
     def test_wrong_provider_url_and_invalid_references_are_rejected(self):
         for provider,value in [('ehentai','https://hitomi.la/galleries/123.html'),('hitomi','https://127.0.0.1/'),
                                ('hitomi','1; echo injected'),('hitomi','0'),('hitomi','１'),
-                               ('hitomi','9'*2049),('unknown','123'),('hitomi',None)]:
+                               ('hitomi','9'*2049),('unknown','123'),('nhentai','123'),('hitomi',None)]:
             with self.subTest(provider=provider,value=value),self.assertRaises(ValueError):
                 self.store.resolve_reference(provider,value)
         self.assertEqual(self.store.jobs(),[])

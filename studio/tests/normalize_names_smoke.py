@@ -77,7 +77,7 @@ def main():
         work=works[0]
         request('/api/organization/artists/all',{'scope':'library'})
         request('/api/works/'+work['id'],{'favorite':True,'title':'Generated preserved title','title_locked':True})
-        request('/api/works/'+work['id']+'/sources',{'url':'https://nhentai.net/g/123456/','comments':[{'id':'1','text':'Generated comment'}]})
+        request('/api/works/'+work['id']+'/sources',{'url':'https://e-hentai.org/g/123456/generated/','comments':[{'id':'1','text':'Generated comment'}]})
         request('/api/media/'+work['lrr_id']+'/files')
         request('/api/works/'+work['id']+'/progress',{'page':2})
         work=request('/api/works/'+work['id'])

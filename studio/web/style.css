@@ -369,7 +369,7 @@ label.tag-language-control:not(.search){display:flex;flex-direction:row;align-it
 .tag-pair>.tag,.tag-pair>.tag-chip{flex:1 1 auto;border-radius:7px 0 0 7px;background:transparent;white-space:normal;min-width:0;max-width:100%;padding:7px 10px;font-size:14px;line-height:1.5;text-align:start}
 .tag-pair>.selected{background:var(--text);color:var(--bg)}
 .tag-pair>.selected .tag-namespace,.tag-pair>.selected .count{color:#4a4642}
-.tag-label{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0;overflow-wrap:anywhere}
+.tag-label{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0;max-width:100%;overflow-wrap:anywhere}
 .tag-namespace{color:var(--muted);font-size:13px;line-height:1.5}
 .tag-value{font-weight:550}
 .tag-pair .count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;margin-inline-start:5px}
@@ -398,3 +398,13 @@ label.tag-language-control:not(.search){display:flex;flex-direction:row;align-it
   .tag-language-control select{min-height:44px}
   .source-shortcut{min-height:44px}
 }
+
+.preset-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+.preset-controls select{min-width:0;max-width:100%}
+.preset-row{padding:14px 0;border-bottom:1px solid var(--line)}
+.preset-row p{margin:8px 0;line-height:1.8;overflow-wrap:anywhere}
+.preset-row .form-actions{justify-content:flex-start;margin:10px 0 0;gap:8px}
+#preset-selected,#preset-tag-results{margin:12px 0}
+.tags>.tag{font-size:14px;line-height:1.5;white-space:normal;text-align:start}
+#tag-presets input{width:100%}
+@media(max-width:700px){.tags>.tag{min-height:44px}}

@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from connectors import fetch_comments, source_candidates
-from sources import parse_source
+from sources import parse_source,supported_source,SUPPORTED_PROVIDERS
 from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates,result as embedded_metadata
 from auto_sources import AutoLinker
 from store import Store
@@ -30,6 +30,12 @@ from tag_display import dictionary as tag_dictionary
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
 STUDIO_UPDATE=31
+
+
+def supported_login_status(value):
+    value={**value,'sites':[s for s in value.get('sites',[]) if s.get('provider') in SUPPORTED_PROVIDERS]}
+    if value.get('active') and value['active'].get('provider') not in SUPPORTED_PROVIDERS:value['active']=None
+    return value
 
 
 class LRR:
@@ -88,6 +94,7 @@ class Studio:
     def restore_source_record(self,work_id):
         record=self.extract_source_record(work_id)
         evidence=preferred_evidence(record['evidence'])
+        if evidence and evidence['provider'] not in SUPPORTED_PROVIDERS:evidence=None
         work=self.store.get_work(work_id)
         if evidence:
             existing=next((s for s in work['sources'] if s['url']==evidence['url']),None)
@@ -233,23 +240,14 @@ class Studio:
                 self.store.begin_matching(work_id)
                 return self.store.import_metadata(work_id,direct_metadata(source['url'],self.source_transport()[0]),remote=True,schedule=schedule)
             finally:self.match_lock.release()
-        if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
-        plugins=self.lrr.json('/api/plugins/metadata')
-        namespace={'ehentai':'ehplugin','hitomi':'hitomiplugin','nhentai':'nhplugin'}[source['provider']]
-        candidates=[x for x in plugins if x.get('namespace')==namespace]
-        if not candidates:raise ValueError('해당 사이트의 메타데이터 플러그인이 설치되어 있지 않습니다.')
-        response=self.lrr.json('/api/plugins/use','POST',{
-            'id':work['lrr_id'],'plugin':candidates[0]['namespace'],'arg':source['url']})
-        data=response.get('data',{})
-        tags=data.get('new_tags',data.get('tags',''))
-        # Fetching tags must never erase previously imported comments or local title edits.
-        return self.store.upsert_source(work_id,{'url':source['url'],'tags':tags,'status':'fetched'})
+        raise ValueError('현재 지원하지 않는 출처입니다.')
 
     def fetch_comments(self, work_id, source_id):
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
-        if source['provider'] in ('nhentai','ehentai','exhentai'):self.store.begin_comment_fetch(work_id,source_id)
+        supported_source(source['url'])
+        if source['provider'] in ('ehentai','exhentai'):self.store.begin_comment_fetch(work_id,source_id)
         if source['provider'] in ('ehentai','exhentai'):
             metadata=direct_metadata(source['url'],self.source_transport()[0])
             result={'status':'fetched','comments':metadata['comments'],'fetched_at':time.time(),
@@ -419,7 +417,8 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/source-linking':return self.respond(store.automatic_summary())
         match=re.fullmatch('/api/works/([0-9a-f]{32})/source-linking',path)
         if match:return self.respond(store.automatic_status(store.get_work(match[1])['id']))
-        if path=='/api/site-connections':return self.respond(self.app.login.call({'op':'status'}))
+        if path=='/api/site-connections':
+            return self.respond(supported_login_status(self.app.login.call({'op':'status'})))
         if path=='/api/downloads/status':return self.respond({'command_workers':store.worker_status(),'site_verified':False})
         if path=='/api/folders':return self.respond(store.folder_status())
         match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',path)
@@ -444,13 +443,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:info={};connected=False
             return self.respond(dict(status='ok',lanraragi_connected=connected,
                                      version=info.get('version'),studio_update=STUDIO_UPDATE,targets=['nas','pc'],
-                                     comment_fetch={'nhentai':'public-json-unverified-live','ehentai':'html-unverified-live','hitomi':'unsupported'},metadata_fetch='direct-eh-hitomi-unverified-live',
+                                     comment_fetch={'ehentai':'html-unverified-live','hitomi':'unsupported'},metadata_fetch='direct-eh-hitomi-unverified-live',
                                      command_workers='operator-configured',uploads_enabled=self.app.uploads.root is not None,
                                      max_upload_bytes=self.app.uploads.max_bytes))
         if path=='/api/uploads':return self.respond({'items':self.app.uploads.list(),'enabled':self.app.uploads.root is not None,'max_bytes':self.app.uploads.max_bytes})
         match=re.fullmatch(r'/api/uploads/([0-9a-f]{64})/download',path)
         if match:return self.download_upload(match[1])
         if path=='/api/tags':return self.respond(store.tag_catalog(q('q')))
+        if path=='/api/tag-presets':return self.respond(store.tag_presets())
         if path=='/api/source-preview':
             raw=preview_image(q('url'));mime=image_content_type(raw[:32])
             if not mime:raise ValueError('후보 표지 이미지 형식을 확인하세요.')
@@ -465,7 +465,7 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.resolve_short_id(match[1]))
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
-                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag'),q('all_tag')))
+                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag'),all_tags=qs.get('all_tag',[])))
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
         if match:return self.respond(store.get_work(match[1]))
         if path=='/api/jobs':
@@ -500,6 +500,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/'):return self.respond({'error':'찾을 수 없습니다.'},404)
         assets={'/':'index.html','/unsen':'index.html','/unsen/':'index.html','/app.js':'app.js','/style.css':'style.css'}
         filename=assets.get(path)
+        if re.fullmatch(r'/(?:library|downloads)|/[EXNL]?[0-9]{1,32}(?:/[0-9]{1,7})?|/works/[0-9a-f]{32}(?:/read/[0-9]{1,7})?',path,re.I):filename='index.html'
         if not filename:return self.respond({'error':'찾을 수 없습니다.'},404)
         raw=(HERE/'web'/filename).read_bytes()
         self.send_response(200)
@@ -606,6 +607,13 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/source-linking':
             if set(data)!={'enabled'}:raise ValueError('자동 연결 설정만 지정하세요.')
             return self.respond(store.set_automatic_enabled(data['enabled']))
+        if path=='/api/tag-presets':
+            if set(data)-{'id','name','tags'}:raise ValueError('프리셋 이름과 태그만 지정하세요.')
+            return self.respond(store.save_tag_preset(data.get('name'),data.get('tags'),data.get('id')))
+        match=re.fullmatch('/api/tag-presets/([0-9a-f]{32})/delete',path)
+        if match:
+            if data:raise ValueError('추가 필드는 지정하지 마세요.')
+            return self.respond(store.delete_tag_preset(match[1]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/source-linking',path)
         if match:
             if data:raise ValueError('추가 필드는 지정하지 마세요.')
@@ -644,7 +652,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(store.import_metadata(match[1],parse_html(data['url'],data['html'])))
         if path=='/api/site-connections':
             if data.get('op')=='source-document':raise ValueError('내부 정보 조회는 로그인 화면 API에서 사용할 수 없습니다.')
+            if 'provider' in data and data['provider'] not in ('ehentai','exhentai'):raise ValueError('지원하는 로그인 사이트를 선택하세요.')
             if len(json.dumps(data).encode())>(200000 if data.get('op')=='import-session' else 16384):raise ValueError('로그인 요청 크기를 확인하세요.')
+            if data.get('op')=='status':return self.respond(supported_login_status(self.app.login.call(data)))
             return self.respond(self.app.login.call(data))
         if path=='/api/visual/index':
             if set(data)!={'items'}:raise ValueError('표지 지문 목록만 지정하세요.')
@@ -699,6 +709,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:self.app.match_lock.release()
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
         if match:
+            supported_source(data.get('url'))
             if data.get('metadata') is not None:
                 # Validate identity and bounded fields before importing comments.
                 # This is a user-confirmed snapshot, never marked live-verified.
@@ -717,11 +728,13 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             store.progress(match[1],data.get('page'));return self.respond({'success':True})
         if path=='/api/jobs':
+            supported_source(data.get('url'))
             return self.respond(store.public_job(store.queue(data.get('url'),data.get('target'),data.get('engine'),data.get('work_id'))),201)
         match=re.fullmatch('/api/jobs/([0-9a-f]{32})/retry',path)
         if match:
             store.expire_jobs()
             job=store.job(match[1]);remote=json.loads(job['result']).get('remote_job')
+            supported_source(job['url'])
             if job['engine']=='lanraragi' and remote:
                 if not re.fullmatch(r'[0-9]+',str(remote)):raise ValueError('잘못된 원격 작업 ID입니다.')
                 status=self.app.lrr.json('/api/minion/'+str(remote)+'/detail')

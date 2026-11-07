@@ -7,7 +7,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name, clean_title
+from sources import parse_source, tags_list, comments_list, filename_hints, canonical_archive_name, clean_title, SUPPORTED_PROVIDERS
 from metadata import canonical_tag, visible_tag
 from tag_display import tag_words, NAMESPACES
 
@@ -193,7 +193,7 @@ class Store(EditionCatalog,AutomaticSources):
             return result
 
     def list_works(self, query='', sort='added', descending=True, page=1, limit=48,
-                   provider='', favorite=False, unread=False, tag='', all_tag=''):
+                   provider='', favorite=False, unread=False, tag='', all_tag='', all_tags=None):
         order = {'added': 'added', 'title': 'title COLLATE NOCASE', 'artist': 'artist COLLATE NOCASE',
                  'pages': 'pages', 'bytes': 'bytes', 'rating': 'rating',
                  'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()'}
@@ -214,12 +214,13 @@ class Store(EditionCatalog,AutomaticSources):
         if tag:
             where.append("EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND u.tag=?)")
             args.append(tag)
-        if all_tag:
-            if not isinstance(all_tag,str) or len(all_tag)>300:raise ValueError('태그 길이를 확인하세요.')
+        if all_tags is not None and not isinstance(all_tags,list):raise ValueError('태그 조합 형식을 확인하세요.')
+        filters=self.combination_tags(([all_tag] if all_tag else [])+(all_tags or []))
+        for selected_tag in filters:
             where.append('''(EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND studio_tag(u.tag)=?)
                 OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE studio_tag(t.value)=?)
                 OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND studio_tag(t.value)=?))''')
-            args.extend([canonical_tag(all_tag)]*3)
+            args.extend([selected_tag]*3)
         if provider:
             if provider in ('ehentai','exhentai'):
                 where.append("EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider IN ('ehentai','exhentai'))")
@@ -303,6 +304,41 @@ class Store(EditionCatalog,AutomaticSources):
         with self.db() as db:
             rows=db.execute("SELECT u.tag,count(*) AS count FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL AND u.tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def combination_tags(tags):
+        if not isinstance(tags,list) or len(tags)>12 or any(not isinstance(t,str) or not t.strip() or len(t)>300 or any(ord(c)<32 for c in t) for t in tags):
+            raise ValueError('태그 조합은 원문 태그 1~12개로 지정하세요.')
+        return list(dict.fromkeys(canonical_tag(t.strip()) for t in tags))
+
+    def tag_presets(self):
+        with self.db() as db:
+            row=db.execute("SELECT value FROM settings WHERE key='tag-presets'").fetchone()
+        return json.loads(row[0]) if row else []
+
+    def save_tag_preset(self,name,tags,preset_id=None):
+        if not isinstance(name,str) or not 1<=len(name.strip())<=60 or any(ord(c)<32 for c in name):raise ValueError('프리셋 이름은 1~60자로 입력하세요.')
+        tags=self.combination_tags(tags)
+        if not tags or any(not visible_tag(t) for t in tags):raise ValueError('목록에 표시되는 태그를 하나 이상 선택하세요.')
+        if preset_id is not None and (not isinstance(preset_id,str) or not re.fullmatch('[0-9a-f]{32}',preset_id)):raise ValueError('프리셋을 확인하세요.')
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute("SELECT value FROM settings WHERE key='tag-presets'").fetchone();items=json.loads(row[0]) if row else []
+            if preset_id and not any(p['id']==preset_id for p in items):raise KeyError('프리셋을 찾을 수 없습니다.')
+            if any(p['name'].casefold()==name.strip().casefold() and p['id']!=preset_id for p in items):raise ValueError('같은 이름의 프리셋이 있습니다.')
+            if not preset_id and len(items)>=40:raise ValueError('프리셋은 최대 40개까지 저장할 수 있습니다.')
+            item={'id':preset_id or uid(),'name':name.strip(),'tags':tags}
+            items=[item if p['id']==preset_id else p for p in items] if preset_id else items+[item]
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('tag-presets',?)",(json.dumps(items,ensure_ascii=False),))
+        return item
+
+    def delete_tag_preset(self,preset_id):
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute("SELECT value FROM settings WHERE key='tag-presets'").fetchone();items=json.loads(row[0]) if row else []
+            if not any(p['id']==preset_id for p in items):raise KeyError('프리셋을 찾을 수 없습니다.')
+            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('tag-presets',?)",(json.dumps([p for p in items if p['id']!=preset_id],ensure_ascii=False),))
+        return {'deleted':True}
 
     def library_tags(self,query='',kind=''):
         if not isinstance(query,str) or len(query)>300:raise ValueError('태그 검색어가 너무 깁니다.')
@@ -610,7 +646,7 @@ class Store(EditionCatalog,AutomaticSources):
             key='matching-attempt:'+work_id
             row=db.execute('SELECT value FROM settings WHERE key=?',(key,)).fetchone()
             now=time.time()
-            if row and now-float(row[0])<60:raise ValueError('세 사이트 확인은 작품별60초 간격으로 가능합니다.')
+            if row and now-float(row[0])<60:raise ValueError('출처 확인은 작품별60초 간격으로 가능합니다.')
             db.execute('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)',(key,str(now)))
 
     def progress(self, work_id, page):
@@ -644,7 +680,7 @@ class Store(EditionCatalog,AutomaticSources):
         return self.job(job_id)
 
     def resolve_reference(self,provider,reference):
-        if provider not in ('ehentai','exhentai','hitomi','nhentai'):
+        if provider not in SUPPORTED_PROVIDERS:
             raise ValueError('출처를 선택하세요.')
         if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
             raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
@@ -658,7 +694,7 @@ class Store(EditionCatalog,AutomaticSources):
             elif provider in ('ehentai','exhentai'):
                 raise ValueError('E-Hentai의 처음 등록하는 번호에는 전체 작품 URL이 필요합니다. 번호 외 URL 식별값을 추측하지 않습니다.')
             else:
-                value=(f'https://hitomi.la/galleries/{number}.html' if provider=='hitomi' else f'https://nhentai.net/g/{number}/')
+                value=f'https://hitomi.la/galleries/{number}.html'
                 origin='number'
         source=parse_source(value)
         if source['provider']!=provider:raise ValueError('선택한 출처와 URL의 사이트가 다릅니다.')

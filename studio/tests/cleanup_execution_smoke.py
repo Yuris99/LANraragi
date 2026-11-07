@@ -79,7 +79,7 @@ def main():
         survivor=next(w for w in works if w['id']!=old['id'])
         request('/api/media/'+old['lrr_id']+'/files')
         request('/api/works/'+old['id'],{'favorite':True,'rating':4})
-        request('/api/works/'+old['id']+'/sources',{'url':'https://nhentai.net/g/123456/','comments':[{'id':'1','text':'Generated preserved comment'}]})
+        request('/api/works/'+old['id']+'/sources',{'url':'https://e-hentai.org/g/123456/generated/','comments':[{'id':'1','text':'Generated preserved comment'}]})
         request('/api/works/'+old['id']+'/progress',{'page':2})
         report=fixture/'reports';report.mkdir()
         def run_tool(script,args):

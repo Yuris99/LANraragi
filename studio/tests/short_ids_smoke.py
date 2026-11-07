@@ -1,5 +1,6 @@
 """Short source routes + favorite/exact-tag flows; all media is generated locally."""
 import json
+import mimetypes
 import os
 from pathlib import Path
 import sys
@@ -14,6 +15,7 @@ from navigation_smoke import FixtureLRR
 
 
 def main():
+    mimetypes.add_type('text/javascript','.js')
     with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'STUDIO_PASSWORD':'short-ui-synthetic'}):
         store=Store(Path(directory)/'studio.db');lrr=FixtureLRR()
         h=store.create_work('Hitomi fixture',lrr_id='a'*40,pages=7,tags=['theme:blue'])
@@ -29,7 +31,7 @@ def main():
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();base='http://127.0.0.1:'+str(server.server_port)
         try:
             with sync_playwright() as pw:
-                browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+                browser=pw.chromium.launch(executable_path=os.environ.get('STUDIO_TEST_CHROMIUM','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'short-ui-synthetic'},viewport={'width':1440,'height':1000})
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
                 page.goto(base);page.locator('.card').first.wait_for()
@@ -45,7 +47,7 @@ def main():
                 page.goto(base+'/#/works/'+local['id']+'/read/7');page.wait_for_url('**/#/'+local['short_id']+'/7');page.locator('#reader[open]').wait_for()
                 page.goto(base+'/#/library');page.locator('.card').first.wait_for()
                 page.locator('#filter-tags-nav').click()
-                tag=page.locator('[data-filter-tag="theme:blue"]');tag.wait_for();assert tag.inner_text()=='theme:blue · 3'
+                tag=page.locator('[data-filter-tag="theme:blue"]');tag.wait_for();assert tag.locator('.count').inner_text()=='3'
                 tag.click();page.wait_for_function('()=>document.querySelectorAll(".card").length===3')
                 assert 'all_tag=theme%3Ablue' in page.url and 'theme:blue' in page.locator('#active-tag-name').inner_text()
                 assert page.locator('.card').filter(has_text='N fixture').count()==0

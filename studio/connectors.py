@@ -71,7 +71,7 @@ def public_document(url, payload=None):
 
 
 def source_candidates(number, fetch=None):
-    """Check all three independent identities; never link, download, or fall back."""
+    """Check the two supported families; never link, download, or fall back."""
     import concurrent.futures
     import re
     import urllib.error
@@ -107,12 +107,6 @@ def source_candidates(number, fetch=None):
                 title=item.get('japanese_title') or item.get('title')
                 artists=[a['artist'] for a in item.get('artists',[]) if isinstance(a,dict) and isinstance(a.get('artist'),str)]
                 url='https://hitomi.la/galleries/'+number+'.html'
-            else:
-                item=json.loads(fetch('https://nhentai.net/api/gallery/'+number))
-                if str(item.get('id'))!=number:raise ValueError('metadata_identity_mismatch')
-                title=item['title'].get('japanese') or item['title'].get('english') or item['title'].get('pretty')
-                artists=[t['name'] for t in item.get('tags',[]) if isinstance(t,dict) and t.get('type')=='artist' and isinstance(t.get('name'),str)]
-                url='https://nhentai.net/g/'+number+'/'
             if not isinstance(title,str) or not title.strip():raise ValueError('metadata_title_missing')
             result.update(status='found',url=parse_source(url)['url'],title=title[:1000],artists=[a[:150] for a in artists[:20]],message='번호가 같은 후보입니다. 제목·작가를 비교해 선택하세요.')
         except urllib.error.HTTPError as error:
@@ -123,5 +117,5 @@ def source_candidates(number, fetch=None):
         except OSError:
             result.update(status='unavailable',message='네트워크 연결을 확인하지 못했습니다.')
         return result
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        return list(pool.map(one,['ehentai','hitomi','nhentai']))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        return list(pool.map(one,['ehentai','hitomi']))

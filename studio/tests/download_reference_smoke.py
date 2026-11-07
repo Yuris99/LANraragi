@@ -1,5 +1,6 @@
 """Browser reference entry with local synthetic metadata; no external requests."""
 import json
+import mimetypes
 import os
 from pathlib import Path
 import sys
@@ -10,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from store import Store
 from server import Studio,make_server
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright,expect
 
 
 class FixtureLRR:
@@ -21,17 +22,18 @@ class FixtureLRR:
 
 
 def main():
+    mimetypes.add_type('text/javascript','.js')
     with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'STUDIO_PASSWORD':'reference-smoke'}):
         store=Store(Path(directory)/'studio.db')
         saved=store.create_work('Synthetic saved metadata')
         store.upsert_source(saved['id'],{'url':'https://e-hentai.org/g/123/abcdef/'})
         existing=store.create_work('Synthetic existing file',lrr_id='a'*40)
-        store.upsert_source(existing['id'],{'url':'https://nhentai.net/g/999/'})
+        store.upsert_source(existing['id'],{'url':'https://hitomi.la/galleries/999.html'})
         app=Studio(store,FixtureLRR());server=make_server('127.0.0.1',0,app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with sync_playwright() as pw:
-                browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+                browser=pw.chromium.launch(executable_path=os.environ.get('STUDIO_TEST_CHROMIUM','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'reference-smoke'})
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
                 page.goto('http://127.0.0.1:'+str(server.server_port))
@@ -48,9 +50,9 @@ def main():
                 assert store.jobs()[0]['url']=='https://e-hentai.org/g/123/abcdef/'
                 page.locator('#download-open').click();form.locator('[name=provider]').select_option('hitomi')
                 form.locator('[name=reference]').fill('123');page.locator('#download-submit').click()
-                page.wait_for_function('() => !document.querySelector("#download-dialog").open')
+                expect(page.locator('#download-dialog')).not_to_be_visible()
                 assert len(store.jobs())==2
-                page.locator('#download-open').click();form.locator('[name=provider]').select_option('nhentai')
+                page.locator('#download-open').click();form.locator('[name=provider]').select_option('hitomi')
                 form.locator('[name=reference]').fill('999');page.locator('#download-submit').click()
                 page.locator('#detail[open]').wait_for();assert len(store.jobs())==2
                 page.locator('#close-detail').click();page.locator('#download-open').click()

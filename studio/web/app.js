@@ -1,7 +1,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const selectedWorks = new Set();
 let tagTargets = [];
-const state = { page: 1, view: "library", provider: "", query: "", tag: "", sort: "added", direction: "desc", detail: null, reader: null };
+const state = { page: 1, view: "library", provider: "", query: "", tag: "", tagCombo: [], sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
 settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", tagLanguage: "ko", ...settings };
@@ -10,14 +10,15 @@ if (typeof settings.thumbnailBlur !== "boolean") settings.thumbnailBlur = settin
 delete settings.mosaic;
 delete settings.thumbnailMosaic;
 // Keep old original-view bookmarks usable; normal visits use the saved choice.
-if (/^\/unsen\/?$/.test(location.pathname)) settings.thumbnailBlur = false;
-const providerName = { ehentai: "E-Hentai", exhentai: "E-Hentai", hitomi: "Hitomi", nhentai: "nHentai" };
+const originalView = /^\/unsen\/?$/.test(location.pathname) || history.state?.studioOriginalView === true;
+if (originalView) settings.thumbnailBlur = false;
+const providerName = { ehentai: "E-Hentai", exhentai: "E-Hentai", hitomi: "Hitomi" };
 const sourceFamily = provider => provider === 'exhentai' ? 'ehentai' : provider;
-const siteNames = {ehentai:'이헨',exhentai:'익헨',hitomi:'히토미',nhentai:'nHentai'};
+const siteNames = {ehentai:'이헨',exhentai:'익헨',hitomi:'히토미'};
 function sourceURL(source) {
     try {
         const url = new URL(source.url);
-        const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la',nhentai:'nhentai.net'}[source.provider];
+        const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la'}[source.provider];
         if (host && url.protocol === 'https:' && url.hostname === host && !url.username && !url.password && !url.port) return url.href;
     } catch {}
     return '';
@@ -32,6 +33,7 @@ function sourceShortcut(source) {
 function sourceGroups(values) {
     const groups = new Map();
     for (const value of values) {
+        if (!Object.hasOwn(providerName,value.provider)) continue;
         const family = sourceFamily(value.provider);
         if (!groups.has(family)) groups.set(family,[]);
         groups.get(family).push(value);
@@ -134,7 +136,7 @@ function counterpartRows(items, work) {
         let url = '';
         try {
             const parsed = new URL(meta.url);
-            const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la',nhentai:'nhentai.net'}[meta.provider];
+            const host = {ehentai:'e-hentai.org',exhentai:'exhentai.org',hitomi:'hitomi.la'}[meta.provider];
             if (parsed.protocol === 'https:' && parsed.hostname === host && !parsed.username && !parsed.password && !parsed.port) url = parsed.href;
         } catch {}
         const sameLanguage = match.language_match === true;
@@ -259,34 +261,42 @@ function cacheWork(work) {
     workShortIds.set(work.id, work.short_id); workAliases.set(work.id, aliases);
 }
 const libraryViews = ["library", "favorite"];
+const selectedTagFilters = (value = state) => value.tagCombo?.length ? value.tagCombo : value.allTag ? [value.allTag] : [];
+const activeTagNames = () => [...selectedTagFilters(),...(state.tag ? [state.tag] : [])].map(tagText).join(' + ');
 function libraryState(value = {}) {
     const integer = (n, fallback, max) => Number.isSafeInteger(Number(n)) && Number(n) >= 1 && Number(n) <= max ? Number(n) : fallback;
     return { view: libraryViews.includes(value.view) ? value.view : "library", page: integer(value.page, 1, 1000000),
         query: String(value.query || "").slice(0, 1024), tag: String(value.tag || "").slice(0, 120), allTag: String(value.allTag || "").slice(0, 300),
-        provider: ["ehentai", "exhentai", "hitomi", "nhentai"].includes(value.provider) ? sourceFamily(value.provider) : "", sort: ["added", "title", "artist", "pages", "bytes", "rating", "last_read", "random"].includes(value.sort) ? value.sort : "added",
+        tagCombo: Array.isArray(value.tagCombo) ? [...new Set(value.tagCombo.filter(t=>typeof t==='string' && t.length && t.length<=300))].slice(0,12) : [],
+        provider: ["ehentai", "exhentai", "hitomi"].includes(value.provider) ? sourceFamily(value.provider) : "", sort: ["added", "title", "artist", "pages", "bytes", "rating", "last_read", "random"].includes(value.sort) ? value.sort : "added",
         direction: value.direction === "asc" ? "asc" : "desc", limit: [24, 48, 96].includes(Number(value.limit)) ? Number(value.limit) : 48,
         scroll: Number.isFinite(value.scroll) && value.scroll >= 0 ? value.scroll : 0 };
 }
 let libraryContext = libraryState({ limit: settings.limit });
 let libraryKey = "", routeHref = "", routeTask = Promise.resolve(), routeRevision = 0, progressTask = Promise.resolve(), pendingReader = null;
 history.scrollRestoration = "manual";
-function routeHash(route) {
-    if (route.kind === "jobs") return "#/downloads";
+function routePath(route) {
+    if (route.kind === "jobs") return "/downloads";
     const short = workShortIds.get(route.id) || route.short;
-    if (route.kind === "detail") return short ? `#/${short}` : `#/works/${route.id}`;
-    if (route.kind === "reader") return short ? `#/${short}/${route.page}` : `#/works/${route.id}/read/${route.page}`;
+    if (route.kind === "detail") return short ? `/${short}` : `/works/${route.id}`;
+    if (route.kind === "reader") return short ? `/${short}/${route.page}` : `/works/${route.id}/read/${route.page}`;
     const value = libraryState(route.library), params = new URLSearchParams();
     for (const [key, field, fallback] of [["view", "view", "library"], ["page", "page", 1], ["q", "query", ""], ["tag", "tag", ""], ["all_tag", "allTag", ""], ["provider", "provider", ""], ["sort", "sort", "added"], ["direction", "direction", "desc"], ["limit", "limit", 48]]) {
-        if (value[field] !== fallback) params.set(key, value[field]);
+        if (value[field] !== fallback && !(key==='all_tag' && value.tagCombo.length)) params.set(key, value[field]);
     }
-    return "#/library" + (params.size ? "?" + params : "");
+    for (const tag of value.tagCombo) params.append('all_tag',tag);
+    return "/library" + (params.size ? "?" + params : "");
 }
+const currentAddress = () => location.pathname + location.search + location.hash;
 function addressRoute() {
-    const raw = location.hash.slice(1), split = raw.indexOf("?"), path = split < 0 ? raw : raw.slice(0, split);
-    if (!raw || raw === "/") return { kind: "library", library: libraryState({ limit: settings.limit }) };
-    if (path === "/library") {
+    // Old hash bookmarks are parsed once, then replaced with a clean path.
+    const raw = location.hash.startsWith('#/') ? location.hash.slice(1) : location.pathname + location.search;
+    const split = raw.indexOf("?"), path = split < 0 ? raw : raw.slice(0, split);
+    if (['/','/unsen','/unsen/'].includes(raw)) return {kind:'library',library:libraryState({limit:settings.limit})};
+    if (['/','/library','/library/','/unsen','/unsen/'].includes(path)) {
         const p = new URLSearchParams(split < 0 ? "" : raw.slice(split + 1));
-        return { kind: "library", library: libraryState({ view: p.get("view"), page: p.get("page"), query: p.get("q"), tag: p.get("tag"), allTag: p.get("all_tag"), provider: p.get("provider"), sort: p.get("sort"), direction: p.get("direction"), limit: p.get("limit") }) };
+        const tags=p.getAll('all_tag');
+        return { kind: "library", library: libraryState({ view: p.get("view"), page: p.get("page"), query: p.get("q"), tag: p.get("tag"), allTag: tags.length===1 ? tags[0] : '', tagCombo:tags.length>1 ? tags : [], provider: p.get("provider"), sort: p.get("sort"), direction: p.get("direction"), limit: p.get("limit") }) };
     }
     if (raw === "/downloads") return { kind: "jobs" };
     const short = /^\/([EXNL]?[0-9]{1,32})(?:\/([0-9]+))?$/.exec(raw.toUpperCase());
@@ -300,8 +310,8 @@ function setAddress(route, replace = false) {
     if (current.kind === "library") libraryContext = { ...current.library, scroll: window.scrollY };
     history.replaceState({ ...history.state, studioLibrary: libraryContext }, "");
     const context = route.kind === "library" ? libraryState(route.library) : libraryContext;
-    const target = routeHash(route), metadata = { studioLibrary: context };
-    if (replace || location.hash === target) history.replaceState(metadata, "", target);
+    const target = routePath(route), metadata = { studioLibrary: context, studioOriginalView: originalView };
+    if (replace || currentAddress() === target) history.replaceState(metadata, "", target);
     else history.pushState(metadata, "", target);
     libraryContext = context;
 }
@@ -312,8 +322,8 @@ function updateView() {
     document.querySelectorAll("[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
     document.querySelectorAll("[data-filter]").forEach((button) => button.classList.toggle("selected", button.dataset.filter === state.provider));
     $("#search").value = state.query; $("#sort").value = state.sort;
-    const activeTag = state.allTag || state.tag;
-    $("#active-tag").hidden = !activeTag; $("#active-tag-name").textContent = activeTag ? `태그: ${tagText(activeTag)}` : "";
+    const activeTag = activeTagNames();
+    $("#active-tag").hidden = !activeTag; $("#active-tag-name").textContent = activeTag ? `태그: ${activeTag}` : "";
     $("#direction").textContent = state.direction === "desc" ? "↓" : "↑";
 }
 async function navigateRoute(route, { replace = false, refresh = false } = {}) {
@@ -334,15 +344,18 @@ async function applyRoute(refresh = false) {
         Object.assign(state, libraryContext); settings.limit = libraryContext.limit;
         if (route.kind === "jobs") state.view = "jobs";
         updateView(); applySettings();
-        if (route.kind === "jobs") { document.title = "다운로드 · Library Studio"; await showJobs(); return; }
+        if (route.kind === "jobs") {
+            if (currentAddress() !== routePath(route)) { setAddress(route,true);routeHref=location.href; }
+            document.title = "다운로드 · Library Studio"; await showJobs(); return;
+        }
         if (route.kind === "library") {
             document.title = $("#page-title").textContent + " · Library Studio";
-            if (location.hash !== routeHash(route)) { setAddress(route, true); routeHref = location.href; }
+            if (currentAddress() !== routePath(route)) { setAddress(route, true); routeHref = location.href; }
             await load({ fromRoute: true });
             if (revision === routeRevision) requestAnimationFrame(() => { if (revision === routeRevision) window.scrollTo(0, libraryContext.scroll); });
             return;
         }
-        if (libraryKey !== routeHash({ kind: "library", library: libraryContext })) await load({ fromRoute: true });
+        if (libraryKey !== routePath({ kind: "library", library: libraryContext })) await load({ fromRoute: true });
         if (revision !== routeRevision) return;
         if (route.short) {
             route.id = shortWorkIds.get(route.short);
@@ -360,7 +373,7 @@ async function applyRoute(refresh = false) {
         cacheWork(state.detail);
         if (route.kind === "detail") {
             const actual = { kind: "detail", id: state.detail.id };
-            if (location.hash !== routeHash(actual)) { setAddress(actual, true); routeHref = location.href; }
+            if (currentAddress() !== routePath(actual)) { setAddress(actual, true); routeHref = location.href; }
             renderDetail(state.detail); document.title = (state.detail.display_title || state.detail.title) + " · Library Studio"; return; }
         if (!state.detail.lrr_id) throw new Error("이 작품에는 아직 읽을 파일이 없습니다.");
         if (state.reader?.work.id !== route.id) {
@@ -372,7 +385,7 @@ async function applyRoute(refresh = false) {
         pendingReader = null;
         state.reader.page = Math.min(state.reader.pages.length, route.page) - 1;
         const actualRoute = { ...route, page: state.reader.page + 1 };
-        if (location.hash !== routeHash(actualRoute)) { setAddress(actualRoute, true); routeHref = location.href; }
+        if (currentAddress() !== routePath(actualRoute)) { setAddress(actualRoute, true); routeHref = location.href; }
         // Reader URLs can open directly, without placing an extra detail dialog below them.
         $("#detail").close(); if (!$("#reader").open) $("#reader").showModal(); renderPage();
     })().catch(async (error) => {
@@ -422,7 +435,8 @@ async function load({ fromRoute = false } = {}) {
     const displayedLibrary = currentLibrary();
     if (!fromRoute && addressRoute().kind === "library") { setAddress({ kind: "library", library: displayedLibrary }); routeHref = location.href; }
     const request = ++requestNumber;
-    const query = new URLSearchParams({ q: state.query, tag: state.tag, all_tag: state.allTag || "", sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
+    const query = new URLSearchParams({ q: state.query, tag: state.tag, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
+    for (const tag of selectedTagFilters()) query.append('all_tag',tag);
     const result = await api(`/api/works?${query}`);
     if (request !== requestNumber) return;
     result.items.forEach(cacheWork);
@@ -431,13 +445,13 @@ async function load({ fromRoute = false } = {}) {
     $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" aria-labelledby="work-title-${work.id}"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3><button class="card-title" id="work-title-${work.id}" data-id="${work.id}" type="button">${esc(work.display_title || work.title)}</button></h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
     updateSelection();
     $("#empty").hidden = result.items.length > 0;
-    const filtered = Boolean(state.query || state.tag || state.allTag || state.provider || state.view === "favorite");
+    const filtered = Boolean(state.query || state.tag || selectedTagFilters().length || state.provider || state.view === "favorite");
     $("#empty h2").textContent = filtered ? "조건에 맞는 작품이 없습니다" : "보관함을 채워 보세요";
     $("#empty p").textContent = filtered ? "검색어·태그·출처 필터를 바꾸거나 해제해 보세요." : "LANraragi 라이브러리를 동기화하거나 작품을 추가해 출처를 연결할 수 있습니다.";
     $("#empty-sync").hidden = filtered;
     $("#previous").disabled = state.page === 1; $("#next").disabled = state.page * settings.limit >= result.total;
     $("#page-number").textContent = `${state.page} / ${Math.max(1, Math.ceil(result.total / settings.limit))} 페이지`;
-    libraryKey = routeHash({ kind: "library", library: displayedLibrary });
+    libraryKey = routePath({ kind: "library", library: displayedLibrary });
     refreshTagStrip().catch(() => {});
     await refreshLibraryStatus();
 }
@@ -453,11 +467,11 @@ function tagData(tag) {
     const ko = aliases[0] || value, ns = Object.hasOwn(tagDictionary.namespaces,namespace) ? tagDictionary.namespaces[namespace] : null;
     const description = text(tagDictionary.descriptions,key) || (general ? text(tagDictionary.descriptions,value.toLowerCase()) : '') ||
         (namespace === 'language' && aliases.length ? `작품의 언어가 ${ko}로 분류되어 있습니다.` : '이 태그의 개별 설명은 아직 등록되지 않았습니다.');
-    return {namespace,value,ko,aliases,description,scope:ns?.[1] || '분류가 없는 태그입니다.',
+    return {namespace,value,ko,aliases,description,scope:ns?.[1] || (namespace ? '이 분류의 설명은 아직 등록되지 않았습니다.' : '분류가 없는 태그입니다.'),
         label:settings.tagLanguage === 'ko' ? ko : value,
         kind:settings.tagLanguage === 'ko' ? ns?.[0] || namespace : namespace};
 }
-function tagText(tag) { const data=tagData(tag); return (data.kind ? data.kind+': ' : '')+data.label; }
+function tagText(tag) { const data=tagData(tag); return data.namespace && !Object.hasOwn(tagDictionary.namespaces,data.namespace) ? tag : (data.kind ? data.kind+': ' : '')+data.label; }
 function tagLabelContent(tag) {
     const data=tagData(tag);
     return `${data.kind ? `<span class="tag-namespace">${esc(data.kind)}</span>` : ''}<span class="tag-value">${esc(data.label)}</span>`;
@@ -494,7 +508,8 @@ document.addEventListener('change',event=>{
     settings.tagLanguage=event.target.value;saveSettings();
     document.querySelectorAll('[data-tag-label]').forEach(el=>{el.innerHTML=tagLabelContent(el.dataset.tagLabel);});
     document.querySelectorAll('[data-tag-info]').forEach(el=>el.setAttribute('aria-label','태그 설명: '+tagText(el.dataset.tagInfo)));
-    const active=state.allTag || state.tag;$('#active-tag-name').textContent=active ? '태그: '+tagText(active) : '';
+    const active=activeTagNames();$('#active-tag-name').textContent=active ? '태그: '+active : '';
+    renderPresetDraft();
     if ($('#tag-explanation').dataset.tag) drawTagExplanation($('#tag-explanation').dataset.tag);
 });
 function tagScope(text, kind = "") {
@@ -521,10 +536,10 @@ async function refreshTagStrip() {
     const matches = await matchingTags(scope);
     if (request !== tagStripRequest) return;
     const filtering = Boolean(scope.kind || scope.term);
-    const active = state.allTag || state.tag;
+    const activeTags = [...selectedTagFilters(),...(state.tag ? [state.tag] : [])];
     let shown = [...matches.filter((t) => !t.tag.includes(":")), ...matches.filter((t) => t.tag.includes(":"))].slice(0, filtering ? 30 : 14);
-    if (active && !shown.some((t) => t.tag === active)) shown = [{ tag: active, count: null }, ...shown];
-    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => tagPair(t.tag,`<button type="button" class="tag-chip${t.tag === active ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${t.tag === active}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${t.tag === active ? '<span aria-hidden="true">×</span>' : ""}</button>`)).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
+    shown = [...activeTags.filter(tag=>!shown.some(t=>t.tag===tag)).map(tag=>({tag,count:null})),...shown];
+    $("#tag-strip-list").innerHTML = (filtering && !matches.length ? '<span class="muted">일치하는 태그가 없습니다.</span>' : "") + shown.map((t) => tagPair(t.tag,`<button type="button" class="tag-chip${activeTags.includes(t.tag) ? " selected" : ""}" data-strip-tag="${esc(t.tag)}" aria-pressed="${activeTags.includes(t.tag)}">${tagLabel(t.tag)}${t.count == null ? "" : `<span class="count">${t.count}</span>`}${activeTags.includes(t.tag) ? '<span aria-hidden="true">×</span>' : ""}</button>`)).join("") + `<button type="button" class="tag-chip more" id="tag-strip-more">모든 태그</button>`;
     $("#tag-strip").hidden = !shown.length && !filtering;
 }
 $("#tag-strip-kind").onchange = guard(refreshTagStrip);
@@ -539,8 +554,72 @@ $("#tag-strip").addEventListener("click", guard(async (event) => {
     const chip = event.target.closest("[data-strip-tag]"); if (!chip) return;
     const tag = chip.dataset.stripTag;
     if (tag === (state.allTag || state.tag)) { state.tag = ""; state.allTag = ""; } else { state.allTag = tag; state.tag = ""; }
+    state.tagCombo=[];
     state.page = 1; await navigateLibrary();
 }));
+let tagPresetItems=[],presetDraftTags=[],presetDraftId=null,presetSearchRequest=0;
+function renderPresetDraft() {
+    $('#preset-selected').innerHTML=presetDraftTags.map(tag=>`<button class="tag" type="button" data-preset-remove="${esc(tag)}" aria-label="조합에서 ${esc(tagText(tag))} 제거">${tagLabel(tag)} <span aria-hidden="true">×</span></button>`).join('') || '<span class="muted">아래에서 태그를 선택하세요.</span>';
+    $('#preset-count').textContent=`${presetDraftTags.length} / 12개 · 모든 태그 포함`;
+}
+async function refreshPresetChoices() {
+    tagPresetItems=await api('/api/tag-presets');
+    const selected=$('#tag-preset-choice').value;
+    $('#tag-preset-choice').innerHTML='<option value="">태그 프리셋 선택</option>'+tagPresetItems.map(p=>`<option value="${p.id}">${esc(p.name)} · ${p.tags.length}개</option>`).join('');
+    $('#tag-preset-choice').value=tagPresetItems.some(p=>p.id===selected) ? selected : '';
+    $('#preset-list').innerHTML=tagPresetItems.map(p=>`<div class="preset-row"><div><strong>${esc(p.name)}</strong><p>${p.tags.map(tag=>tagLabel(tag)).join(' + ')}</p></div><div class="form-actions"><button class="quiet" type="button" data-preset-apply="${p.id}">적용</button><button class="quiet" type="button" data-preset-edit="${p.id}">수정</button><button class="quiet" type="button" data-preset-delete="${p.id}">삭제</button></div></div>`).join('') || '<p class="muted">저장한 프리셋이 없습니다.</p>';
+}
+async function searchPresetTags() {
+    const query=$('#preset-tag-search').value,request=++presetSearchRequest;
+    const rows=await matchingTags(tagScope(query));
+    if (request!==presetSearchRequest) return;
+    $('#preset-tag-results').innerHTML=rows.filter(row=>!presetDraftTags.includes(row.tag)).slice(0,30).map(row=>`<button class="tag" type="button" data-preset-add="${esc(row.tag)}">${tagLabel(row.tag)} <span class="count">${row.count}</span></button>`).join('') || '<p class="muted">추가할 태그가 없습니다.</p>';
+}
+function resetPresetDraft() {
+    presetDraftId=null;presetDraftTags=[...new Set([...selectedTagFilters(),...(state.tag ? [state.tag] : [])])];
+    $('#preset-name').value='';$('#preset-tag-search').value='';renderPresetDraft();
+}
+async function applyTagPreset(preset) {
+    state.tagCombo=[...preset.tags];state.tag='';state.allTag='';state.query='';state.page=1;
+    $('#tag-presets').close();
+    await navigateLibrary();$('#tag-preset-choice').value=preset.id;
+}
+$('#manage-tag-presets').onclick=guard(async()=>{
+    resetPresetDraft();$('#tag-presets').showModal();await refreshPresetChoices();await searchPresetTags();
+});
+$('#preset-new').onclick=guard(async()=>{resetPresetDraft();await searchPresetTags();$('#preset-name').focus();});
+$('#preset-tag-search').oninput=()=>{clearTimeout(state.presetTimer);state.presetTimer=setTimeout(guard(searchPresetTags),200);};
+$('#tag-preset-choice').onchange=guard(async event=>{
+    const preset=tagPresetItems.find(p=>p.id===event.target.value);if (preset) await applyTagPreset(preset);
+});
+$('#tag-presets').addEventListener('click',guard(async event=>{
+    const button=event.target.closest('button');if (!button) return;
+    if (button.dataset.presetAdd) {
+        if (presetDraftTags.length>=12) throw new Error('태그는 최대 12개까지 조합할 수 있습니다.');
+        if (!presetDraftTags.includes(button.dataset.presetAdd)) presetDraftTags.push(button.dataset.presetAdd);
+    }
+    if (button.dataset.presetRemove) presetDraftTags=presetDraftTags.filter(tag=>tag!==button.dataset.presetRemove);
+    if (button.dataset.presetAdd || button.dataset.presetRemove) {renderPresetDraft();await searchPresetTags();}
+    const id=button.dataset.presetApply || button.dataset.presetEdit || button.dataset.presetDelete;
+    const preset=tagPresetItems.find(p=>p.id===id);if (!preset) return;
+    if (button.dataset.presetApply) await applyTagPreset(preset);
+    if (button.dataset.presetEdit) {
+        presetDraftId=preset.id;presetDraftTags=[...preset.tags];$('#preset-name').value=preset.name;
+        renderPresetDraft();await searchPresetTags();$('#preset-name').focus();
+    }
+    if (button.dataset.presetDelete) {
+        await api('/api/tag-presets/'+preset.id+'/delete',{});await refreshPresetChoices();
+        if (presetDraftId===preset.id) {resetPresetDraft();await searchPresetTags();}
+        toast('프리셋을 삭제했습니다. 적용 중인 태그 조건은 유지합니다.');
+    }
+}));
+$('#preset-form').onsubmit=guard(async event=>{
+    event.preventDefault();const button=$('#preset-save');button.disabled=true;
+    try {
+        const preset=await api('/api/tag-presets',{...(presetDraftId?{id:presetDraftId}:{}),name:$('#preset-name').value,tags:presetDraftTags});
+        await refreshPresetChoices();await applyTagPreset(preset);toast('태그 조합을 저장하고 적용했습니다.');
+    } finally {button.disabled=false;}
+});
 async function refreshLibraryStatus() {
     try {
         const status = await api("/api/library/status");
@@ -562,9 +641,17 @@ function sourceRows(values) {
         return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `${tagPair(tag,`<span class="tag">${tagLabel(tag)}</span>`)}`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
     }).join('') || '<p class="muted">작품 원본 주소를 연결하세요. 이헨·익헨은 하나의 출처 계열로 표시합니다.</p>';
 }
+function readingActions(work) {
+    const voice = work.edition?.kind && work.edition.kind !== 'comic';
+    const available = work.lrr_id || work.edition?.assets.some(a=>['audio','video'].includes(a.kind));
+    const opened = !voice && work.lrr_id && Boolean(work.last_read || work.progress);
+    const page = Math.max(1,Math.min(work.pages || 1,work.progress || 1));
+    const label = voice ? (work.edition.kind === 'voice_video' ? '보이스코믹 재생' : '만화+음성') : opened ? `이어보기 · ${page}쪽` : '읽기';
+    return `<button class="primary" id="read-work" ${available ? '' : 'disabled'}>${label}</button>${opened ? '<button class="quiet" id="read-work-start">처음부터</button>' : ''}`;
+}
 function renderDetail(work) {
     pauseVoicePlayers();
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
@@ -591,12 +678,12 @@ function pageUrl(url, id) {
     if (parsed.origin !== location.origin || parsed.pathname !== `/api/archives/${id}/page`) throw new Error("페이지 URL 형식이 올바르지 않습니다.");
     return `/api/media/${id}/page${parsed.search}`;
 }
-function readWork() {
+function readWork(fromStart = false) {
     if (state.detail?.edition?.kind !== "comic") {
         const player = $(state.detail?.edition?.kind === "voice_video" ? "#detail-content video" : "#detail-content audio");
         if (player) { player.scrollIntoView({block:"center"}); return player.play(); }
     }
-    if (state.detail) return navigateRoute({ kind: "reader", id: state.detail.id, page: pendingReader?.id === state.detail.id ? pendingReader.page : Math.max(1, state.detail.progress || 1) });
+    if (state.detail) return navigateRoute({ kind: "reader", id: state.detail.id, page: fromStart ? 1 : pendingReader?.id === state.detail.id ? pendingReader.page : Math.max(1, state.detail.progress || 1) });
 }
 function renderPage() {
     const reader = state.reader; const image = $("#reader-image");
@@ -652,11 +739,11 @@ document.addEventListener("click", guard(async (event) => {
     }
     if (button.dataset.comments) { button.disabled = true; try { const result = await api(`/api/works/${state.detail.id}/sources/${button.dataset.comments}/comments/fetch`, {}); await showDetail(state.detail.id); toast(result.message); } finally { button.disabled = false; } }
     if (button.dataset.retry) { await api(`/api/jobs/${button.dataset.retry}/retry`, {}); await showJobs(); }
-    if (button.dataset.userFilter) { state.tag = button.dataset.userFilter; state.allTag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
+    if (button.dataset.userFilter) { state.tagCombo=[];state.tag = button.dataset.userFilter; state.allTag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary(); toast("사용자 태그: " + state.tag + " · 검색하면 필터가 해제됩니다."); }
     if (button.dataset.removeUserTag) { await api("/api/tags/batch", {work_ids:[state.detail.id],remove:[button.dataset.removeUserTag]}); await showDetail(state.detail.id); await load(); }
     if (button.id === "edit-user-tags") await openTagEditor([state.detail.id]);
     if (button.dataset.tag || button.dataset.filterTag) {
-        state.allTag = button.dataset.filterTag || button.dataset.tag; state.tag = ""; state.page = 1;
+        state.tagCombo=[];state.allTag = button.dataset.filterTag || button.dataset.tag; state.tag = ""; state.page = 1;
         await navigateLibrary();
     }
 }));
@@ -695,6 +782,7 @@ document.addEventListener("submit", guard(async (event) => {
 $("#detail").addEventListener("click", guard(async (e) => {
     if (e.target.closest("#favorite-work")) { await api(`/api/works/${state.detail.id}`, { favorite: !state.detail.favorite }); await showDetail(state.detail.id); await load(); }
     if (e.target.closest("#read-work")) await readWork();
+    if (e.target.closest("#read-work-start")) await readWork(true);
     if (e.target.closest("#edit-work")) {
         const section = document.createElement("section"); section.className = "detail-section";
         section.innerHTML = `<form id="work-form"><label>제목<input name="title" required value="${esc(state.detail.title)}"></label><label>작가<input name="artist" value="${esc(state.detail.artist)}"></label><p class="muted">저장하면 제목을 잠가 다음 동기화에서 덮어쓰지 않습니다.</p><button class="primary">저장</button></form>`;
@@ -746,7 +834,7 @@ async function refreshTagFilter() {
 }
 $("#filter-tags-nav").onclick = guard(async () => { $("#tag-filter").showModal(); await refreshTagFilter(); });
 $("#filter-tag-search").oninput = () => { clearTimeout(state.filterTagTimer); state.filterTagTimer = setTimeout(guard(refreshTagFilter), 200); };
-$("#clear-tag").onclick = guard(async () => { state.tag = ""; state.allTag = ""; state.page = 1; await navigateLibrary(); });
+$("#clear-tag").onclick = guard(async () => { state.tagCombo=[];state.tag = ""; state.allTag = ""; state.page = 1; await navigateLibrary(); });
 $("#open-number").onclick = () => $("#short-open").showModal();
 $("#settings-button").onclick = () => $("#settings").showModal();
 $('#automatic-source-links').onchange = guard(async event => {
@@ -781,7 +869,7 @@ async function refreshSuggestions(query) {
 }
 async function applySuggestion(tag) {
     hideSuggestions(); clearTimeout(state.searchTimer);
-    state.allTag = tag; state.tag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary();
+    state.tagCombo=[];state.allTag = tag; state.tag = ""; state.query = ""; $("#search").value = ""; state.page = 1; await navigateLibrary();
 }
 $("#search").oninput = () => { hideSuggestions(); clearTimeout(state.searchTimer); state.searchTimer = setTimeout(guard(async () => {
     const query = $("#search").value;
@@ -892,6 +980,7 @@ try { tagDictionary=await api('/api/tag-dictionary',undefined,{signal:AbortSigna
 catch { toast('태그 번역을 불러오지 못했습니다. 원문으로 표시합니다. 새로고침해서 다시 시도하세요.'); }
 applySettings();
 applyRoute(); guard(showJobs)();
+refreshPresetChoices().catch(()=>{});
 guard(async () => { const health = await api("/api/health"); $("#studio-version").textContent = Number.isInteger(health.studio_update) ? `Studio 업데이트 ${health.studio_update}` : "Studio 버전 표시 업데이트 대기"; $("#connection-dot").classList.add(health.lanraragi_connected ? "online" : "offline"); $("#connection-text").innerHTML = health.lanraragi_connected ? `서버 연결됨<small>LANraragi ${esc(health.version)} · 개인 라이브러리</small>` : "서버 연결 필요<small>작품 정보는 로컬에 보존됩니다.</small>"; })();
 setInterval(guard(async () => { if (state.view === "jobs" && !document.hidden) await showJobs(); }), 5000);
 
@@ -1013,7 +1102,7 @@ async function renderOrganization() {
     $("#organize-status").textContent = `${result.total}권 · 먼저 동기화하면 현재 파일명을 읽습니다. 대괄호의 값은 작가 추정이며 확인 후 저장하세요.`;
     $("#organize-items").innerHTML = result.items.map(work => {
         const hints = work.organization;
-        return `<section class="detail-section" data-organize-work="${work.id}"><h3>${esc(work.display_title || work.title)}</h3><p class="muted">파일명: ${esc(work.archive_filename || "동기화 후 확인")}</p><p>${sources(work) || "연결된 출처 없음"}</p><form class="organize-artist"><label>작가<input name="artist" maxlength="500" value="${esc(work.artist || hints.artist)}"></label><button class="quiet">작가 저장</button></form><label>확인할 번호<input class="organize-number" inputmode="numeric" maxlength="12" value="${esc(hints.numbers.length === 1 ? hints.numbers[0].number : "")}" aria-label="확인할 작품 번호"></label><p class="muted">${hints.ambiguous ? "번호가 없거나 여러 개입니다. 확인할 번호를 직접 입력하세요." : "출처가 확정되지 않은 파일명 후보입니다."}</p><button class="quiet" data-match-work="${work.id}">세 사이트 함께 확인</button><div class="organize-results" aria-live="polite"></div><form class="organize-source"><label>원본 URL로 직접 연결<input name="url" type="url" required placeholder="https://…"></label><button class="quiet">URL 연결</button></form><p class="muted">통일 파일명 미리보기: ${esc(work.proposed_filename)}</p></section>`;
+        return `<section class="detail-section" data-organize-work="${work.id}"><h3>${esc(work.display_title || work.title)}</h3><p class="muted">파일명: ${esc(work.archive_filename || "동기화 후 확인")}</p><p>${sources(work) || "연결된 출처 없음"}</p><form class="organize-artist"><label>작가<input name="artist" maxlength="500" value="${esc(work.artist || hints.artist)}"></label><button class="quiet">작가 저장</button></form><label>확인할 번호<input class="organize-number" inputmode="numeric" maxlength="12" value="${esc(hints.numbers.length === 1 ? hints.numbers[0].number : "")}" aria-label="확인할 작품 번호"></label><p class="muted">${hints.ambiguous ? "번호가 없거나 여러 개입니다. 확인할 번호를 직접 입력하세요." : "출처가 확정되지 않은 파일명 후보입니다."}</p><button class="quiet" data-match-work="${work.id}">출처 함께 확인</button><div class="organize-results" aria-live="polite"></div><form class="organize-source"><label>원본 URL로 직접 연결<input name="url" type="url" required placeholder="https://…"></label><button class="quiet">URL 연결</button></form><p class="muted">통일 파일명 미리보기: ${esc(work.proposed_filename)}</p></section>`;
     }).join("") || '<p class="muted">표시할 작품이 없습니다. 라이브러리를 동기화하세요.</p>';
 }
 $("#organize-open").onclick = guard(async () => { $("#organize-dialog").showModal(); await renderOrganization(); });
@@ -1291,7 +1380,7 @@ async function connectionStatus() {
     if (desktopMissing) $('#connections-status').textContent = '일반 브라우저 실행 패키지가 아직 설치되지 않았습니다. NAS 전용 브라우저 구성 연결이 필요합니다.';
     $('#session-import-submit').disabled = !status.configured || !status.session_import;
     $('#session-import-note').textContent = status.session_import ? '등록 후 자동 연결 작업이 다시 확인합니다. 저장 성공과 사이트 접근 성공은 별도로 표시합니다.' : '로그인 서비스의 세션 등록 기능 업데이트를 기다립니다.';
-    const accountSites = status.sites.filter(s => s.provider !== 'exhentai').map(s => {
+    const accountSites = status.sites.filter(s => ['ehentai','hitomi'].includes(s.provider)).map(s => {
         if (s.provider !== 'ehentai') return s;
         const members = status.sites.filter(value => sourceFamily(value.provider) === 'ehentai');
         const latest = members.filter(value => value.last_request).sort((a,b) => b.last_request.at-a.last_request.at)[0];

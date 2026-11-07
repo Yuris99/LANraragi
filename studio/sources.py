@@ -3,6 +3,16 @@ import re
 import unicodedata
 from urllib.parse import urlsplit
 
+SUPPORTED_PROVIDERS = ('ehentai', 'exhentai', 'hitomi')
+
+
+def supported_source(url):
+    # Retain parse_source for reading old records; new actions use this boundary.
+    source = parse_source(url)
+    if source['provider'] not in SUPPORTED_PROVIDERS:
+        raise ValueError('이헨·익헨·히토미의 작품 URL만 지원합니다.')
+    return source
+
 
 def source_family(provider):
     return 'ehentai' if provider in ('ehentai','exhentai') else provider

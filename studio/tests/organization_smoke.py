@@ -39,7 +39,7 @@ def main():
                 assert store.list_works()['items'][0]['artist']=='Generated Confirmed Artist'
                 page.locator('[data-match-work]').click()
                 page.locator('[data-match-select]').first.wait_for()
-                assert page.locator('[data-match-select]').count()==3
+                assert page.locator('[data-match-select]').count()==2
                 assert store.list_works()['items'][0]['sources']==[]
                 page.locator('[data-match-select="1"]').click()
                 page.wait_for_function('()=>document.querySelector("#toast").textContent.includes("선택한 출처")')
@@ -60,7 +60,7 @@ def main():
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not errors,errors
                 browser.close()
-            print('organization_browser=passed; artist_lock; three_candidates; explicit_single_selection; filename_preview; desktop/mobile; synthetic_only=true')
+            print('organization_browser=passed; artist_lock; supported_candidates; explicit_single_selection; filename_preview; desktop/mobile; synthetic_only=true')
         finally:server.shutdown();server.server_close();thread.join(timeout=5)
 
 
