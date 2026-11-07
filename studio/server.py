@@ -17,7 +17,7 @@ from pathlib import Path
 
 from connectors import fetch_comments, source_candidates
 from sources import parse_source
-from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates
+from metadata import parse_html, fetch_metadata as direct_metadata, counterpart_candidates,result as embedded_metadata
 from auto_sources import AutoLinker
 from store import Store
 from uploads import Uploads,UploadError
@@ -87,8 +87,18 @@ class Studio:
     def restore_source_record(self,work_id):
         record=self.extract_source_record(work_id)
         evidence=preferred_evidence(record['evidence'])
+        work=self.store.get_work(work_id)
         if evidence:
-            self.store.upsert_source(work_id,{'url':evidence['url']},schedule=False)
+            existing=next((s for s in work['sources'] if s['url']==evidence['url']),None)
+            data={'url':evidence['url']}
+            if existing:data['status']=existing['status']
+            original=next((e['metadata'] for e in record['evidence'] if e.get('metadata',{}).get('title')),None)
+            if original and not existing:
+                tags=original.get('tags',[])+['artist:'+a for a in original.get('artists',[])]+['language:'+a for a in original.get('languages',[])]
+                metadata=embedded_metadata(parse_source(evidence['url']),original['title'],tags,
+                    pages=original.get('pages'),comments=[],collector='studio-embedded-source-v1')
+                data.update(tags=metadata['tags'],metadata=metadata)
+            self.store.upsert_source(work_id,data,schedule=False)
         work=self.store.get_work(work_id)
         return {'restored':bool(evidence),'source_id':next((s['id'] for s in work['sources'] if evidence and s['url']==evidence['url']),None),
                 'record':self.store.get_source_record(work_id),'work':work}

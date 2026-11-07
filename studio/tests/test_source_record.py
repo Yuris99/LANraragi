@@ -109,5 +109,16 @@ class SourceRecordTests(unittest.TestCase):
         self.store.upsert_source(work['id'],{'url':work['sources'][0]['url'],'tags':['updated:source']})
         self.assertEqual(self.store.get_source_record(work['id'])['sources'][0]['tags'],['updated:source'])
 
+    def test_original_tags_are_visible_before_remote_fetch_and_fetched_data_is_preserved(self):
+        xml=b'<ComicInfo><Web>https://exhentai.org/g/123/abcdefghij/</Web><Title>Original</Title><Genre>parody:original</Genre><Writer>Fixture</Writer><LanguageISO>ko</LanguageISO><PageCount>49</PageCount></ComicInfo>'
+        app=Studio(self.store,RangeLRR(archive([('.ehviewer',spider()),('ComicInfo.xml',xml)])))
+        result=app.restore_source_record(self.work['id']);source=result['work']['sources'][0]
+        self.assertEqual(source['status'],'manual')
+        self.assertIn('parody:original',source['tags']);self.assertIn('language:korean',source['tags'])
+        self.assertEqual(source['metadata']['collector'],'studio-embedded-source-v1')
+        self.store.upsert_source(self.work['id'],{'url':source['url'],'tags':['newer:remote'],'status':'fetched'})
+        again=app.restore_source_record(self.work['id'])['work']['sources'][0]
+        self.assertEqual(again['status'],'fetched');self.assertEqual(again['tags'],['newer:remote'])
+
 
 if __name__=='__main__':unittest.main()
