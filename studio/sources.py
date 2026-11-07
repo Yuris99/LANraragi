@@ -4,6 +4,10 @@ import unicodedata
 from urllib.parse import urlsplit
 
 
+def source_family(provider):
+    return 'ehentai' if provider in ('ehentai','exhentai') else provider
+
+
 def parse_source(url):
     if not isinstance(url, str) or len(url) > 2048:
         raise ValueError('올바른 작품 URL을 입력하세요.')

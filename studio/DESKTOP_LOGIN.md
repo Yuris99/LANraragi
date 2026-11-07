@@ -13,6 +13,19 @@ Wheel and vertical touch gestures scroll remotely. Escape releases keyboard
 capture to the visible keyboard button; the collapsed text tool remains a fallback.
 No keyboard events are captured outside this focused input.
 
+E-Hentai and ExHentai share one account vault and one login control. A new private
+browser restores saved account cookies with their original domains. Restoration
+runs only on the extension's initial install, so idle wake cannot overwrite a
+later login. Fixed buttons open either host. EH-only cookies never become EX
+cookies, and a saved session with no matching domain fails before any request.
+
+Legacy account files are read without migration writes. Explicit Save writes the
+shared Netscape file at ehentai.cookies with a format marker; an older EX file
+remains a private backup and is no longer read. Conflicting account identities
+require explicit resaving. Shared Forget removes both legacy account files.
+Existing E/X links and source URL fields remain compatible. Grouped display
+preserves files, work records and editions, and does not merge their storage.
+
 The existing nonroot UID, read-only root, 1GiB memory, private tmpfs, dropped
 capabilities and no-host-port configuration remain. There is no VNC/debug port,
 Docker socket or original-library mount. X11 uses a private Xauthority cookie

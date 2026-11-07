@@ -1,4 +1,4 @@
-"""Automatic registration-to-three-sites tests use generated metadata only."""
+"""Automatic family connections and explicit original URLs, generated data only."""
 import io
 import json
 from email.message import Message
@@ -53,12 +53,12 @@ class AutoSourceTests(unittest.TestCase):
         work=work or self.work
         return self.store.import_metadata(work['id'],parse_hitomi_json(H.replace('123456',number),hitomi_js().replace('123456',number)))
 
-    def test_registration_alone_runs_both_other_sites_without_a_button(self):
+    def test_registration_alone_runs_the_other_family_without_a_button(self):
         self.store.upsert_source(self.work['id'],{'url':H})
         self.assertEqual(self.store.automatic_status(self.work['id'])['state'],'queued')
         self.assertTrue(self.linker().run_one())
         work=self.store.get_work(self.work['id'])
-        self.assertEqual({s['provider'] for s in work['sources']},{'ehentai','exhentai','hitomi'})
+        self.assertEqual({s['provider'] for s in work['sources']},{'ehentai','hitomi'})
         self.assertEqual((work['title'],work['artist']),('Keep title','Keep artist'))
         self.assertEqual(self.store.automatic_status(work['id'])['state'],'complete')
         self.assertFalse(self.linker().run_one())
@@ -68,7 +68,7 @@ class AutoSourceTests(unittest.TestCase):
         self.store.upsert_source(self.work['id'],{'url':E})
         self.linker().run_one()
         sources=self.store.get_work(self.work['id'])['sources']
-        self.assertEqual(len(sources),3)
+        self.assertEqual(len(sources),2)
         self.assertTrue(all(s['metadata'] for s in sources))
         self.assertEqual(next(s for s in sources if s['provider']=='ehentai')['comments'][0]['text'],'A & B')
 
@@ -82,13 +82,13 @@ class AutoSourceTests(unittest.TestCase):
         self.assertEqual(e['status'],'review')
         self.assertFalse(e['items'][0]['comparison']['language_match'])
 
-    def test_eh_or_ex_registration_can_discover_hitomi_and_the_other_host(self):
+    def test_eh_or_ex_registration_discovers_hitomi_without_a_duplicate_host_search(self):
         for url,html in [(E,eh_html()),(X,ex_html())]:
             with tempfile.TemporaryDirectory() as directory:
                 store=Store(Path(directory)/'catalog.db');work=store.create_work('Generated')
                 store.import_metadata(work['id'],parse_html(url,html))
                 AutoLinker(store,lambda:(generated_fetch,generated_index,{})).run_one()
-                self.assertEqual({s['provider'] for s in store.get_work(work['id'])['sources']},{'ehentai','exhentai','hitomi'})
+                self.assertEqual({s['provider'] for s in store.get_work(work['id'])['sources']},{parse_source(url)['provider'],'hitomi'})
 
     def test_legacy_ex_migration_preserves_saved_url_metadata_and_old_alias(self):
         self.store.import_metadata(self.work['id'],parse_html(X,ex_html()))
@@ -127,7 +127,7 @@ class AutoSourceTests(unittest.TestCase):
         def denied(url):calls.append(url);raise urllib.error.HTTPError(url,403,'Denied',{},None)
         linker=self.linker(fetch=denied)
         linker.run_one();linker.run_one()
-        self.assertEqual(len(calls),2)  # One denied request per distinct target.
+        self.assertEqual(len(calls),1)  # One denied request for the shared EH family.
         self.assertEqual(self.store.automatic_status(other['id'])['state'],'waiting')
 
     def test_scan_resumes_after_restart_and_waits_for_ambiguity_check(self):

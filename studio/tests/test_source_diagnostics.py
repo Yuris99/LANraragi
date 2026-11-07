@@ -214,6 +214,7 @@ class SourceDiagnosticsTests(unittest.TestCase):
         self.vault.read.return_value=[http.cookiejar.Cookie(0,'ipb_member_id','generated-secret',None,False,
             '.e-hentai.org',True,True,'/',True,True,None,True,None,None,{})]
         self.vault.path.return_value.stat.side_effect=FileNotFoundError
+        self.vault.read_paths.return_value=[]
         self.vault.status.side_effect=lambda provider:CookieVault.status(self.vault,provider)
         actor=BrowserActor(self.vault,browser=LoginBrowser(self.vault))
         self.addCleanup(actor.close)

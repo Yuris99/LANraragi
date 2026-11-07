@@ -21,9 +21,12 @@ import urllib.parse
 import urllib.request
 
 
+def session_family(provider):
+    return 'ehentai' if provider in ('ehentai','exhentai') else provider
+
 SITES = {
     'ehentai': {'name': 'E-Hentai', 'login': 'https://forums.e-hentai.org/index.php?act=Login',
-                'domains': ('e-hentai.org',)},
+                'domains': ('e-hentai.org','exhentai.org')},
     'exhentai': {'name': 'ExHentai', 'login': 'https://forums.e-hentai.org/index.php?act=Login',
                  'domains': ('e-hentai.org', 'exhentai.org')},
     'nhentai': {'name': 'nHentai', 'login': 'https://nhentai.net/login/',
@@ -127,6 +130,7 @@ def _source_document(vault,url,offset=0,trace=None):
     request=urllib.request.Request(url,headers=headers)
     jar.add_cookie_header(request)
     if trace is not None:trace['mode']='saved_session' if request.has_header('Cookie') else 'no_matching_cookies' if cookies else 'anonymous'
+    if (provider=='exhentai' or cookies) and not request.has_header('Cookie'):return {'status':'session_required'}
     try:
         with urllib.request.build_opener(NoRedirect(),urllib.request.HTTPCookieProcessor(jar)).open(request,timeout=20) as response:
             if trace is not None:trace['http_status']=response.status
@@ -184,7 +188,12 @@ class CookieVault:
 
     def path(self, name):
         site(name)
-        return self.root / (name + '.cookies')
+        return self.root / (session_family(name)+'.cookies')
+
+    def read_paths(self, name):
+        current=self.path(name)
+        if session_family(name)!='ehentai':return [current]
+        return [p for p in (self.root/'ehentai.cookies',self.root/'exhentai.cookies') if p.exists() or p.is_symlink()]
 
     def import_file(self, name, content):
         """Explicit user export only; no browser extraction or challenge transfer."""
@@ -221,8 +230,8 @@ class CookieVault:
                 cookies.append({**item,'expires':expiry})
             names={c['name'] for c in cookies}
             if not {'ipb_member_id','ipb_pass_hash'}<=names:raise ValueError()
-            target='https://exhentai.org/' if name=='exhentai' else 'https://e-hentai.org/'
-            if not {'ipb_member_id','ipb_pass_hash'}<={c['name'] for c in cookies if c['domain'].lstrip('.').lower()==urllib.parse.urlsplit(target).hostname}:raise ValueError()
+            if not any({'ipb_member_id','ipb_pass_hash'}<={c['name'] for c in cookies if c['domain'].lstrip('.').lower()==host}
+                       for host in ('e-hentai.org','exhentai.org')):raise ValueError()
             result=self.save(name,cookies)
         except (ValueError,TypeError,KeyError,OverflowError):
             raise ValueError('사이트 전용 JSON 배열 또는 Netscape 세션 파일을 확인하세요. 유효한 계정 로그인 쿠키가 필요합니다.') from None
@@ -234,6 +243,8 @@ class CookieVault:
         if not isinstance(cookies, list) or len(cookies) > 500:
             raise ValueError('쿠키 형식을 확인하세요.')
         lines = ['# Netscape HTTP Cookie File']; count = 0
+        if session_family(name)=='ehentai':lines.append('# Studio shared EH account v1')
+        identities=set()
         for c in cookies:
             domain = c.get('domain', '')
             if not allowed_domain(name, domain): continue
@@ -247,12 +258,14 @@ class CookieVault:
             if not isinstance(expiry,(int,float)) or not math.isfinite(expiry):
                 raise ValueError('잘못된 쿠키 만료 시간입니다.')
             if expiry > 0 and expiry <= time.time(): continue
+            if key=='ipb_member_id' and value:identities.add(value)
             expiry = max(0, int(expiry))
             prefix = '#HttpOnly_' if c.get('httpOnly') else ''
             lines.append('\t'.join((prefix+domain,'TRUE' if domain.startswith('.') else 'FALSE',path,
                                     'TRUE' if c.get('secure') else 'FALSE',str(expiry) if expiry else '',key,value)))
             count += 1
         if not count: raise ValueError('이 사이트에서 저장할 유효한 세션이 없습니다.')
+        if session_family(name)=='ehentai' and len(identities)>1:raise ValueError('이헨·익헨의 계정이 다릅니다. 사용할 계정으로 다시 저장하세요.')
         raw = ('\n'.join(lines)+'\n').encode()
         if len(raw) > 1024*1024: raise ValueError('세션 크기 제한을 초과했습니다.')
         fd, temporary = tempfile.mkstemp(prefix='.session-', dir=self.root)
@@ -265,37 +278,62 @@ class CookieVault:
             finally: os.close(directory)
         finally:
             if os.path.exists(temporary): os.unlink(temporary)
+        for provider in (('ehentai','exhentai') if session_family(name)=='ehentai' else (name,)):self.last_requests.pop(provider,None)
         return self.status(name)
 
-    def read(self, name):
-        fd = os.open(self.path(name), os.O_RDONLY | os.O_NOFOLLOW)
+    def read_file(self, name, path):
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, 'rb') as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 1024*1024:
                 raise ValueError('세션 파일 권한 또는 크기를 확인하세요.')
             raw = stream.read(1024*1024+1)
         jar = http.cookiejar.MozillaCookieJar()
-        jar._really_load(io.StringIO(raw.decode()), str(self.path(name)), True, False)
+        jar._really_load(io.StringIO(raw.decode()), str(path), True, False)
         # Discard unrelated domains even if a local administrator edited the file.
         cookies = [c for c in jar if allowed_domain(name,c.domain) and account_cookie(c.name) and not c.is_expired()]
         if not cookies: raise ValueError('세션이 만료됐습니다. 다시 로그인하세요.')
-        return cookies
+        return cookies, b'# Studio shared EH account v1\n' in raw
+
+    def read(self, name):
+        paths=self.read_paths(name)
+        if not paths:raise FileNotFoundError('저장한 계정 세션이 없습니다.')
+        cookies={};identities=set()
+        canonical=self.path(name)
+        if session_family(name)=='ehentai' and canonical in paths:
+            current,shared=self.read_file(name,canonical)
+            if shared:paths=[canonical]
+        for path in sorted(paths,key=lambda p:p.lstat().st_mtime_ns):
+            current,_=self.read_file(name,path)
+            identities.update(c.value for c in current if c.name=='ipb_member_id' and c.value)
+            for cookie in current:cookies[(cookie.domain,cookie.path,cookie.name)]=cookie
+        if session_family(name)=='ehentai' and len(identities)>1:raise ValueError('기존 이헨·익헨 계정이 다릅니다. 사용할 계정으로 다시 저장하세요.')
+        return list(cookies.values())
 
     def status(self, name):
-        try: count = len(self.read(name)); state = 'saved_unverified'
+        cookies=[]
+        try: cookies=self.read(name); count=len(cookies); state = 'saved_unverified'
         except FileNotFoundError: count = 0; state = 'not_saved'
         except (ValueError, OSError, http.cookiejar.LoadError): count = 0; state = 'unavailable'
-        try:revision=str(self.path(name).stat().st_mtime_ns)
+        try:revision=','.join(str(p.lstat().st_mtime_ns) for p in self.read_paths(name))
         except OSError:revision=''
+        host={'ehentai':'e-hentai.org','exhentai':'exhentai.org'}.get(name)
+        applicable=[c for c in cookies if host and (host==c.domain.lstrip('.') or host.endswith(c.domain if c.domain.startswith('.') else '.'+c.domain))]
+        target_ready=bool(applicable) if host else bool(cookies)
         return {'provider':name,'name':site(name)['name'],'state':state,'cookie_count':count,'session_revision':revision,
+                'session_family':session_family(name),'target_session_available':target_ready,'target_cookie_count':len(applicable),
                 'login_available':bool(site(name)['login']),'site_verified':False,
                 'download_enabled':name != 'exhentai','last_request':self.last_requests.get(name)}
 
     def forget(self, name):
         if self.readonly: raise ValueError('읽기 전용 세션입니다.')
-        self.last_requests.pop(name,None)
-        try: self.path(name).unlink()
-        except FileNotFoundError: pass
+        providers=('ehentai','exhentai') if session_family(name)=='ehentai' else (name,)
+        for provider in providers:self.last_requests.pop(provider,None)
+        paths={self.path(name)}
+        if session_family(name)=='ehentai':paths.update((self.root/'ehentai.cookies',self.root/'exhentai.cookies'))
+        for path in paths:
+            try:path.unlink()
+            except FileNotFoundError:pass
         return self.status(name)
 
 

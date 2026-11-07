@@ -26,7 +26,7 @@ from site_sessions import LoginClient
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=27
+STUDIO_UPDATE=28
 
 
 class LRR:
@@ -105,7 +105,7 @@ class Studio:
             ids=[str(int.from_bytes(raw[i:i+4],'big')) for i in range(0,len(raw),4)]
             return ids if offset is None else {'ids':ids,'complete':result.get('complete',False)}
         ex=next((s for s in status.get('sites',[]) if s['provider']=='exhentai'),{})
-        return fetch,index,{} if ex.get('state')=='saved_unverified' else {'exhentai':'session_required'}
+        return fetch,index,{} if ex.get('state')=='saved_unverified' and ex.get('target_session_available',True) else {'exhentai':'session_required'}
 
     def automatic_source_loop(self):
         linker=AutoLinker(self.store,self.source_transport,pause=self.stop.wait);checked=0
@@ -114,7 +114,7 @@ class Studio:
             if time.monotonic()-checked>60:
                 try:
                     status=self.login.call({'op':'status'})
-                    fingerprint=json.dumps({'documents':status.get('source_documents',False),'sites':[
+                    fingerprint=json.dumps({'documents':status.get('source_documents',False),'eh_family':status.get('shared_eh_account',False),'sites':[
                         [s['provider'],s.get('state'),s.get('session_revision','')] for s in status.get('sites',[])]},sort_keys=True)
                     self.store.automatic_session_changed(fingerprint)
                 except (ValueError,OSError):pass
@@ -557,7 +557,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('기준 출처와 자동 연결 여부를 지정하세요.')
             work=store.get_work(match[1])
             source=next((s for s in work['sources'] if s['id']==data['source_id']),None)
-            if not source or source['provider'] not in ('hitomi','ehentai'):raise ValueError('E-Hentai 또는 Hitomi 기준 출처를 선택하세요.')
+            if not source or source['provider'] not in ('hitomi','ehentai','exhentai'):raise ValueError('E-Hentai 계열 또는 Hitomi 기준 출처를 선택하세요.')
             if not self.app.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
             try:
                 store.begin_matching(work['id'])

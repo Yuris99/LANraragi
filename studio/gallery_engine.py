@@ -28,6 +28,10 @@ def cookie_snapshot(url):
     try: cookies=vault.read(provider)
     except FileNotFoundError:
         yield None; return
+    host=urlsplit(url).hostname
+    cookies=[cookie for cookie in cookies if host==cookie.domain.lstrip('.') or
+             (cookie.domain.startswith('.') and host.endswith(cookie.domain))]
+    if not cookies:raise ValueError('이 주소에 적용되는 저장 계정 쿠키가 없습니다.')
     # Expired/invalid saved sessions fail rather than silently becoming anonymous.
     import http.cookiejar
     with tempfile.TemporaryDirectory(prefix='studio-session-') as directory:

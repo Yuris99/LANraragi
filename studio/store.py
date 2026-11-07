@@ -217,8 +217,11 @@ class Store(EditionCatalog,AutomaticSources):
                 OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND studio_tag(t.value)=?))''')
             args.extend([canonical_tag(all_tag)]*3)
         if provider:
-            where.append('EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider=?)')
-            args.append(provider)
+            if provider in ('ehentai','exhentai'):
+                where.append("EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider IN ('ehentai','exhentai'))")
+            else:
+                where.append('EXISTS (SELECT 1 FROM sources s WHERE s.work_id=works.id AND s.provider=?)')
+                args.append(provider)
         if favorite:
             where.append('favorite=1')
         if unread:

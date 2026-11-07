@@ -4,7 +4,7 @@ import secrets
 import time
 import urllib.error
 from metadata import fetch_metadata, counterpart_candidates
-from sources import clean_title
+from sources import clean_title,source_family
 
 PROVIDERS=('ehentai','exhentai','hitomi')
 SCHEMA='''
@@ -158,12 +158,16 @@ class AutoLinker:
             for target in PROVIDERS:
                 old=next((s for s in previous.get('sites',[]) if s['provider']==target),{})
                 existing=next((s for s in sources if s['provider']==target),None)
+                # An explicit original URL may still need its own update, but
+                # never discover a second EH host or retry it after a denial.
+                if not existing and source_family(target)=='ehentai' and (target=='exhentai' or any(source_family(s['provider'])=='ehentai' for s in sources)):
+                    continue
                 if existing:
                     if target==source['provider'] or (existing['metadata'] and existing['status']=='fetched'):
                         output['sites'].append({'provider':target,'status':'connected','items':[]});continue
-                    circuit=self.store.automatic_circuit(target)
-                    if circuit or access.get(target):
-                        output['sites'].append({'provider':target,'status':access.get(target) or circuit['status'],'items':[]})
+                    circuit=self.store.automatic_circuit(existing['provider'])
+                    if circuit or access.get(existing['provider']):
+                        output['sites'].append({'provider':target,'status':access.get(existing['provider']) or circuit['status'],'items':[]})
                         state='waiting';continue
                     try:
                         detail=fetch_metadata(existing['url'],guarded_fetch)

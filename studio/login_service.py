@@ -20,13 +20,21 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from site_sessions import CookieVault, SITES, allowed_domain, site, read_service_token
+from site_sessions import CookieVault, SITES, allowed_domain, site, read_service_token,session_family
 
 
 KEYS = {'Tab','Enter','Backspace','Delete','Escape','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End',
         'Control+A','Shift+Tab'}
 LOGIN_ERRORS = {'browser_start_failed','login_site_timeout','login_site_unreachable','login_preview_failed'}
 LOGIN_IDLE_TIMEOUT = 30 * 60
+
+
+def visit_url(provider, target):
+    if target!=provider and not (session_family(provider)==session_family(target)=='ehentai'):
+        raise ValueError('현재 로그인 계열의 사이트만 열 수 있습니다.')
+    urls={'ehentai':'https://e-hentai.org/','exhentai':'https://exhentai.org/','nhentai':'https://nhentai.net/'}
+    if target not in urls:raise ValueError('지원하는 로그인 사이트를 선택하세요.')
+    return urls[target]
 
 
 class LoginFailure(ValueError):
@@ -57,6 +65,7 @@ class LoginBrowser:
     def status(self):
         self.expire()
         return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
+                'shared_eh_account':True,
                 'editing_shortcuts':True,
                 'idle_timeout_seconds':LOGIN_IDLE_TIMEOUT,
                 'idle_remaining_seconds':max(0,int(self.deadline-time.monotonic())) if self.session else None,
@@ -141,16 +150,16 @@ class LoginBrowser:
             'status':set(),'start':{'provider'},'frame':{'session'},'cancel':{'session'},
             'save':{'session'},'forget':{'provider'},'import-session':{'provider','content'},'click':{'session','x','y'},
             'text':{'session','text'},'key':{'session','key'},'scroll':{'session','delta'},'visit':{'session'}}
-        if op not in schemas or set(data)!=(schemas[op]|{'op'}): raise ValueError('잘못된 로그인 요청입니다.')
+        if op not in schemas or (set(data)!=(schemas[op]|{'op'}) and not (op=='visit' and set(data)=={'op','session','target'})): raise ValueError('잘못된 로그인 요청입니다.')
         self.expire()
         if op=='status': return self.status()
         if op=='import-session':
-            if self.provider==data['provider']: self.close()
+            if self.provider and session_family(self.provider)==session_family(data['provider']): self.close()
             return self.vault.import_file(data['provider'],data['content'])
         if op=='start': return self.start(data['provider'])
         if op=='forget':
             site(data['provider'])
-            if self.provider==data['provider']: self.close()
+            if self.provider and session_family(self.provider)==session_family(data['provider']): self.close()
             return self.vault.forget(data['provider'])
         if not self.session or not secrets.compare_digest(str(data['session']),self.session):
             raise ValueError('로그인 창이 만료됐거나 다른 창에서 변경됐습니다.')
@@ -160,8 +169,7 @@ class LoginBrowser:
             self.close(); return result
         if op=='frame': return self.frame()
         if op=='visit':
-            url={'ehentai':'https://e-hentai.org/','exhentai':'https://exhentai.org/',
-                 'nhentai':'https://nhentai.net/'}[self.provider]
+            url=visit_url(self.provider,data.get('target',self.provider))
             response=self.page.goto(url,wait_until='domcontentloaded',timeout=15000)
             self.response_status=response.status if response else None
             self.touch_activity()
@@ -223,6 +231,15 @@ class DesktopBrowser(LoginBrowser):
     def extension(self, directory):
         token=self.bridge_token or read_service_token(os.environ['STUDIO_LOGIN_TOKEN_FILE'])
         config={'token':token,'url':self.bridge_url,'session':self.session,'domains':list(site(self.provider)['domains'])}
+        restored=[]
+        try:
+            for cookie in self.vault.read(self.provider):
+                item={'url':'https://'+cookie.domain.lstrip('.')+cookie.path,'domain':cookie.domain,'path':cookie.path,
+                      'name':cookie.name,'value':cookie.value,'secure':cookie.secure,'httpOnly':cookie.has_nonstandard_attr('HTTPOnly')}
+                if cookie.expires:item['expirationDate']=cookie.expires
+                restored.append(item)
+        except (FileNotFoundError,ValueError):pass
+        config['restored']=restored
         manifest={'manifest_version':3,'name':'Studio account session save','version':'1.0',
                   'permissions':['cookies'],'host_permissions':['https://*.e-hentai.org/*','https://exhentai.org/*',
                   'https://*.nhentai.net/*','http://127.0.0.1/*'],
@@ -235,9 +252,14 @@ class DesktopBrowser(LoginBrowser):
         manifest['host_permissions']=[scheme+'://'+('' if d in ('127.0.0.1','localhost') else '*.')+d+'/*'
             for d in config['domains'] for scheme in (('http',) if d in ('127.0.0.1','localhost') else ('https','http'))]+['http://127.0.0.1/*']
         (directory/'manifest.json').write_text(json.dumps(manifest))
-        script='const config='+json.dumps(config)+';\n'+'''chrome.commands.onCommand.addListener(async command => {
+        script='const config='+json.dumps(config)+';\n'+'''let restored = Promise.resolve();
+chrome.runtime.onInstalled.addListener(details => {
+  if (details.reason === 'install') restored = Promise.all(config.restored.map(cookie => chrome.cookies.set(cookie).catch(() => null)));
+});
+chrome.commands.onCommand.addListener(async command => {
   if (command !== 'save-account-session') return;
   try {
+    await restored;
     const groups = await Promise.all(config.domains.map(domain => chrome.cookies.getAll({domain})));
     const unique = new Map();
     for (const c of groups.flat()) {
@@ -320,7 +342,7 @@ class DesktopBrowser(LoginBrowser):
         if op in ('status','start','forget','import-session'):return super().call(data)
         schemas={'frame':set(),'cancel':set(),'save':set(),'visit':set(),'click':{'x','y'},
                  'text':{'text'},'key':{'key'},'scroll':{'delta'},'desktop-session':{'cookies'}}
-        if op not in schemas or set(data)!=(schemas[op]|{'op','session'}):raise ValueError('잘못된 로그인 요청입니다.')
+        if op not in schemas or (set(data)!=(schemas[op]|{'op','session'}) and not (op=='visit' and set(data)=={'op','session','target'})):raise ValueError('잘못된 로그인 요청입니다.')
         self.expire()
         if not self.session or not secrets.compare_digest(str(data['session']),self.session):raise ValueError('로그인 창이 만료됐습니다.')
         if op=='cancel':self.close();return {'closed':True}
@@ -356,7 +378,7 @@ class DesktopBrowser(LoginBrowser):
             if type(data['delta']) is not int or not -700<=data['delta']<=700:raise ValueError('스크롤 범위를 확인하세요.')
             self.run(['xdotool','click','--repeat',str(max(1,abs(data['delta'])//100)),'4' if data['delta']<0 else '5'])
         elif op=='visit':
-            url={'ehentai':'https://e-hentai.org/','exhentai':'https://exhentai.org/','nhentai':'https://nhentai.net/'}[self.provider]
+            url=visit_url(self.provider,data.get('target',self.provider))
             self.run(['xdotool','key','--clearmodifiers','ctrl+l'])
             self.run(['xdotool','type','--clearmodifiers','--file','-'],input=url.encode())
             self.run(['xdotool','key','Return'])

@@ -4,7 +4,7 @@ import re
 import unicodedata
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
-from sources import parse_source, tags_list, comments_list, clean_title
+from sources import parse_source, tags_list, comments_list, clean_title,source_family
 
 MAX_DOCUMENT = 2 * 1024 * 1024
 
@@ -214,7 +214,7 @@ def compare_metadata(first, second):
     exact_title = bool(title_key(first)) and title_key(first) == title_key(second)
     return {'title_similarity': round(title, 3), 'artist_match': artists, 'language_match': languages,
             'page_match': pages, 'tag_similarity': round(overlap, 3),
-            'automatic_eligible': first.get('provider') != second.get('provider') and exact_title and artists and languages and pages and overlap >= .7,
+            'automatic_eligible': source_family(first.get('provider')) != source_family(second.get('provider')) and exact_title and artists and languages and pages and overlap >= .7,
             'message': '출처 연결의 비교 근거입니다. 파일 병합·삭제와 판본 통합은 실행하지 않습니다.'}
 
 
@@ -259,7 +259,7 @@ def counterpart_candidates(metadata,fetch=None,index_fetch=None,target=None,curs
     from connectors import public_document
     fetch=fetch or public_document
     target=target or ('ehentai' if metadata['provider']=='hitomi' else 'hitomi')
-    if target not in ('ehentai','exhentai','hitomi') or target==metadata['provider']:
+    if target not in ('ehentai','exhentai','hitomi') or source_family(target)==source_family(metadata['provider']):
         raise ValueError('다른 출처를 지정하세요.')
     output={'provider':target,'items':[],'bounded':True,'failures':0,'status':'checked',
             'message':'제한된 후보 검색입니다. 결과 없음은 다른 사이트에 작품이 없다는 뜻이 아닙니다.'}

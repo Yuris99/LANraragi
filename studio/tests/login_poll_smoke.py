@@ -15,6 +15,7 @@ def main():
     dialog = re.search(r'<dialog\b[^>]*\bid="connections-dialog"[^>]*>.*?</dialog>', markup, re.S).group()
     script = '''
 const $ = selector => document.querySelector(selector);
+const state = {};
 const esc = value => String(value);
 const guard = fn => (...args) => Promise.resolve(fn(...args)).catch(error => { throw error; });
 const toast = () => {};
@@ -31,7 +32,7 @@ async function api(url, data) {
     }
     return {accepted:true};
 }
-''' + source[source.index('// Credentials travel only'):]
+''' + source[source.index('const providerName ='):source.index('const visibleTag =')] + source[source.index('// Credentials travel only'):]
     script += "\n$('#connections-dialog').showModal();renderLoginFrame(frame);"
     document = ('<!doctype html><meta charset="utf-8"><style>' +
                 (root / 'web/style.css').read_text(encoding='utf-8') + '</style>' +

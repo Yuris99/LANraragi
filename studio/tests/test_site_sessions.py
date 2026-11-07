@@ -44,7 +44,8 @@ class SessionTests(unittest.TestCase):
         self.assertEqual([(c.name,c.value) for c in restored],[('fixture_session','generated-secret')])
         self.assertTrue(restored[0].has_nonstandard_attr('HTTPOnly'))
         self.assertFalse(allowed_domain('ehentai','e-hentai.org.attacker.example'))
-        self.assertFalse(allowed_domain('ehentai','exhentai.org'))
+        self.assertTrue(allowed_domain('ehentai','exhentai.org'))
+        self.assertFalse(allowed_domain('ehentai','exhentai.org.attacker.example'))
 
     def test_invalid_new_session_keeps_saved_session_and_no_partial_files(self):
         self.vault.save('ehentai',[cookie()]);old=self.vault.path('ehentai').read_bytes()
