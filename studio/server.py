@@ -29,7 +29,17 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=35
+STUDIO_UPDATE=36
+
+
+def supports_download(plugins,url):
+    if not isinstance(plugins,list):return False
+    for plugin in plugins:
+        if not isinstance(plugin,dict) or not isinstance(plugin.get('url_regex'),str) or not plugin['url_regex']:continue
+        try:
+            if re.search(plugin['url_regex'],url):return True
+        except re.error:continue
+    return False
 
 
 def supported_login_status(value):
@@ -77,11 +87,19 @@ def verify_cleanup_downloads(lrr, request):
 
 
 class Studio:
-    def download_status(self):
+    def download_status(self,include_plugins=False):
         workers=self.store.worker_status();runtime=self.store.worker_runtime()
         expected=hashlib.sha256((HERE/'gallery_engine.py').read_bytes()).hexdigest()
         ready={target:bool(workers[target] and runtime[target] and 0<=time.time()-runtime[target].get('seen_at',0)<60 and runtime[target].get('adapter')=='same-source-1' and runtime[target].get('gallery_engine_sha256')==expected and runtime[target].get('sessions_available')) for target in ('nas','pc')}
-        return {'command_workers':workers,'worker_runtime':runtime,'exhentai_workers':ready,'site_verified':False}
+        value={'command_workers':workers,'worker_runtime':runtime,'exhentai_workers':ready,'site_verified':False}
+        if include_plugins:
+            try:plugins=self.lrr.json('/api/plugins/download') if self.lrr else []
+            except (ValueError,OSError):plugins=None
+            value['server_plugins_known']=isinstance(plugins,list)
+            value['server_plugins']={'ehentai':supports_download(plugins,'https://e-hentai.org/g/123/0123456789/'),
+                'hitomi':any(supports_download(plugins,url) for url in ('https://hitomi.la/galleries/123.html','https://hitomi.la/manga/generated-123.html','https://hitomi.la/doujinshi/generated-123.html')),
+                'exhentai':False}
+        return value
 
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
@@ -107,12 +125,12 @@ class Studio:
             data={'url':evidence['url']}
             if existing:data['status']=existing['status']
             original=next((e['metadata'] for e in record['evidence'] if e.get('metadata',{}).get('title')),None)
-            if original and not existing:
+            if original and (not existing or not existing['metadata'].get('title')):
                 tags=original.get('tags',[])+['artist:'+a for a in original.get('artists',[])]+['language:'+a for a in original.get('languages',[])]
                 metadata=embedded_metadata(parse_source(evidence['url']),original['title'],tags,
                     pages=original.get('pages'),comments=[],collector='studio-embedded-source-v1')
-                data.update(tags=metadata['tags'],metadata=metadata)
-            self.store.upsert_source(work_id,data,schedule=False)
+                self.store.import_metadata(work_id,metadata,remote=bool(existing and existing['status']=='fetched'),schedule=False)
+            else:self.store.upsert_source(work_id,data,schedule=False)
         work=self.store.get_work(work_id)
         return {'restored':bool(evidence),'source_id':next((s['id'] for s in work['sources'] if evidence and s['url']==evidence['url']),None),
                 'record':self.store.get_source_record(work_id),'work':work}
@@ -276,7 +294,7 @@ class Studio:
             if not job:continue
             try:
                 plugins=self.lrr.json('/api/plugins/download')
-                if not any(re.search(p.get('url_regex') or r'(?!)',job['url']) for p in plugins):
+                if not supports_download(plugins,job['url']):
                     self.store.report(job['id'],job['lease'],'blocked',
                                       '이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 엔진 작업자를 연결하세요.')
                     continue
@@ -434,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.automatic_status(store.get_work(match[1])['id']))
         if path=='/api/site-connections':
             return self.respond(supported_login_status(self.app.login.call({'op':'status'})))
-        if path=='/api/downloads/status':return self.respond(self.app.download_status())
+        if path=='/api/downloads/status':return self.respond(self.app.download_status(include_plugins=True))
         if path=='/api/folders':return self.respond(store.folder_status())
         match=re.fullmatch('/api/voice/assets/([0-9a-f]{32})',path)
         if match:return self.download_voice(match[1],q('download')=='1')
@@ -715,6 +733,10 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.cancel_folder_import(match[1]))
         if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
         if path=='/api/downloads':
+            if data.get('engine')=='lanraragi' and data.get('provider')!='exhentai':
+                source=store.resolve_reference(data.get('provider'),data.get('reference'))
+                if not source['available'] and not supports_download(self.app.lrr.json('/api/plugins/download'),source['url']):
+                    raise ValueError('이 출처를 지원하는 서버 다운로드 플러그인이 없습니다. 연결한 외부 다운로드 작업자를 선택하세요.')
             if data.get('provider')=='exhentai' and data.get('engine')=='command':
                 source=store.resolve_reference('exhentai',data.get('reference'))
                 if not source['available'] and not self.app.download_status()['exhentai_workers'].get(data.get('target')):
@@ -764,6 +786,8 @@ class Handler(BaseHTTPRequestHandler):
             store.progress(match[1],data.get('page'));return self.respond({'success':True})
         if path=='/api/jobs':
             supported_source(data.get('url'))
+            if data.get('engine')=='lanraragi' and not supports_download(self.app.lrr.json('/api/plugins/download'),data['url']):
+                raise ValueError('이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 작업자를 선택하세요.')
             return self.respond(store.public_job(store.queue(data.get('url'),data.get('target'),data.get('engine'),data.get('work_id'))),201)
         match=re.fullmatch('/api/jobs/([0-9a-f]{32})/retry',path)
         if match:
@@ -775,6 +799,8 @@ class Handler(BaseHTTPRequestHandler):
                 status=self.app.lrr.json('/api/minion/'+str(remote)+'/detail')
                 store.reconcile_remote(job['id'],remote,status.get('state'))
                 if status.get('state')=='finished':return self.respond({'success':True,'reconciled':True})
+            if job['engine']=='lanraragi' and not supports_download(self.app.lrr.json('/api/plugins/download'),job['url']):
+                raise ValueError('이 URL을 지원하는 서버 다운로드 플러그인이 없습니다. 외부 작업자로 새로 등록하세요.')
             store.retry(match[1]);return self.respond({'success':True})
         if path.startswith('/api/worker/'):
             scope=self.worker_scope()

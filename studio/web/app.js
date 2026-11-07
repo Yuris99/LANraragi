@@ -885,31 +885,32 @@ $("#sync").onclick = guard(sync); $("#empty-sync").onclick = guard(sync);
 $('#refresh-metadata').onclick = guard(refreshLinkedMetadata);
 $('#metadata-refresh-stop').onclick = () => { metadataRefreshStop = true; $('#metadata-refresh-stop').disabled = true; };
 $("#add").onclick = () => $("#editor").showModal();
+let downloadCapabilities=null;
+function refreshDownloadMethod() {
+    const form=$('#download-form'),provider=form.elements.provider.value,target=form.elements.target.value;
+    const server=target==='nas' && Boolean(downloadCapabilities?.server_plugins?.[provider]);
+    form.querySelector('[name=engine] option[value=lanraragi]').disabled=!server;
+    if (!server && form.elements.engine.value==='lanraragi') form.elements.engine.value='command';
+    const worker=Boolean(downloadCapabilities?.command_workers?.[target]);
+    $('#download-support').textContent=server
+        ? `이 출처의 서버 다운로드 플러그인을 사용할 수 있습니다. 외부 작업자 ${worker?'연결됨':'미연결'}.`
+        : `${target==='pc'?'내 PC 저장은 외부 작업자를 사용합니다.':downloadCapabilities?.server_plugins_known?`${siteNames[provider]}용 서버 다운로드 플러그인이 없습니다. 외부 작업자를 사용하세요.`:'서버 플러그인 지원 여부를 확인할 수 없습니다. 외부 작업자를 선택할 수 있습니다.'} ${worker?'작업자 연결됨.':'작업자 연결 전에는 대기열에서 기다립니다.'}`;
+}
 $("#queue").onclick = $("#download-open").onclick = guard(async () => {
     $("#download-dialog").showModal();
-    const status = await api('/api/downloads/status');
-    const target = $('#download-form [name="target"]').value;
-    $('#download-support').textContent = status.command_workers[target]
-        ? '외부 작업자 연결됨 · 사이트별 실제 접근·다운로드 성공은 아직 미검증입니다.'
-        : '외부 작업자가 연결되지 않았습니다. 서버 플러그인은 지원하는 URL만 처리하며, 로그인 세션은 외부 작업자에서 사용합니다.';
-    if (status.command_workers[target]) $('#download-form [name="engine"]').value = 'command';
+    downloadCapabilities=await api('/api/downloads/status');
+    refreshDownloadMethod();
 });
 let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
     const provider = $("#download-form [name=provider]").value;
     $("#download-reference-help").textContent = provider === "exhentai" ? "저장된 번호·X번호 또는 전체 URL을 입력하세요. 저장된 익헨 세션을 사용하는 외부 작업자로 다운로드합니다." : provider === "ehentai" ? "E-Hentai는 처음 등록할 때 전체 URL이 필요합니다. 저장된 출처는 번호·E번호로 확인할 수 있습니다." : "선택한 사이트의 작품 번호 또는 전체 URL을 입력하세요.";
-    $('#download-form [name=engine] option[value=lanraragi]').disabled=provider==='exhentai' || $('#download-form [name=target]').value==='pc';
-    if(provider==='exhentai') $('#download-form [name=engine]').value='command';
+    refreshDownloadMethod();
 }
 $("#download-form [name=reference]").oninput = resetDownloadPreview;
 $("#download-form [name=provider]").onchange = resetDownloadPreview;
-$("#download-form [name=target]").onchange = () => {
-    const pc = $("#download-form [name=target]").value === "pc";
-    const ex=$('#download-form [name=provider]').value==='exhentai';
-    $("#download-form [name=engine] option[value=lanraragi]").disabled = pc || ex;
-    if (pc || ex) $("#download-form [name=engine]").value = "command";
-};
+$("#download-form [name=target]").onchange = resetDownloadPreview;
 $("#download-preview").onclick = guard(async () => {
     const revision = downloadRevision;
     const data = Object.fromEntries(new FormData($("#download-form")));

@@ -1,5 +1,6 @@
 """Source identity is (provider, external_id), never an unqualified number."""
 import re
+import json
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -55,6 +56,29 @@ def tags_list(value):
     if any(not isinstance(x, str) or len(x) > 300 for x in value):
         raise ValueError('태그 형식이 올바르지 않습니다.')
     return list(dict.fromkeys(x.strip() for x in value if x.strip()))
+
+
+def hitomi_download_metadata(source,data,pages):
+    """Public fields from the pinned extractor; account and transport fields stay out."""
+    if source['provider']!='hitomi' or 'gallery_id' not in data:return None
+    if str(data['gallery_id'])!=source['external_id']:raise ValueError('Gallery metadata identity mismatch')
+    title=data.get('title_jpn') or data.get('title')
+    if not isinstance(title,str) or not title.strip() or len(title)>2000:raise ValueError('Invalid gallery title')
+    tags=[]
+    for field,namespace in [('artist','artist'),('group','group'),('parody','parody'),('characters','character')]:
+        tags.extend(namespace+':'+value for value in tags_list(data.get(field) or []))
+    for value in tags_list(data.get('tags') or []):
+        namespace='female' if value.endswith(' ♀') else 'male' if value.endswith(' ♂') else 'other'
+        tags.append(namespace+':'+(value[:-2] if namespace!='other' else value).casefold())
+    language=data.get('language')
+    if isinstance(language,str) and language:tags.append('language:'+language.casefold())
+    tags=tags_list(tags)
+    value={**source,'title':title.strip(),'tags':tags,'raw_tags':tags,
+           'artists':[tag.split(':',1)[1] for tag in tags if tag.startswith('artist:')],
+           'languages':[language.casefold()] if isinstance(language,str) and language else [],
+           'pages':pages,'comments':[],'collector':'studio-gallery-dl-v1'}
+    if len(json.dumps(value).encode())>20*1024:raise ValueError('Gallery metadata exceeds worker report limit')
+    return value
 
 
 def comments_list(value):

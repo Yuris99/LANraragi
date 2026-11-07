@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from contextlib import contextmanager
 from urllib.parse import urlsplit
 import zipfile
-from sources import parse_source
+from sources import parse_source,hitomi_download_metadata
 from site_sessions import CookieVault,session_provider
 
 IMAGE_SUFFIXES={'.jpg','.jpeg','.png','.gif','.webp','.avif'}
@@ -181,14 +181,20 @@ def package_images(root,source=None):
             files.append(path)
     if not files:raise ValueError('No verified images were downloaded')
     metadata={};original_metadata=None
-    info=root/'info.json'
-    if info.exists():
+    infos=list(root.rglob('info.json'))
+    if len(infos)>1:raise ValueError('Multiple gallery metadata files require review')
+    info=infos[0] if infos else None
+    if info:
         if info.is_symlink() or info.stat().st_size>4*1024*1024:raise ValueError('Invalid metadata file')
         original_metadata=info.read_text(encoding='utf-8')
         metadata=json.loads(original_metadata)
         if not isinstance(metadata,dict):raise ValueError('Gallery metadata must be an object')
     if source:metadata['source']=source['url']
     metadata.setdefault('tags',[])
+    receipt={'source':source,'engine':'gallery-dl','version':'1.32.16','pages':len(files)} if source else None
+    if receipt:
+        normalized=hitomi_download_metadata(source,metadata,len(files))
+        if normalized:receipt['metadata']=normalized
     name=(source['provider']+'-'+source['external_id']) if source else 'gallery'
     archive=root/(name+'.cbz')
     fd,temporary=tempfile.mkstemp(prefix='.gallery-',suffix='.part',dir=root)
@@ -196,9 +202,11 @@ def package_images(root,source=None):
         with os.fdopen(fd,'w+b') as stream:
             with zipfile.ZipFile(stream,'w',compression=zipfile.ZIP_STORED) as output:
                 for path in files:output.write(path,path.relative_to(root).as_posix())
-                if metadata.get('source') or info.exists():output.writestr('info.json',json.dumps(metadata,ensure_ascii=False))
+                if metadata.get('source') or info:output.writestr('info.json',json.dumps(metadata,ensure_ascii=False))
                 if original_metadata is not None:output.writestr('gallery-dl-original.json',original_metadata)
+                if receipt:output.writestr('studio-source.json',json.dumps(receipt,ensure_ascii=False))
             stream.flush();os.fsync(stream.fileno())
+        if receipt:(root/'studio-source.json').write_text(json.dumps(receipt,ensure_ascii=False),encoding='utf-8')
         # LRR's watcher sees only the complete CBZ. Never overwrite an existing one.
         os.link(temporary,archive)
     finally:
@@ -238,7 +246,6 @@ def main():
         print('Verified one image page; no archive published')
         return
     count=package_images(root,parse_source(args.url))
-    (root/'studio-source.json').write_text(json.dumps({'source':parse_source(args.url),'engine':'gallery-dl','version':'1.32.16','pages':count},ensure_ascii=False),encoding='utf-8')
     print('Verified image pages packaged:',count)
 
 

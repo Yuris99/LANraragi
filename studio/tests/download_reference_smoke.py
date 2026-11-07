@@ -19,6 +19,7 @@ class FixtureLRR:
     def json(self,path,*args):
         if path=='/api/info':return {'version':'synthetic'}
         if path=='/api/archives':return []
+        if path=='/api/plugins/download':return [{'url_regex':r'https://e-hentai\.org/g/[0-9]+/[0-9a-f]+/'}]
         raise ValueError('No external service in this fixture')
 
 
@@ -50,6 +51,10 @@ def main():
                 assert len(store.jobs())==1 and store.jobs()[0]['state']=='queued'
                 assert store.jobs()[0]['url']=='https://e-hentai.org/g/123/abcdef/'
                 page.locator('#download-open').click();form.locator('[name=provider]').select_option('hitomi')
+                form.locator('[name=target]').select_option('nas')
+                expect(form.locator('[name=engine] option[value=lanraragi]')).to_have_attribute('disabled','')
+                expect(page.locator('#download-support')).to_contain_text('서버 다운로드 플러그인이 없습니다')
+                form.locator('[name=target]').select_option('pc')
                 form.locator('[name=reference]').fill('123');page.locator('#download-submit').click()
                 expect(page.locator('#download-dialog')).not_to_be_visible()
                 assert len(store.jobs())==2

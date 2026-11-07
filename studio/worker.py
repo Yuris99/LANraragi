@@ -127,8 +127,15 @@ def run_job(job, command, root, report, heartbeat_interval=20):
         stop.set();heartbeat_thread.join()
         if heartbeat_errors:raise RuntimeError('Worker heartbeat failed')
         archives=[x for x in files if Path(x['file']).suffix.lower()=='.cbz']
+        source_metadata=None
+        receipt=output/'studio-source.json'
+        if receipt.is_file() and not receipt.is_symlink() and receipt.stat().st_size<=24*1024:
+            value=json.loads(receipt.read_text(encoding='utf-8'))
+            if isinstance(value,dict) and value.get('engine')=='gallery-dl' and isinstance(value.get('metadata'),dict):
+                source_metadata=value['metadata']
         report('complete','익헨 계정·이미지 1페이지 검증 완료' if verification else '파일 생성 및 SHA-256 기록 완료',{'files':len(files),'bytes':sum(x['bytes'] for x in files),'directory':output.name,
-                                                         'archives':archives[:10],**({'verification':True} if verification else {})})
+                                                         'archives':archives[:10],**({'verification':True} if verification else {}),
+                                                         **({'source_metadata':source_metadata} if source_metadata else {})})
     finally:
         stop.set()
         heartbeat_thread.join()

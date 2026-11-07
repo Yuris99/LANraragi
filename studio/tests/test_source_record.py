@@ -109,6 +109,24 @@ class SourceRecordTests(unittest.TestCase):
         self.store.upsert_source(work['id'],{'url':work['sources'][0]['url'],'tags':['updated:source']})
         self.assertEqual(self.store.get_source_record(work['id'])['sources'][0]['tags'],['updated:source'])
 
+    def test_existing_hitomi_download_restores_info_without_downloading_images(self):
+        url='https://hitomi.la/galleries/123.html'
+        original={'category':'hitomi','gallery_id':123,'title':'Generated actual title','source':url,
+                  'artist':['generated artist'],'language':'Korean','tags':['Glasses ♀'],'count':2,
+                  'cookie':'generated-excluded-secret'}
+        lrr=RangeLRR(archive([('info.json',json.dumps(original).encode()),('01.png',b'generated-only')]))
+        work=self.store.create_work('hitomi-123',lrr_id='b'*40)
+        self.store.upsert_source(work['id'],{'url':url})
+        app=Studio(self.store,lrr);result=app.restore_source_record(work['id'])
+        self.assertTrue(result['restored'])
+        actual=self.store.get_work(work['id'])
+        self.assertEqual((actual['title'],actual['artist']),('Generated actual title','generated artist'))
+        self.assertIn('female:glasses',actual['all_tags'])
+        self.assertNotIn('generated-excluded-secret',json.dumps(self.store.get_source_record(work['id'])))
+        self.store.sync_lrr([{'arcid':'b'*40,'filename':'hitomi-123','title':'hitomi-123','pagecount':2}])
+        self.assertEqual(self.store.get_work(work['id'])['title'],'Generated actual title')
+        self.assertLess(sum(int(headers['Range'].split('-')[-1])-int(headers['Range'].split('=')[1].split('-')[0])+1 for _,headers in lrr.calls),2*1024**2)
+
     def test_original_tags_are_visible_before_remote_fetch_and_fetched_data_is_preserved(self):
         xml=b'<ComicInfo><Web>https://exhentai.org/g/123/abcdefghij/</Web><Title>Original</Title><Genre>parody:original</Genre><Writer>Fixture</Writer><LanguageISO>ko</LanguageISO><PageCount>49</PageCount></ComicInfo>'
         app=Studio(self.store,RangeLRR(archive([('.ehviewer',spider()),('ComicInfo.xml',xml)])))

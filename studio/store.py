@@ -511,6 +511,12 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             'metadata':metadata,'artist_if_empty':', '.join(metadata['artists'])[:500],
             'status':'fetched' if remote else 'manual'},schedule=schedule,lease_guard=lease_guard)
         work=self.get_work(work_id)
+        placeholder=metadata['provider']+'-'+metadata['external_id']
+        if not work['title_locked'] and work['title'] in (placeholder,placeholder+'.cbz'):
+            with self.db() as db:
+                if lease_guard:self.check_automatic_lease(db,lease_guard)
+                db.execute('UPDATE works SET title=? WHERE id=? AND title_locked=0 AND title=?',
+                           (metadata['title'],work_id,work['title']))
         source=next(s for s in work['sources'] if s['url']==metadata['url'])
         if metadata.get('comments'):
             self.apply_comments(work['id'],source['id'],{'status':'fetched','comments':metadata['comments'],'fetched_at':time.time()})
@@ -558,7 +564,15 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             tags = tags_list(item.get('tags',''))
             artist = ', '.join(x.split(':',1)[1] for x in tags if x.startswith('artist:'))
             with self.db() as db:
-                row = db.execute('SELECT id,title_locked,artist_locked FROM works WHERE lrr_id=?',(lrr_id,)).fetchone()
+                row = db.execute('SELECT id,title,artist,title_locked,artist_locked FROM works WHERE lrr_id=?',(lrr_id,)).fetchone()
+                sources=db.execute('SELECT provider,external_id,metadata FROM sources WHERE work_id=?',(row['id'],)).fetchall() if row else []
+            # The backend keeps generated download filenames; preserve the saved source title.
+            if row and item.get('title') in (stored_stem,stored_stem+'.cbz'):
+                snapshot=next((json.loads(source['metadata']) for source in sources
+                    if stored_stem==source['provider']+'-'+source['external_id'] and json.loads(source['metadata']).get('title')),None)
+                if snapshot:
+                    item={**item,'title':row['title'] if row['title'] not in (stored_stem,stored_stem+'.cbz') else snapshot['title']}
+                    artist=artist or row['artist'] or ', '.join(snapshot.get('artists',[]))[:500]
             if row:
                 with self.db() as db:
                     db.execute('UPDATE works SET pages=?,bytes=? WHERE id=?',
@@ -801,6 +815,9 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         proofs=result.get('archives',[])
         if job['target']!='nas' or job['engine']!='command' or job['state']!='complete' or not re.fullmatch(job_id+r'-[0-9a-f]{16}',directory) or metadata.get('filename') not in (expected,expected+'.cbz') or not re.fullmatch('[0-9a-f]{40}',arcid) or not re.fullmatch('[0-9a-f]{64}',verified_sha) or not any(p.get('file')==expected+'.cbz' and p.get('sha256')==verified_sha for p in proofs if isinstance(p,dict)):
             raise ValueError('다운로드 결과와 색인 파일의 연결을 확인하세요.')
+        source_metadata=result.get('source_metadata')
+        if source_metadata and (not isinstance(source_metadata,dict) or any(source_metadata.get(key)!=source[key] for key in ('provider','external_id','url'))):
+            raise ValueError('다운로드 메타데이터의 원본 출처를 확인하세요.')
         with self.db() as db:
             owner=db.execute('SELECT work_id FROM sources WHERE provider=? AND external_id=?',(source['provider'],source['external_id'])).fetchone()
             work_id=owner[0] if owner else job['work_id']
@@ -812,7 +829,10 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
                 db.execute('UPDATE works SET lrr_id=? WHERE id=?',(arcid,work_id))
         self.sync_lrr([metadata])
         with self.db() as db:work_id=db.execute('SELECT id FROM works WHERE lrr_id=?',(arcid,)).fetchone()[0]
-        self.upsert_source(work_id,{'url':source['url']})
+        if not any(s['provider']==source['provider'] and s['external_id']==source['external_id'] for s in self.get_work(work_id)['sources']):
+            self.upsert_source(work_id,{'url':source['url']})
+        if source_metadata:
+            self.import_metadata(work_id,source_metadata,remote=True)
         result.update(catalog_work_id=work_id,catalog_indexed=True)
         with self.db() as db:
             db.execute('UPDATE jobs SET result=?,message=? WHERE id=? AND state=?',

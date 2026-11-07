@@ -7,7 +7,7 @@ import zipfile
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
-from sources import parse_source,source_family
+from sources import parse_source,source_family,hitomi_download_metadata
 
 FORMAT='yuri-studio-source'
 VERSION=1
@@ -120,7 +120,7 @@ def archive_evidence(lrr,work):
     with ArchiveRanges(lrr,work['lrr_id']) as stream,zipfile.ZipFile(stream) as archive:
         infos=archive.infolist()
         if len(infos)>10000:raise ValueError('압축 파일 항목 수 한도입니다.')
-        matched=[i for i in infos if PurePosixPath(i.filename).name in ('.ehviewer','ComicInfo.xml') and not i.is_dir()]
+        matched=[i for i in infos if PurePosixPath(i.filename).name in ('.ehviewer','ComicInfo.xml','info.json') and not i.is_dir()]
         evidence=[];seen=set()
         for info in matched:
             name=PurePosixPath(info.filename).name
@@ -134,6 +134,17 @@ def archive_evidence(lrr,work):
                 except (ValueError,UnicodeError):
                     evidence.append({'requires_review':True,'issue':'invalid-embedded-format',
                         'origin':{'kind':'embedded-ehviewer','file':'.ehviewer','sha256':hashlib.sha256(raw).hexdigest()}})
+            elif name=='info.json':
+                try:data=json.loads(raw.decode('utf-8-sig'))
+                except (ValueError,UnicodeError):continue
+                if not isinstance(data,dict) or data.get('category')!='hitomi' or not isinstance(data.get('source'),str):continue
+                source=parse_source(data['source'])
+                pages=data.get('count') or work.get('pages')
+                pages=pages if type(pages) is int and 0<pages<=20000 else None
+                metadata=hitomi_download_metadata(source,data,pages)
+                if metadata:
+                    evidence.append({**source,'metadata':metadata,'pages':pages,
+                        'origin':{'kind':'embedded-gallery-dl','file':'info.json','sha256':hashlib.sha256(raw).hexdigest(),'url_basis':'original-url'}})
             else:
                 if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():raise ValueError('XML 외부 선언은 허용하지 않습니다.')
                 root=ElementTree.fromstring(raw)
