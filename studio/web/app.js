@@ -23,13 +23,68 @@ function sourceGroups(values) {
 }
 const visibleTag = (tag) => !/^(date_added|timestamp|source):/i.test(tag);
 const sourceMatchCandidates = new Map();
+const sourceFinders = new Map();
+function renderSourceFinder(work) {
+    const root=$('#source-finder'); if (!root) return;
+    const finder=sourceFinders.get(work.id) || {items:[],method:'embedded',page:1}; sourceFinders.set(work.id,finder);
+    root.innerHTML=`<h3>원본 출처 · 정보 찾기</h3><p class="muted">압축 안의 원본 기록을 유리 스튜디오 양식으로 가져옵니다. 기록이 없는 작품은 이미지·제목으로 후보를 찾아 비교하세요.</p>
+        <div class="source-finder-controls"><button class="quiet" id="restore-original-source" type="button">원본 출처 복원 · 정보 갱신</button><button class="quiet" id="export-source-record" type="button">출처 기록 JSON 저장</button></div>
+        <div class="source-finder-controls"><label>찾는 방법<select id="source-find-method"><option value="embedded">원본 기록으로 찾기</option><option value="image">페이지 이미지로 이헨·익헨 검색</option><option value="title">제목으로 이헨·익헨 검색</option><option value="hitomi">작가·제목으로 히토미 검색</option></select></label><label>이미지 검색 페이지<input id="source-find-page" type="number" min="1" max="${work.pages || 20000}" value="${finder.page}"></label><button class="primary" id="source-find-start" type="button">후보 찾기</button><button class="quiet" id="source-find-more" type="button" ${finder.cursor?'':'hidden'}>후보 더 보기</button></div>
+        <p id="source-find-note" class="muted" role="status">${esc(finder.message || '이미지 검색은 선택한 페이지의 파일 지문을 검색 사이트에 보냅니다. 같은 작품인지 확인한 뒤 연결하세요.')}</p>
+        <div id="source-find-results"></div>`;
+    $('#source-find-method').value=finder.method;
+    const draw=() => {
+        $('#source-find-results').innerHTML=(finder.image?`<img class="source-find-image" src="${esc(finder.image)}" alt="검색에 사용한 만화 페이지">`:'')+finder.items.map((item,index)=>{
+            const m=item.metadata,c=item.comparison;
+            const mismatch=Boolean(finder.baseline?.languages?.length && m.languages?.length && !c.language_match);
+            const cover=/^https:\/\/ehgt\.org\/[A-Za-z0-9_./-]+\.(?:jpe?g|png|webp)$/i.test(m.cover_url || '') && !m.cover_url.includes('..') ? `<img class="source-find-image" src="/api/source-preview?url=${encodeURIComponent(m.cover_url)}" loading="lazy" alt="${esc(m.title)} 후보 표지">` : '';
+            return `<div class="source-row">${cover}<div class="source-header"><strong>${esc(item.display_title || m.title)}</strong><a class="quiet" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">원본 열기</a></div><p>${esc(providerName[m.provider])} · ${esc(m.artists.join(', ') || '작가 미확인')} · ${esc(m.languages.join(', ') || '언어 미확인')}</p><p>페이지 ${m.pages ?? '미확인'} / 보관본 ${finder.baseline?.pages ?? '미확인'} · 제목 유사도 ${Math.round(c.title_similarity*100)}% · ${c.page_match?'페이지 수 일치':'페이지 수 비교 필요'}</p><div class="tags">${m.tags.slice(0,12).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><button class="quiet" type="button" data-source-finder-select="${index}" ${mismatch?'disabled':''}>${mismatch?'언어가 달라 판본 확인 필요':'이 작품에 출처 연결'}</button></div>`;
+        }).join('');
+    };
+    draw();
+    async function search(more=false) {
+        if (finder.busy) return;
+        const method=$('#source-find-method').value,page=Number($('#source-find-page').value);
+        if (more && (method!==finder.method || page!==finder.page)) throw new Error('검색 조건이 바뀌었습니다. 후보 찾기를 다시 누르세요.');
+        finder.busy=true;$('#source-find-start').disabled=true;$('#source-find-more').disabled=true;
+        $('#source-find-note').textContent='원본 정보와 후보를 확인하고 있습니다.';
+        try {
+            const result=await api(`/api/works/${work.id}/source-candidates`,{method,page,...(more?{cursor:finder.cursor}:{})});
+            if (state.detail?.id!==work.id) return;
+            finder.items=more?[...finder.items,...result.items.filter(item=>!finder.items.some(old=>old.metadata.url===item.metadata.url))]:result.items;
+            finder.method=method;finder.page=page;finder.cursor=result.next_cursor;finder.baseline=result.baseline;finder.image=result.image;
+            finder.message=`후보 ${finder.items.length}개 · ${result.message}`;
+            $('#source-find-note').textContent=finder.message;$('#source-find-more').hidden=!finder.cursor;draw();
+        } catch (error) {
+            finder.message=error.message;if (state.detail?.id===work.id) $('#source-find-note').textContent=finder.message;
+            throw error;
+        } finally { finder.busy=false;if (state.detail?.id===work.id) {$('#source-find-start').disabled=false;$('#source-find-more').disabled=false;} }
+    }
+    $('#source-find-start').onclick=guard(()=>search());$('#source-find-more').onclick=guard(()=>search(true));
+    $('#restore-original-source').onclick=guard(async()=>{
+        const button=$('#restore-original-source');button.disabled=true;
+        try {
+            const result=await api(`/api/works/${work.id}/restore-source`,{});
+            if (!result.restored) {if (state.detail?.id===work.id) $('#source-find-note').textContent='원본 주소를 확정하지 못했습니다. 원본 기록 후보 또는 이미지·제목 검색으로 비교하세요.';return;}
+            try {await api(`/api/works/${work.id}/sources/${result.source_id}/fetch`,{});}
+            finally {if (state.detail?.id===work.id) await showDetail(work.id);await load();}
+            toast('원본 출처를 복원하고 정보를 갱신했습니다.');
+        } finally {button.disabled=false;}
+    });
+    $('#export-source-record').onclick=guard(async()=>{
+        let record=await api(`/api/works/${work.id}/source-record`);
+        if (record.inspection.state==='not_read' && work.lrr_id) record=await api(`/api/works/${work.id}/source-record`,{});
+        const url=URL.createObjectURL(new Blob([JSON.stringify(record,null,2)+'\n'],{type:'application/json'})),link=document.createElement('a');
+        link.href=url;link.download=`studio-source-${work.short_id}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    });
+}
 let autoSourceRequest = 0;
 async function refreshAutomaticSources() {
     if (!state.detail || !$('#auto-source-state')) return;
     const workId = state.detail.id, request = ++autoSourceRequest;
     const value = await api(`/api/works/${workId}/source-linking`);
     if (state.detail?.id !== workId || request !== autoSourceRequest || !$('#auto-source-state')) return;
-    const labels = {no_source:'기준 출처 URL 하나를 연결하면 자동으로 시작합니다.',queued:'다른 사이트의 작품 정보를 자동 확인할 예정입니다.',running:'다른 사이트의 같은 판본을 찾고 있습니다.',scanning:'저장한 검색 위치부터 다음 묶음을 자동 확인합니다.',waiting:'일부 사이트의 정상 접근·인증을 기다립니다. 자동으로 다시 확인합니다.',blocked:'반복 실패로 대기 중입니다. 로그인 상태가 바뀌면 자동으로 다시 확인합니다.',review:'확실하지 않은 후보는 아래에서 같은 판본인지 확인하세요.',complete:'연결된 출처 확인을 마쳤습니다.'};
+    const labels = {no_source:state.detail.sources.some(source=>['ehentai','exhentai','hitomi'].includes(source.provider))?'원본 출처가 연결돼 있습니다. 위의 후보 찾기로 다른 사이트의 작품도 비교할 수 있습니다.':'원본 출처 복원 또는 후보 찾기로 출처를 연결하세요.',queued:'다른 사이트의 작품 정보를 자동 확인할 예정입니다.',running:'다른 사이트의 같은 판본을 찾고 있습니다.',scanning:'저장한 검색 위치부터 다음 묶음을 자동 확인합니다.',waiting:'일부 사이트의 정상 접근·인증을 기다립니다. 자동으로 다시 확인합니다.',blocked:'반복 실패로 대기 중입니다. 로그인 상태가 바뀌면 자동으로 다시 확인합니다.',review:'확실하지 않은 후보는 아래에서 같은 판본인지 확인하세요.',complete:'연결된 출처 확인을 마쳤습니다.'};
     const sites = sourceGroups(value.result?.sites || []).map(([family,members]) => ({
         ...(members.find(site => site.status === 'connected') || members[0]),provider:family,
         ...(members.some(site => site.status === 'connected') && members.some(site => site.status !== 'connected') ? {status:'partial'} : {}),
@@ -110,6 +165,70 @@ async function api(path, data, options = {}) {
     }
     if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
     return value;
+}
+let metadataRefreshRunning = false, metadataRefreshStop = false;
+function metadataRefreshPlan(works) {
+    const targets = [], seen = new Set(); let missing = 0;
+    for (const work of works) {
+        const sources = work.sources.filter(source => ['ehentai','exhentai','hitomi'].includes(source.provider));
+        if (!sources.length) missing++;
+        for (const source of sources) {
+            const key = work.id + ':' + source.url;
+            if (seen.has(key)) continue;
+            seen.add(key); targets.push({workId:work.id,sourceId:source.id,family:sourceFamily(source.provider),label:work.short_id+' · '+providerName[source.provider]});
+        }
+    }
+    return {targets,missing};
+}
+async function refreshLinkedMetadata() {
+    if (metadataRefreshRunning) return;
+    metadataRefreshRunning = true; metadataRefreshStop = false;
+    const button = $('#refresh-metadata'), stop = $('#metadata-refresh-stop'), note = $('#metadata-refresh-status');
+    button.disabled = true; stop.hidden = false; stop.disabled = false;
+    note.textContent = '연결된 작품 주소를 확인하고 있습니다.';
+    try {
+        const works = []; let page = 1, restored = 0, review = 0;
+        while (!metadataRefreshStop) {
+            const value = await api(`/api/works?limit=120&page=${page++}`);
+            works.push(...value.items);
+            if (works.length >= value.total) break;
+            if (!value.items.length) throw new Error('작품 목록이 변경됐습니다. 다시 실행하세요.');
+        }
+        for (let index=0;index<works.length && !metadataRefreshStop;index++) {
+            const work=works[index];
+            if (!work.lrr_id || work.sources.some(source=>['ehentai','exhentai','hitomi'].includes(source.provider))) continue;
+            note.textContent=`원본 출처 확인 ${index+1}/${works.length} · 복원 ${restored}개 · 검토 ${review}개`;
+            try {
+                const result=await api(`/api/works/${work.id}/restore-source`,{});
+                works[index]=result.work;if (result.restored) restored++;else if (result.record.evidence.some(e=>e.conflict || e.requires_review)) review++;
+            } catch (error) {review++;}
+        }
+        if (metadataRefreshStop) { note.textContent = `중지 · 원본 출처 ${restored}개 복원 · 검토 ${review}개. 외부 정보 갱신은 시작하지 않았습니다.`; await load();return; }
+        const {targets,missing} = metadataRefreshPlan(works), blocked = new Set(), errors = [];
+        let completed = 0, failed = 0, deferred = 0;
+        for (const target of targets) {
+            if (metadataRefreshStop) break;
+            if (blocked.has(target.family)) { deferred++; continue; }
+            note.textContent = `출처 ${completed+failed+deferred+1}/${targets.length} 갱신 중 · 연결 주소 없는 작품 ${missing}개`;
+            try {
+                await api(`/api/works/${target.workId}/sources/${target.sourceId}/fetch`, {defer_automatic:true});
+                completed++;
+            } catch (error) {
+                failed++; blocked.add(target.family);
+                errors.push(target.label+': '+error.message);
+                // Stop this site's remaining requests after an access or collection failure.
+            }
+            if (!metadataRefreshStop) await new Promise(resolve => setTimeout(resolve,1000));
+        }
+        note.textContent = `${metadataRefreshStop ? '중지' : '완료'} · 원본 복원 ${restored}개 · 검토 ${review}개 · 갱신 ${completed}건 · 실패 ${failed}건 · 보류 ${deferred}건 · 원본 출처 없는 작품 ${missing}개` +
+            (metadataRefreshStop ? ` · 미처리 ${targets.length-completed-failed-deferred}건` : '') +
+            (failed ? ' · 실패한 사이트의 추가 요청 중지. '+errors.join(' / ') : '');
+        await load();
+    } catch (error) {
+        note.textContent = '일괄 갱신 중단 · ' + error.message;
+    } finally {
+        metadataRefreshRunning = false; button.disabled = false; stop.hidden = true;
+    }
 }
 const workShortIds = new Map(), shortWorkIds = new Map(), workAliases = new Map();
 function cacheWork(work) {
@@ -375,8 +494,9 @@ function renderDetail(work) {
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions"><button class="primary" id="read-work" ${work.lrr_id || work.edition?.assets.some(a=>a.kind === "audio" || a.kind === "video") ? "" : "disabled"}>${work.edition?.kind === "voice_video" ? "▷ 보이스코믹 재생" : work.edition?.kind === "voice_pages" ? "▷ 만화+음성" : "▷ 읽기"}</button><button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${esc(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => `<button class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
-    <section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
+    <section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
     <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(익헨 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
+    renderSourceFinder(work);
     renderEdition(work);
     refreshAutomaticSources().catch(() => {});
     if (!$("#detail").open) $("#detail").showModal();
@@ -433,6 +553,16 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.id) await showDetail(button.dataset.id);
     if (button.dataset.rating) { await api(`/api/works/${state.detail.id}`, { rating: Number(button.dataset.rating) }); await showDetail(state.detail.id); }
     if (button.dataset.fetch) { button.disabled = true; try { await api(`/api/works/${state.detail.id}/sources/${button.dataset.fetch}/fetch`, {}); await showDetail(state.detail.id); toast("출처 태그를 갱신했습니다."); } finally { button.disabled = false; } }
+    if (button.dataset.sourceFinderSelect !== undefined) {
+        const finder=sourceFinders.get(state.detail.id),item=finder?.items[Number(button.dataset.sourceFinderSelect)];
+        if (!item) return;
+        if (finder.baseline?.languages?.length && item.metadata.languages.length && !item.comparison.language_match) throw new Error('언어가 다른 후보는 판본을 확인하세요.');
+        button.disabled=true;
+        try {
+            await api(`/api/works/${state.detail.id}/sources`,{url:item.metadata.url,tags:item.metadata.tags,metadata:item.metadata,artist_if_empty:item.metadata.artists.join(', ').slice(0,500)});
+            await showDetail(state.detail.id);await load();toast('선택한 후보의 출처 정보를 연결했습니다.');
+        } finally {button.disabled=false;}
+    }
     if (button.id === "metadata-preview") {
         const form = $("#html-metadata-form"), snapshot = {url:form.elements.url.value,html:form.elements.html.value};
         const value = await api('/api/metadata/preview', snapshot);
@@ -500,6 +630,8 @@ $("#detail").addEventListener("click", guard(async (e) => {
 }));
 document.addEventListener("submit", guard(async (e) => { if (e.target.id === "work-form") { const data = Object.fromEntries(new FormData(e.target)); await api(`/api/works/${state.detail.id}`, { ...data, title_locked: true }); await showDetail(state.detail.id); await load(); } }));
 $("#sync").onclick = guard(sync); $("#empty-sync").onclick = guard(sync);
+$('#refresh-metadata').onclick = guard(refreshLinkedMetadata);
+$('#metadata-refresh-stop').onclick = () => { metadataRefreshStop = true; $('#metadata-refresh-stop').disabled = true; };
 $("#add").onclick = () => $("#editor").showModal();
 $("#queue").onclick = $("#download-open").onclick = guard(async () => {
     $("#download-dialog").showModal();

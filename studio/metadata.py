@@ -194,7 +194,14 @@ def fetch_metadata(url, fetch=None):
     fetch = fetch or public_document
     if source['provider'] == 'hitomi':
         return parse_hitomi_json(url, fetch('https://ltn.gold-usergeneratedcontent.net/galleries/' + source['external_id'] + '.js'))
-    if source['provider'] in ('ehentai','exhentai'): return parse_html(url, fetch(source['url']))
+    if source['provider'] in ('ehentai','exhentai'):
+        html=fetch(source['url']);metadata=parse_html(url,html)
+        cover=Document(html).root.by_id('gd1')
+        if cover:
+            for node in cover.walk():
+                match=re.search(r'url\([\"\x27]?(https://ehgt\.org/[^\s\"\x27()]+)[\"\x27]?\)',node.attrs.get('style',''))
+                if match:metadata['cover_url']=match[1];break
+        return metadata
     raise ValueError('이 출처의 직접 정보 수집기는 아직 지원하지 않습니다.')
 
 

@@ -23,10 +23,12 @@ from store import Store
 from uploads import Uploads,UploadError
 from editions import VoiceAssets
 from site_sessions import LoginClient
+from source_record import archive_evidence,preferred_evidence
+from source_finder import candidates as find_candidates,preview_image
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=28
+STUDIO_UPDATE=29
 
 
 class LRR:
@@ -70,11 +72,43 @@ def verify_cleanup_downloads(lrr, request):
 class Studio:
     def __init__(self, store, lrr, upload_dir=None):
         self.store=store;self.lrr=lrr;self.stop=threading.Event()
+        self.source_search_at=0
         self.sync_lock=threading.Lock();self.upload_cursor='';self.match_lock=threading.Lock()
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
 
         self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
         self.login=LoginClient(config_root=Path(store.path).parent)
+
+    def extract_source_record(self,work_id):
+        work=self.store.get_work(work_id)
+        evidence=archive_evidence(self.lrr,work)
+        return self.store.save_source_evidence(work['id'],evidence)
+
+    def restore_source_record(self,work_id):
+        record=self.extract_source_record(work_id)
+        evidence=preferred_evidence(record['evidence'])
+        if evidence:
+            self.store.upsert_source(work_id,{'url':evidence['url']},schedule=False)
+        work=self.store.get_work(work_id)
+        return {'restored':bool(evidence),'source_id':next((s['id'] for s in work['sources'] if evidence and s['url']==evidence['url']),None),
+                'record':self.store.get_source_record(work_id),'work':work}
+
+    def find_source_candidates(self,work_id,data):
+        if not isinstance(data,dict) or set(data)-{'method','cursor','page'} or 'method' not in data:raise ValueError('후보 검색 방법을 지정하세요.')
+        method=data['method']
+        if method not in ('embedded','image','title','hitomi'):raise ValueError('지원하는 검색 방법을 선택하세요.')
+        if not self.match_lock.acquire(blocking=False):raise ValueError('다른 출처 검색이 진행 중입니다.')
+        try:
+            if time.monotonic()-self.source_search_at<3:raise ValueError('검색은 3초 간격으로 실행하세요.')
+            self.source_search_at=time.monotonic()
+            work=self.store.get_work(work_id);record=self.store.get_source_record(work_id)
+            if record['inspection']['state']=='not_read' and work.get('lrr_id'):record=self.extract_source_record(work_id)
+            if method=='image':
+                status=self.login.call({'op':'status'})
+                if not status.get('source_image_search'):raise ValueError('로그인 서비스의 이미지 검색 업데이트가 필요합니다.')
+            fetch,index,blocked=self.source_transport()
+            return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1))
+        finally:self.match_lock.release()
 
     def source_transport(self):
         from connectors import public_document
@@ -176,7 +210,7 @@ class Studio:
             return {'synced':synced}
         finally:self.sync_lock.release()
 
-    def fetch_metadata(self, work_id, source_id):
+    def fetch_metadata(self, work_id, source_id, schedule=True):
         work=self.store.get_work(work_id)
         source=next((s for s in work['sources'] if s['id']==source_id),None)
         if not source:raise KeyError('출처를 찾을 수 없습니다.')
@@ -184,7 +218,7 @@ class Studio:
             if not self.match_lock.acquire(blocking=False):raise ValueError('다른 사이트 조회가 진행 중입니다.')
             try:
                 self.store.begin_matching(work_id)
-                return self.store.import_metadata(work_id,direct_metadata(source['url'],self.source_transport()[0]),remote=True)
+                return self.store.import_metadata(work_id,direct_metadata(source['url'],self.source_transport()[0]),remote=True,schedule=schedule)
             finally:self.match_lock.release()
         if not work['lrr_id']:raise ValueError('라이브러리에 파일을 연결한 뒤 태그를 가져오세요.')
         plugins=self.lrr.json('/api/plugins/metadata')
@@ -404,6 +438,14 @@ class Handler(BaseHTTPRequestHandler):
         match=re.fullmatch(r'/api/uploads/([0-9a-f]{64})/download',path)
         if match:return self.download_upload(match[1])
         if path=='/api/tags':return self.respond(store.tag_catalog(q('q')))
+        if path=='/api/source-preview':
+            raw=preview_image(q('url'));mime=image_content_type(raw[:32])
+            if not mime:raise ValueError('후보 표지 이미지 형식을 확인하세요.')
+            self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Content-Length',str(len(raw)))
+            self.send_header('Cache-Control','private, max-age=3600');self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+            self.wfile.write(raw);return
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/source-record',path)
+        if match:return self.respond(store.get_source_record(match[1]))
         if path=='/api/library/tags':return self.respond(store.library_tags(q('q')))
         match=re.fullmatch(r'/api/short/([^/]+)',path)
         if match:return self.respond(store.resolve_short_id(match[1]))
@@ -541,6 +583,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/source-candidates',path)
+        if match:return self.respond(self.app.find_source_candidates(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/(source-record|restore-source)',path)
+        if match:
+            if data:raise ValueError('추가 필드는 지정하지 마세요.')
+            return self.respond(self.app.extract_source_record(match[1]) if match[2]=='source-record' else self.app.restore_source_record(match[1]))
         if path=='/api/source-linking':
             if set(data)!={'enabled'}:raise ValueError('자동 연결 설정만 지정하세요.')
             return self.respond(store.set_automatic_enabled(data['enabled']))
@@ -644,7 +692,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(store.import_metadata(match[1],data['metadata']))
             return self.respond(store.upsert_source(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)
-        if match:return self.respond(self.app.fetch_metadata(match[1],match[2]))
+        if match:
+            if set(data)-{'defer_automatic'} or 'defer_automatic' in data and type(data['defer_automatic']) is not bool:raise ValueError('정보 갱신 옵션을 확인하세요.')
+            return self.respond(self.app.fetch_metadata(match[1],match[2],schedule=not data.get('defer_automatic',False)))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/comments/fetch',path)
         if match:return self.respond(self.app.fetch_comments(match[1],match[2]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/progress',path)

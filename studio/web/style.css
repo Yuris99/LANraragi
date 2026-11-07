@@ -205,6 +205,10 @@ summary:hover{color:var(--text)}
 .comment{padding:12px 0;border-bottom:1px solid var(--line);font-size:15px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
 .comment small{display:block;margin-bottom:4px;font-size:12px}
 .source-form textarea{min-height:130px;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.source-finder-controls{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin:14px 0}
+.source-finder-controls label{flex:1 1 180px;margin:0}
+.source-finder-controls input{max-width:100%}
+.source-find-image{display:block;max-width:160px;max-height:220px;object-fit:contain;margin:10px 0}
 #counterpart-results .source-header{align-items:flex-start}
 #counterpart-results .source-header strong{flex:1 1 200px;min-width:0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
 #counterpart-results a{text-decoration:underline;text-underline-offset:3px}

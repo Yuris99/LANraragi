@@ -66,6 +66,7 @@ class LoginBrowser:
         self.expire()
         return {'configured':True,'source_documents':True,'session_import':True,'sites':[self.vault.status(k) for k in SITES],
                 'shared_eh_account':True,
+                'source_image_search':True,
                 'editing_shortcuts':True,
                 'idle_timeout_seconds':LOGIN_IDLE_TIMEOUT,
                 'idle_remaining_seconds':max(0,int(self.deadline-time.monotonic())) if self.session else None,

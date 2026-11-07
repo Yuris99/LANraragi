@@ -106,6 +106,10 @@ def _source_document(vault,url,offset=0,trace=None):
         search=urllib.parse.parse_qs(value.query,keep_blank_values=True)
         gallery=re.fullmatch(r'/g/[0-9]+/[A-Za-z0-9]+/',value.path) and not value.query
         searching=value.path=='/' and set(search) in ({'f_search'},{'f_search','page'}) and len(search['f_search'])==1 and 0<len(search['f_search'][0])<=150
+        image_search=value.path=='/' and set(search) in ({'f_shash','fs_similar','fs_covers'},{'f_shash','fs_similar','fs_covers','page'}) and \
+            len(search.get('f_shash',[]))==1 and bool(re.fullmatch('[0-9a-f]{40}',search['f_shash'][0])) and \
+            search.get('fs_similar')==['1'] and search.get('fs_covers')==['1']
+        searching=searching or image_search
         if 'page' in search and (len(search['page'])!=1 or not re.fullmatch(r'[0-9]{1,4}',search['page'][0]) or int(search['page'][0])>1000):searching=False
         if not (gallery or searching):raise ValueError('invalid_source_url')
     elif host=='ltn.gold-usergeneratedcontent.net' and not value.query:

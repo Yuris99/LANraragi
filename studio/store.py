@@ -40,6 +40,8 @@ class Store(EditionCatalog,AutomaticSources):
                 fetched REAL, status TEXT NOT NULL DEFAULT 'unverified',
                 UNIQUE(provider,external_id));
               CREATE INDEX IF NOT EXISTS sources_work ON sources(work_id);
+              CREATE TABLE IF NOT EXISTS studio_source_records (
+                work_id TEXT PRIMARY KEY REFERENCES works(id),record TEXT NOT NULL);
               CREATE INDEX IF NOT EXISTS works_added ON works(added);
               CREATE TABLE IF NOT EXISTS work_numbers (
                 number INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -261,6 +263,23 @@ class Store(EditionCatalog,AutomaticSources):
         if any(not isinstance(t,str) or not t.strip() or len(t)>120 or any(ord(c)<32 for c in t) for t in value):
             raise ValueError('태그는 1~120자의 텍스트여야 합니다.')
         return list(dict.fromkeys(t.strip() for t in value))
+
+    def save_source_evidence(self,work_id,evidence):
+        from source_record import source_record
+        record=source_record(self.get_work(work_id),evidence)
+        record['inspection']={'state':'read','at':time.time()}
+        with self.db() as db:
+            db.execute('INSERT OR REPLACE INTO studio_source_records VALUES(?,?)',(work_id,json.dumps(record,ensure_ascii=False)))
+        return record
+
+    def get_source_record(self,work_id):
+        from source_record import source_record
+        work=self.get_work(work_id)
+        with self.db() as db:row=db.execute('SELECT record FROM studio_source_records WHERE work_id=?',(work['id'],)).fetchone()
+        saved=json.loads(row[0]) if row else {}
+        record=source_record(work,saved.get('evidence',[]))
+        record['inspection']=saved.get('inspection',{'state':'not_read'})
+        return record
 
     def edit_user_tags(self,work_ids,add=None,remove=None):
         if not isinstance(work_ids,list) or not 1<=len(work_ids)<=120 or any(not isinstance(i,str) for i in work_ids):
