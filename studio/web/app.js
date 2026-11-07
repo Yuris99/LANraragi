@@ -753,7 +753,7 @@ async function renderWorkSeries(work) {
 }
 function renderDetail(work) {
     pauseVoicePlayers();
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div id="detail-facets">${detailFacets(work)}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div id="detail-facets">${detailFacets(work)}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button>${work.lrr_id ? `<button class="quiet danger" id="delete-work-file">원본 파일 삭제</button>` : ""}</div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.filter(visibleTag).map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section" id="work-series"></section><section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
@@ -768,6 +768,58 @@ function jobDetails(job) {
     const hint=job.engine==='command' && job.message==='엔진 종료 코드 16' ? 'gallery-dl 기준: 로그인 인증 실패 또는 열람 권한 부족. 쿠키 전달·만료와 작품 권한은 작업 폴더의 engine.log에서 확인해야 합니다.' : '';
     try { const result = JSON.parse(job.result || "{}"); return [hint, result.directory ? `출력 폴더: ${result.directory}` : "", result.remote_job ? `원격 작업: ${result.remote_job}` : "", result.submission === "pending" ? "원격 접수 여부 확인 필요 · 자동 재제출 중지" : ""].filter(Boolean).map(esc).join(" · "); } catch { return esc(hint); }
 }
+let fileDeletionSelection=null,fileDeletionTimer=null;
+function drawFileDeletion(value) {
+    const request=value.request,preview=value.ready && request?.state==='preview';
+    $('#file-deletion-name').textContent=request ? `${request.filename} · ${(request.bytes/1048576).toFixed(1)} MiB` : '';
+    $('#file-deletion-check').hidden=!preview;$('#file-deletion-submit').hidden=!preview;
+    $('#file-deletion-submit').disabled=!preview || !$('#file-deletion-ack').checked;
+    $('#file-deletion-refresh').hidden=!request || !['queued','deleting'].includes(request.state);
+    $('#file-deletion-status').textContent=!value.ready && !request ? 'NAS 파일 삭제 작업자 설치·연결이 필요합니다. 현재 파일은 그대로입니다.' : request?.state==='failed' ? request.message : ({preview:'파일 전체를 확인했습니다. 아래에서 삭제를 확정하세요.',queued:'삭제 작업 대기 중입니다. 창을 닫아도 확정한 작업은 계속됩니다.',deleting:'파일을 다시 확인하고 삭제하는 중입니다.',complete:'실제 만화 파일을 삭제했습니다. 작품 정보는 유지했습니다.'}[request?.state] || '파일 확인 중…');
+    if (fileDeletionSelection) fileDeletionSelection.request=request;
+}
+async function checkFileDeletion() {
+    clearTimeout(fileDeletionTimer);
+    const selected=fileDeletionSelection;if (!selected || !$('#file-deletion-dialog').open) return;
+    const value=await api(`/api/works/${selected.work.id}/file-deletion`);
+    if (fileDeletionSelection!==selected) return;
+    drawFileDeletion(value);
+    if (value.request?.state==='complete') {
+        $('#file-deletion-dialog').close();
+        if (state.detail?.id===selected.work.id) {await showDetail(selected.work.id);await load();}
+        toast('실제 만화 파일을 삭제했습니다. 제목·태그·읽기 기록은 남아 있습니다.');
+    } else if (['queued','deleting'].includes(value.request?.state)) fileDeletionTimer=setTimeout(guard(checkFileDeletion),1500);
+}
+async function openFileDeletion(work) {
+    fileDeletionSelection={work};$('#file-deletion-work').textContent=work.display_title || work.title;
+    $('#file-deletion-name').textContent='';$('#file-deletion-status').textContent='삭제 작업자 연결과 파일을 확인하고 있습니다…';
+    $('#file-deletion-check').hidden=true;$('#file-deletion-ack').checked=false;
+    $('#file-deletion-submit').hidden=true;$('#file-deletion-refresh').hidden=true;
+    $('#file-deletion-dialog').showModal();
+    const selected=fileDeletionSelection,value=await api(`/api/works/${work.id}/file-deletion`);
+    if (fileDeletionSelection!==selected) return;
+    drawFileDeletion(value);
+    if (['queued','deleting','complete'].includes(value.request?.state)) return checkFileDeletion();
+    if (value.ready) {
+        try {
+            const preview=await api(`/api/works/${work.id}/file-deletion/preview`,{});
+            if (fileDeletionSelection===selected) drawFileDeletion(preview);
+        } catch(error) {if (fileDeletionSelection===selected) $('#file-deletion-status').textContent=error.message;}
+    }
+}
+$('#file-deletion-dialog').addEventListener('close',()=>{clearTimeout(fileDeletionTimer);fileDeletionSelection=null;});
+$('#file-deletion-ack').onchange=()=>{$('#file-deletion-submit').disabled=!$('#file-deletion-ack').checked;};
+$('#file-deletion-refresh').onclick=guard(checkFileDeletion);
+$('#file-deletion-form').onsubmit=guard(async event=>{
+    event.preventDefault();const selected=fileDeletionSelection;
+    if (!selected?.request || !$('#file-deletion-ack').checked) return;
+    $('#file-deletion-submit').disabled=true;
+    try {
+        const value=await api(`/api/works/${selected.work.id}/file-deletion/confirm`,{request_id:selected.request.id,filename:selected.request.filename});
+        if (fileDeletionSelection!==selected) return;
+        drawFileDeletion(value);await checkFileDeletion();
+    } catch(error) {if (fileDeletionSelection===selected) {$('#file-deletion-status').textContent=error.message;$('#file-deletion-submit').disabled=false;}}
+});
 async function showJobs() {
     const jobs = await api("/api/jobs"); $("#job-count").textContent = jobs.filter((j) => ["queued", "running"].includes(j.state)).length;
     $("#jobs").innerHTML = jobs.length ? jobs.map((j) => `<article class="job"><div><div class="job-state">${statusName[j.state] || esc(j.state)} · ${j.engine === "lanraragi" ? "서버 플러그인" : "외부 엔진"}</div><div class="job-url">${esc(j.url)}</div><div class="job-message">${esc(j.message || (j.engine === "command" && j.state === "queued" ? "대상 기기의 다운로드 작업자가 가져가기를 기다립니다." : "서버 작업 대기 중"))}</div><small class="muted">${jobDetails(j)}</small></div><div class="job-target">${j.target === "nas" ? "NAS" : "내 PC"}${["failed", "blocked"].includes(j.state) ? `<p><button class="quiet" data-retry="${j.id}">${j.engine === "lanraragi" ? "상태 확인 · 재시도" : "다시 시도"}</button></p>` : ""}</div></article>`).join("") : `<div class="empty"><span>↓</span><h2>대기 중인 다운로드가 없습니다.</h2><p>작품 URL과 저장할 기기를 선택해 주세요.</p></div>`;
@@ -903,6 +955,7 @@ $("#detail").addEventListener("click", guard(async (e) => {
     if (e.target.closest("#favorite-work")) { await api(`/api/works/${state.detail.id}`, { favorite: !state.detail.favorite }); await showDetail(state.detail.id); await load(); }
     if (e.target.closest("#read-work")) await readWork();
     if (e.target.closest("#read-work-start")) await readWork(true);
+    if (e.target.closest("#delete-work-file")) await openFileDeletion(state.detail);
     if (e.target.closest("#edit-work")) {
         const section = document.createElement("section"); section.className = "detail-section";
         section.innerHTML = `<form id="work-form"><label>제목<input name="title" required value="${esc(state.detail.title)}"></label><label>작가<input name="artist" value="${esc(state.detail.artist)}"></label><p class="muted">저장하면 제목을 잠가 다음 동기화에서 덮어쓰지 않습니다.</p><button class="primary">저장</button></form>`;

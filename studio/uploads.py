@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import zipfile
+from file_deletion import restore as restore_deleted_file
 
 IMAGE_SUFFIXES={'.jpg','.jpeg','.png','.webp','.gif','.avif','.jxl'}
 
@@ -115,6 +116,9 @@ class Uploads:
             with self.store.db() as db:
                 db.execute('INSERT OR IGNORE INTO uploads(sha256,original_name,stored_name,bytes,created) VALUES(?,?,?,?,?)',
                            (sha,name,destination.name,length,time.time()))
+                if previous and previous['state']=='retired' and db.execute("SELECT 1 FROM file_deletions WHERE sha256=? AND state='complete'",(sha,)).fetchone():
+                    db.execute("UPDATE uploads SET state='stored',lrr_id=NULL WHERE sha256=?",(sha,))
+                    restore_deleted_file(db,sha)
             return {**self.get(sha),'duplicate':False}
         finally:
             if temporary:temporary.unlink(missing_ok=True)

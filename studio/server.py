@@ -27,10 +27,11 @@ from site_sessions import LoginClient
 from source_record import archive_evidence,preferred_evidence
 from source_finder import candidates as find_candidates,preview_image
 from tag_display import dictionary as tag_dictionary
+from file_deletion import FileDeletion,blocked as file_deleted
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=39
+STUDIO_UPDATE=40
 
 
 def supports_download(plugins,url):
@@ -108,6 +109,7 @@ class Studio:
         self.sync_lock=threading.Lock();self.upload_cursor='';self.match_lock=threading.Lock()
         self.source_waiter_lock=threading.Lock();self.source_waiter_count=0;self.manual_source_pending=threading.Event()
         self.uploads=Uploads(store,upload_dir or os.environ.get('STUDIO_UPLOAD_DIR'),int(os.environ.get('STUDIO_MAX_UPLOAD_BYTES',512*1024*1024)))
+        self.file_deletion=FileDeletion(store,lrr)
 
         self.voice=VoiceAssets(store,self.uploads.root,self.uploads.max_bytes)
         self.login=LoginClient(config_root=Path(store.path).parent)
@@ -470,6 +472,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/file-deletion',path)
+        if match:return self.respond(self.app.file_deletion.status(match[1]))
         if path=='/api/source-linking':return self.respond(store.automatic_summary())
         match=re.fullmatch('/api/works/([0-9a-f]{32})/source-linking',path)
         if match:return self.respond(store.automatic_status(store.get_work(match[1])['id']))
@@ -533,6 +537,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(store.export())
         match=re.fullmatch(r'/api/media/([0-9a-f]{40})/(thumbnail|download|files|page)',path)
         if match:
+            with store.db() as db:
+                if file_deleted(db,match[1]):raise KeyError('삭제된 파일이거나 파일 삭제가 진행 중입니다.')
             query='?'+parsed.query if parsed.query else ''
             if match[2]=='files':
                 value=self.app.lrr.json('/api/archives/'+match[1]+'/files'+query)
@@ -657,6 +663,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/file-deletion/(preview|confirm)',path)
+        if match:
+            if match[2]=='preview':
+                if data:raise ValueError('삭제 대상은 현재 작품에서만 선택하세요.')
+                return self.respond(self.app.file_deletion.preview(match[1]))
+            if set(data)!={'request_id','filename'} or any(not isinstance(data[k],str) for k in data):raise ValueError('확인한 삭제 요청과 파일 이름만 지정하세요.')
+            return self.respond(self.app.file_deletion.confirm(match[1],data['request_id'],data['filename']),202)
         match=re.fullmatch('/api/works/([0-9a-f]{32})/series',path)
         if match:return self.respond(store.set_work_series(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/series/([0-9a-f]{32})/remove',path)

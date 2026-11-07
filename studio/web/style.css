@@ -176,6 +176,9 @@ label:not(.search){display:flex;flex-direction:column;gap:6px;margin:16px 0;colo
 @media(max-width:600px){.bookmark-toggle{width:44px;height:44px;min-height:44px}}
 @media(max-width:600px){.source-method-options{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .muted{font-size:13px;line-height:1.65;color:var(--faint)}
+.danger{color:var(--danger);border-color:var(--danger)}
+.danger:hover{background:var(--danger-bg)}
+.deletion-filename{overflow-wrap:anywhere;font-weight:600}
 dialog .muted{font-size:14px}
 dialog p{max-width:75ch}
 .close{position:absolute;right:14px;top:12px;width:40px;height:40px;border-radius:var(--radius);font-size:26px;line-height:1;color:var(--muted)}

@@ -19,6 +19,7 @@ def uid():
 from editions import EditionCatalog, SCHEMA as EDITION_SCHEMA
 from auto_sources import AutomaticSources, SCHEMA as AUTO_SOURCE_SCHEMA
 from series import SeriesCatalog, SCHEMA as SERIES_SCHEMA
+from file_deletion import SCHEMA as FILE_DELETION_SCHEMA,blocked as file_deleted,restore as restore_deleted_file
 
 
 class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
@@ -88,6 +89,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             db.executescript(EDITION_SCHEMA)
             db.executescript(AUTO_SOURCE_SCHEMA)
             db.executescript(SERIES_SCHEMA)
+            db.executescript(FILE_DELETION_SCHEMA)
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
@@ -575,6 +577,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             if not re.fullmatch('[0-9a-f]{40}',lrr_id):
                 continue
             with self.db() as db:
+                if file_deleted(db,lrr_id):continue
                 if db.execute('SELECT 1 FROM copy_retirements WHERE copy_lrr_id=?',(lrr_id,)).fetchone():continue
             stored_stem=Path(item.get('filename','')).stem
             with self.db() as db:
@@ -585,6 +588,11 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
             artist = ', '.join(x.split(':',1)[1] for x in tags if x.startswith('artist:'))
             with self.db() as db:
                 row = db.execute('SELECT id,title,artist,title_locked,artist_locked FROM works WHERE lrr_id=?',(lrr_id,)).fetchone()
+                if not row:
+                    restored=db.execute("SELECT w.id FROM file_deletions d JOIN works w ON w.id=d.work_id WHERE d.lrr_id=? AND d.state='restored' AND w.lrr_id IS NULL AND w.merged_into IS NULL ORDER BY d.created DESC LIMIT 1",(lrr_id,)).fetchone()
+                    if restored:
+                        db.execute('UPDATE works SET lrr_id=? WHERE id=?',(lrr_id,restored['id']))
+                        row=db.execute('SELECT id,title,artist,title_locked,artist_locked FROM works WHERE id=?',(restored['id'],)).fetchone()
                 sources=db.execute('SELECT provider,external_id,metadata FROM sources WHERE work_id=?',(row['id'],)).fetchall() if row else []
             # The backend keeps generated download filenames; preserve the saved source title.
             if row and item.get('title') in (stored_stem,stored_stem+'.cbz'):
@@ -801,6 +809,8 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         if target not in ('nas','pc') or engine not in ('lanraragi','command') or (target=='pc' and engine=='lanraragi'):
             raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')
         source=self.resolve_reference(provider,reference)
+        with self.db() as db:
+            if source['work_id'] and db.execute("SELECT 1 FROM file_deletions WHERE work_id=? AND state IN ('queued','deleting')",(source['work_id'],)).fetchone():raise ValueError('파일 삭제가 진행 중입니다. 완료 후 다시 다운로드하세요.')
         if source['available']:
             return {'state':'available','work_id':source['work_id']}
         if source['provider']=='exhentai' and engine!='command':raise ValueError('익헨은 로그인 세션을 사용하는 외부 다운로드 작업자를 선택하세요.')
@@ -864,6 +874,10 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         if source_metadata and (not isinstance(source_metadata,dict) or any(source_metadata.get(key)!=source[key] for key in ('provider','external_id','url'))):
             raise ValueError('다운로드 메타데이터의 원본 출처를 확인하세요.')
         with self.db() as db:
+            if db.execute("SELECT 1 FROM file_deletions WHERE lrr_id=? AND state IN ('queued','deleting')",(arcid,)).fetchone():raise ValueError('파일 삭제가 진행 중입니다.')
+            if file_deleted(db,arcid):
+                if not db.execute("SELECT 1 FROM file_deletions WHERE lrr_id=? AND sha256=? AND state='complete' AND updated<?",(arcid,verified_sha,job['created'])).fetchone():raise ValueError('삭제 후 새로 요청한 다운로드와 파일 검증값을 확인하세요.')
+                restore_deleted_file(db,verified_sha)
             owner=db.execute('SELECT work_id FROM sources WHERE provider=? AND external_id=?',(source['provider'],source['external_id'])).fetchone()
             work_id=owner[0] if owner else job['work_id']
             if work_id:
