@@ -67,6 +67,14 @@ class SourceFinderTests(unittest.TestCase):
         candidates(self.work,record,'image',fetch,lrr=PageLRR())
         self.assertTrue(fetch.call_args.args[0].startswith('https://exhentai.org/?f_shash='))
 
+    def test_unknown_source_uses_available_account_and_linked_host_is_preserved(self):
+        fetch=Mock(return_value='')
+        candidates(self.work,{'evidence':[]},'image',fetch,lrr=PageLRR(),default_provider='exhentai')
+        self.assertTrue(fetch.call_args.args[0].startswith('https://exhentai.org/?f_shash='))
+        linked={**self.work,'sources':[{'provider':'ehentai','metadata':{}}]}
+        candidates(linked,{'evidence':[]},'image',fetch,lrr=PageLRR(),default_provider='exhentai')
+        self.assertTrue(fetch.call_args.args[0].startswith('https://e-hentai.org/?f_shash='))
+
     def test_thumbnail_proxy_accepts_only_fixed_public_image_host(self):
         good='https://ehgt.org/aa/bb/generated.jpg'
         self.assertEqual(preview_url(good),good)

@@ -60,14 +60,16 @@ def first_page_hash(lrr,work,page=1):
     return digest.hexdigest(),'/api/media/'+arcid+'/page'+('?'+value.query if value.query else '')
 
 
-def candidates(work,record,method,fetch,index_fetch=None,lrr=None,cursor=None,page=1):
+def candidates(work,record,method,fetch,index_fetch=None,lrr=None,cursor=None,page=1,default_provider='ehentai'):
     if method not in ('embedded','image','title','hitomi'):raise ValueError('지원하는 후보 검색 방법을 선택하세요.')
+    if default_provider not in ('ehentai','exhentai'):raise ValueError('검색할 출처 계열을 확인하세요.')
     cursor={} if cursor is None else cursor
     if not isinstance(cursor,dict) or set(cursor)-{'page','offset'} or any(type(v) is not int or not 0<=v<=100000 for v in cursor.values()):raise ValueError('검색 위치를 확인하세요.')
     base=baseline(work,record)
     result={'items':[],'baseline':base,'method':method,'status':'checked','failures':0,'message':'후보를 비교한 뒤 연결할 출처를 선택하세요.'}
     preferred=preferred_evidence(record.get('evidence',[]))
-    provider=preferred['provider'] if preferred and preferred['provider'] in ('ehentai','exhentai') else 'ehentai'
+    linked=next((s['provider'] for s in work.get('sources',[]) if s['provider'] in ('ehentai','exhentai')),None)
+    provider=preferred['provider'] if preferred and preferred['provider'] in ('ehentai','exhentai') else linked or default_provider
     if method in ('title','hitomi'):
         value=counterpart_candidates(base,fetch,index_fetch,target='hitomi' if method=='hitomi' else provider,cursor=cursor)
         return {**result,**value}

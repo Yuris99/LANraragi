@@ -28,7 +28,7 @@ from source_finder import candidates as find_candidates,preview_image
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=29
+STUDIO_UPDATE=30
 
 
 class LRR:
@@ -113,11 +113,13 @@ class Studio:
             self.source_search_at=time.monotonic()
             work=self.store.get_work(work_id);record=self.store.get_source_record(work_id)
             if record['inspection']['state']=='not_read' and work.get('lrr_id'):record=self.extract_source_record(work_id)
-            if method=='image':
+            default_provider='ehentai'
+            if method in ('image','title'):
                 status=self.login.call({'op':'status'})
-                if not status.get('source_image_search'):raise ValueError('로그인 서비스의 이미지 검색 업데이트가 필요합니다.')
+                if method=='image' and not status.get('source_image_search'):raise ValueError('로그인 서비스의 이미지 검색 업데이트가 필요합니다.')
+                if any(s['provider']=='exhentai' and s.get('target_session_available') for s in status.get('sites',[])):default_provider='exhentai'
             fetch,index,blocked=self.source_transport()
-            return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1))
+            return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1),default_provider)
         finally:self.match_lock.release()
 
     def source_transport(self):
