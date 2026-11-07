@@ -163,7 +163,7 @@ async function api(path, data, options = {}) {
         if (error.name === 'AbortError') throw error;
         throw new Error(`Studio 서버 응답을 확인할 수 없습니다 (HTTP ${response.status}). 연결 상태를 확인하세요.`);
     }
-    if (!response.ok) throw new Error(value.error || "요청을 처리하지 못했습니다.");
+    if (!response.ok) throw Object.assign(new Error(value.error || "요청을 처리하지 못했습니다."),{status:response.status,sourceHttp:value.source_http});
     return value;
 }
 let metadataRefreshRunning = false, metadataRefreshStop = false;
@@ -175,7 +175,7 @@ function metadataRefreshPlan(works) {
         for (const source of sources) {
             const key = work.id + ':' + source.url;
             if (seen.has(key)) continue;
-            seen.add(key); targets.push({workId:work.id,sourceId:source.id,family:sourceFamily(source.provider),label:work.short_id+' · '+providerName[source.provider]});
+            seen.add(key); targets.push({workId:work.id,sourceId:source.id,provider:source.provider,label:work.short_id+' · '+providerName[source.provider]});
         }
     }
     return {targets,missing};
@@ -208,21 +208,21 @@ async function refreshLinkedMetadata() {
         let completed = 0, failed = 0, deferred = 0;
         for (const target of targets) {
             if (metadataRefreshStop) break;
-            if (blocked.has(target.family)) { deferred++; continue; }
+            if (blocked.has(target.provider)) { deferred++; continue; }
             note.textContent = `출처 ${completed+failed+deferred+1}/${targets.length} 갱신 중 · 연결 주소 없는 작품 ${missing}개`;
             try {
                 await api(`/api/works/${target.workId}/sources/${target.sourceId}/fetch`, {defer_automatic:true});
                 completed++;
             } catch (error) {
-                failed++; blocked.add(target.family);
+                failed++;if (![404,410].includes(error.sourceHttp)) blocked.add(target.provider);
                 errors.push(target.label+': '+error.message);
-                // Stop this site's remaining requests after an access or collection failure.
+                // Removed pages are individual failures; access/transport errors stop that original host.
             }
             if (!metadataRefreshStop) await new Promise(resolve => setTimeout(resolve,1000));
         }
         note.textContent = `${metadataRefreshStop ? '중지' : '완료'} · 원본 복원 ${restored}개 · 검토 ${review}개 · 갱신 ${completed}건 · 실패 ${failed}건 · 보류 ${deferred}건 · 원본 출처 없는 작품 ${missing}개` +
             (metadataRefreshStop ? ` · 미처리 ${targets.length-completed-failed-deferred}건` : '') +
-            (failed ? ' · 실패한 사이트의 추가 요청 중지. '+errors.join(' / ') : '');
+            (failed ? ' · '+(blocked.size?'접근·연결 오류가 난 사이트의 추가 요청 중지. ':'조회할 수 없는 원본은 기존 기록 유지. ')+errors.join(' / ') : '');
         await load();
     } catch (error) {
         note.textContent = '일괄 갱신 중단 · ' + error.message;

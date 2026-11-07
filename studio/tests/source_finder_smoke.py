@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import urllib.error
 from unittest.mock import patch
 from urllib.parse import parse_qs,urlsplit
 from playwright.sync_api import sync_playwright,expect
@@ -50,6 +51,7 @@ def main():
                 return ''.join('<a href="https://e-hentai.org/g/'+str(i)+'/abcdefghij/">Candidate</a>' for i in range(111111,111117))
             if url.startswith('https://ltn.gold-usergeneratedcontent.net/galleries/'):return hitomi_js()
             gid=url.split('/')[4]
+            if gid=='222222':raise urllib.error.HTTPError(url,404,'Generated removed gallery',{},None)
             return eh_html().replace('987654',gid).replace('abcdef','abcdefghij')
         app.source_transport=lambda:(fetch,lambda artist,offset=None: {'ids':['123456'],'complete':True} if offset is not None else ['123456'],{})
         server=make_server('127.0.0.1',0,app);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -99,11 +101,13 @@ def main():
                 expect(page.locator('#metadata-refresh-status')).to_contain_text('완료',timeout=20000)
                 expect(page.locator('#metadata-refresh-status')).to_contain_text('원본 복원 1개')
                 assert store.get_work(c['id'])['sources'][0]['external_id']=='222222'
+                assert store.get_work(c['id'])['sources'][0]['status']=='manual'
+                assert next(s for s in store.get_work(b['id'])['sources'] if s['provider']=='ehentai')['status']=='fetched'
                 with store.db() as db:assert db.execute('SELECT 1 FROM source_link_jobs WHERE work_id=?',(c['id'],)).fetchone() is None
                 assert store.get_work(c['id'])['title']=='Bulk restore local title'
                 assert not errors,errors
                 browser.close()
-            print('SOURCE_FINDER_UI=PASS original_archive_restore=true portable_json=true image_candidates_and_more=true manual_eh_hitomi_connection=true bulk_restore_refresh=true desktop_mobile=true')
+            print('SOURCE_FINDER_UI=PASS original_archive_restore=true portable_json=true image_candidates_and_more=true manual_eh_hitomi_connection=true bulk_removed_page_continues=true desktop_mobile=true')
         finally:server.shutdown();server.server_close();thread.join(timeout=3)
 
 

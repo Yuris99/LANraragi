@@ -28,12 +28,18 @@ async function main() {
     assert.match(first.note(),/원본 복원 1개/);assert.match(first.note(),/갱신 4건/);
     assert.equal(first.elements.get('#refresh-metadata').disabled,false);
     const denial=setup(async(path,body)=>{
-        if (!body) return {total:2,items:[a,b]};
+        if (!body) return {total:3,items:[a,b,work('other',[ref('ehentai','5')])]};
         if (path.includes('/sources/1/')) throw new Error('Access required');return {};
     });
     await denial.context.run();
-    assert.equal(denial.calls.filter(c=>c.path.endsWith('/fetch')).length,2);
+    assert.equal(denial.calls.filter(c=>c.path.endsWith('/fetch')).length,3);
     assert.match(denial.note(),/실패 1건/);assert.match(denial.note(),/보류 1건/);
+    const removed=setup(async(path,body)=>{
+        if (!body) return {total:2,items:[a,b]};
+        if (path.includes('/sources/1/')) throw Object.assign(new Error('Removed'),{sourceHttp:404});return {};
+    });
+    await removed.context.run();assert.equal(removed.calls.filter(c=>c.path.endsWith('/fetch')).length,3);
+    assert.match(removed.note(),/보류 0건/);
     const stop=setup(async(path,body,ctx)=>{
         if (!body) return {total:2,items:[a,b]};
         vm.runInContext('metadataRefreshStop=true',ctx);return {};

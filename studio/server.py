@@ -706,7 +706,9 @@ class Handler(BaseHTTPRequestHandler):
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/fetch',path)
         if match:
             if set(data)-{'defer_automatic'} or 'defer_automatic' in data and type(data['defer_automatic']) is not bool:raise ValueError('정보 갱신 옵션을 확인하세요.')
-            return self.respond(self.app.fetch_metadata(match[1],match[2],schedule=not data.get('defer_automatic',False)))
+            try:return self.respond(self.app.fetch_metadata(match[1],match[2],schedule=not data.get('defer_automatic',False)))
+            except urllib.error.HTTPError as error:
+                return self.respond({'error':public_error(error),'source_http':error.code},502)
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/([0-9a-f]{32})/comments/fetch',path)
         if match:return self.respond(self.app.fetch_comments(match[1],match[2]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/progress',path)
