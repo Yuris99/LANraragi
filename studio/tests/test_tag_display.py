@@ -11,6 +11,15 @@ from tag_display import LABELS, tag_words, dictionary
 
 
 class TagDisplayTests(unittest.TestCase):
+    def test_internal_user_tags_hidden_from_management_but_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(Path(directory)/'studio.db');work=store.create_work('Generated')
+            tags=['date_added:123','timestamp','SOURCE:generated','소장']
+            store.edit_user_tags([work['id']],tags)
+            self.assertEqual(store.tag_catalog(),[{'tag':'소장','count':1}])
+            self.assertEqual(store.tag_catalog('date_added'),[])
+            self.assertEqual(set(store.get_work(work['id'])['user_tags']),set(tags))
+
     def test_dictionary_is_local_namespace_safe_and_has_explanations(self):
         self.assertGreater(len(LABELS),7500)
         self.assertIn('안경',tag_words('female:glasses'))

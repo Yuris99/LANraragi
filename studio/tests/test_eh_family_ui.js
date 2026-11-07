@@ -10,7 +10,7 @@ const tagHelpers=source.slice(source.indexOf('const tagKinds ='),source.indexOf(
 vm.runInContext(helpers+'\n'+esc+'\nconst visibleTag=()=>true;\n'+tagHelpers+'\n'+badges+'\n'+rows+'\nglobalThis.render={sources,sourceRows,sourceShortcut};',context);
 const comment={id:'generated-1',author:'Generated author',posted_at:'generated',text:'Keep comment'};
 const a={id:'a'.repeat(32),provider:'ehentai',external_id:'123',url:'https://e-hentai.org/g/123/abc/',tags:['artist:generated','language:korean'],comments:[comment],status:'manual',metadata:{}};
-const b={...a,id:'b'.repeat(32),provider:'exhentai',url:'https://exhentai.org/g/123/abc/',tags:['artist:generated','tag:extra']};
+const b={...a,id:'b'.repeat(32),provider:'exhentai',url:'https://exhentai.org/g/123/abc/',tags:['artist:generated','tag:extra'],metadata:{rating:4.35,rating_count:1234}};
 const badge=context.render.sources({sources:[a,b]});
 assert.equal((badge.match(/source-pill/g)||[]).length,1);
 const html=context.render.sourceRows([a,b]);
@@ -20,6 +20,7 @@ assert.ok(html.includes('data-fetch="'+a.id+'"')&&html.includes('data-fetch="'+b
 assert.equal((html.match(/Keep comment/g)||[]).length,1);
 assert.equal((html.match(/data-tag-label="artist:generated"/g)||[]).length,1);
 assert.ok(html.includes('tag:extra'));
+assert.ok(html.includes('출처 평점 4.35 / 5')&&html.includes('1,234표'));
 assert.equal(JSON.stringify(a.comments),JSON.stringify([comment]));
 assert.ok(badge.includes('href="'+a.url+'"')&&badge.includes('href="'+b.url+'"'));
 assert.ok(badge.includes('#i-ehentai')&&badge.includes('#i-exhentai'));

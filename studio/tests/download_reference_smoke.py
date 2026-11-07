@@ -56,6 +56,13 @@ def main():
                 form.locator('[name=reference]').fill('999');page.locator('#download-submit').click()
                 page.locator('#detail[open]').wait_for();assert len(store.jobs())==2
                 page.locator('#close-detail').click();page.locator('#download-open').click()
+                ex=store.create_work('Existing EX',lrr_id='b'*40)
+                store.upsert_source(ex['id'],{'url':'https://exhentai.org/g/456/abcdef/'})
+                form.locator('[name=provider]').select_option('exhentai');form.locator('[name=reference]').fill('X456')
+                page.locator('#download-preview').click();expect(page.locator('#download-resolution')).to_contain_text('이미 보관함에 있음')
+                page.locator('#download-submit').click();page.locator('#detail[open]').wait_for()
+                assert len(store.jobs())==2
+                page.locator('#close-detail').click();page.locator('#download-open').click()
                 for width in [1440,390]:
                     page.set_viewport_size({'width':width,'height':900})
                     assert page.locator('#download-open').is_visible()

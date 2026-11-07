@@ -234,8 +234,8 @@ summary:hover{color:var(--text)}
 #reader-position{white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text)}
 #reader-jump{display:flex;align-items:center;gap:6px;margin:0}
 #reader-page{width:68px;min-height:36px;padding:6px 8px;font-size:14px;font-variant-numeric:tabular-nums}
-.reader-canvas{min-height:calc(100dvh - 56px);text-align:center}
-.reader-canvas img{max-width:100%;min-height:100px;max-height:calc(100dvh - 56px);object-fit:contain}
+.reader-canvas{min-height:calc(100dvh - 56px);text-align:center;user-select:none;-webkit-user-select:none}
+.reader-canvas img{max-width:100%;min-height:100px;max-height:calc(100dvh - 56px);object-fit:contain;-webkit-user-drag:none;cursor:pointer}
 .reader-page{position:relative;display:inline-grid;max-width:100%;background:#000}
 .reader-page>img{grid-area:1/1}
 
@@ -408,3 +408,8 @@ label.tag-language-control:not(.search){display:flex;flex-direction:row;align-it
 .tags>.tag{font-size:14px;line-height:1.5;white-space:normal;text-align:start}
 #tag-presets input{width:100%}
 @media(max-width:700px){.tags>.tag{min-height:44px}}
+
+.preset-tabs{display:flex;flex:1;min-width:0;gap:18px;overflow-x:auto;border-bottom:1px solid var(--line)}
+.preset-tabs [role="tab"]{flex:none;min-height:44px;padding:8px 2px 10px;border-bottom:2px solid transparent;color:var(--muted);font-size:14px;white-space:nowrap}
+.preset-tabs [aria-selected="true"]{border-bottom-color:var(--accent);color:var(--text);font-weight:600}
+.preset-tabs [role="tab"]:hover{color:var(--text)}

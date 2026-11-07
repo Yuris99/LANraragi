@@ -140,7 +140,12 @@ def parse_html(url, text):
                     comments.append({'id': anchor, 'text': clean(body), 'author': author,
                                      'posted_at': clean(info), 'source_url': source['url'],
                                      'collector': 'studio-eh-html-v1'})
-        return result(source, title, tags, pages=pages, comments=comments_list(comments),
+        rating={}
+        average=re.fullmatch(r'Average:\s*([0-5](?:\.[0-9]+)?)',clean(root.by_id('rating_label')))
+        count=clean(root.by_id('rating_count')).replace(',','')
+        if average and 0<=float(average[1])<=5:rating['rating']=float(average[1])
+        if count.isdigit() and len(count)<=12:rating['rating_count']=int(count)
+        return result(source, title, tags, pages=pages, comments=comments_list(comments), **rating,
                       title_original=clean(root.by_id('gn')), title_localized=clean(root.by_id('gj')))
     if source['provider'] != 'hitomi':
         raise ValueError('HTML 가져오기는 E-Hentai·Hitomi를 지원합니다.')

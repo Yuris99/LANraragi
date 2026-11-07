@@ -30,6 +30,30 @@ class SourceFinderTests(unittest.TestCase):
         self.assertEqual((base['title'],base['artists']),('A Garden',['Fixture']))
         self.assertEqual(self.work['title'],'Local title')
 
+    def test_image_candidate_can_seed_hitomi_without_linking_or_losing_local_edition(self):
+        from test_metadata import hitomi_js
+        work={**self.work,'title':'Opaque local filename'}
+        record={'evidence':[{'metadata':{'title':'Opaque local filename','languages':['english']}}]}
+        calls=[]
+        def fetch(url):
+            calls.append(url)
+            return eh_html() if url==E else hitomi_js()
+        result=candidates(work,record,'hitomi',fetch,lambda artist,offset=None:{'ids':['123456'],'complete':True},from_url=E)
+        self.assertEqual(result['seed_url'],E)
+        self.assertEqual(result['baseline']['title'],'A Garden')
+        self.assertEqual(result['baseline']['languages'],['english'])
+        self.assertFalse(result['items'][0]['comparison']['language_match'])
+        self.assertEqual(work['sources'],[])
+        self.assertEqual(calls[0],E)
+        for method,url in [('image',E),('hitomi','https://private.invalid/test'),('hitomi','https://hitomi.la/galleries/123.html')]:
+            with self.assertRaises(ValueError):candidates(work,record,method,fetch,from_url=url)
+
+    def test_seed_auth_failure_stops_before_hitomi_search(self):
+        fetch=Mock(side_effect=urllib.error.HTTPError(E,403,'denied',{},None));index=Mock()
+        result=candidates(self.work,self.record,'hitomi',fetch,index,from_url=E)
+        self.assertEqual(result['status'],'access_required');self.assertEqual(result['items'],[])
+        fetch.assert_called_once_with(E);index.assert_not_called()
+
     def test_original_page_hash_and_path_validation(self):
         lrr=PageLRR();digest,image=first_page_hash(lrr,self.work)
         self.assertEqual(digest,hashlib.sha1(lrr.raw).hexdigest())

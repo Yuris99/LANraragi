@@ -28,7 +28,7 @@ def main():
         for provider,url in [('ehentai','https://e-hentai.org/g/123/abc/'),('exhentai','https://exhentai.org/g/123/abc/'),('hitomi','https://hitomi.la/manga/generated-456.html')]:
             store.upsert_source(work['id'],{'url':url,'tags':['female:glasses','language:korean']})
         store.upsert_source(work['id'],{'url':'https://nhentai.net/g/123/','tags':['female:glasses']})
-        store.edit_user_tags([work['id']],['소장'])
+        store.edit_user_tags([work['id']],['소장','date_added:123456','timestamp','source:generated'])
         snapshot=json.dumps(store.get_work(work['id']),sort_keys=True)
         server=make_server('127.0.0.1',0,Studio(store,FixtureLRR()))
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -99,10 +99,15 @@ def main():
                     page.keyboard.press('Escape');expect(page.locator('#tag-explanation')).not_to_be_visible()
                     assert page.locator('#combined-source-tags img').count()==0
                     expect(page.locator('#connected-source-list .source-shortcut')).to_have_count(3)
+                    assert page.locator('[data-user-filter="date_added:123456"],[data-user-filter="timestamp"],[data-user-filter="source:generated"]').count()==0
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     assert page.locator('#detail').evaluate('(el)=>el.scrollWidth <= el.clientWidth')
                     page.screenshot(path=str(output/f'detail-{width}.png'))
                     page.locator('#close-detail').click()
+                    page.locator('#manage-tags').click()
+                    expect(page.locator('#tag-catalog [data-manage-tag]')).to_have_count(1)
+                    expect(page.locator('#tag-catalog')).not_to_contain_text('date_added')
+                    page.locator('#tag-manager [data-close]').click()
                     page.locator('#tag-strip-search').fill('')
                     expect(page.locator('#tag-strip-list [data-strip-tag]')).to_have_count(13)
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

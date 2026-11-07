@@ -52,7 +52,7 @@ def main():
             if url.startswith('https://ltn.gold-usergeneratedcontent.net/galleries/'):return hitomi_js()
             gid=url.split('/')[4]
             if gid=='222222':raise urllib.error.HTTPError(url,404,'Generated removed gallery',{},None)
-            return eh_html().replace('987654',gid).replace('abcdef','abcdefghij')
+            return eh_html().replace('987654',gid).replace('abcdef','abcdefghij')+'<span id="rating_label">Average: 4.35</span><span id="rating_count">1234</span>'
         app.source_transport=lambda:(fetch,lambda artist,offset=None: {'ids':['123456'],'complete':True} if offset is not None else ['123456'],{})
         server=make_server('127.0.0.1',0,app);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
@@ -66,6 +66,7 @@ def main():
                 expect(page.locator('#connected-source-list a[href="https://exhentai.org/g/987654/abcdefghij/"]')).to_be_visible()
                 assert store.get_work(a['id'])['title']=='Accepted archive title'
                 assert store.get_work(a['id'])['artist']=='User artist'
+                expect(page.locator('#connected-source-list .source-rating')).to_have_text('출처 평점 4.35 / 5 · 1,234표')
                 with page.expect_download() as download:
                     page.locator('#export-source-record').click()
                 record=json.loads(Path(download.value.path()).read_text(encoding='utf-8'))
@@ -88,12 +89,17 @@ def main():
                     page.locator('#source-finder').scroll_into_view_if_needed()
                     box=page.locator('#source-finder').bounding_box();assert box['x']>=0 and box['x']+box['width']<=width+1
                     page.screenshot(path=str(output/('desktop.png' if width>400 else 'mobile.png')))
+                app.source_search_at=0
+                page.locator('[data-source-hitomi="0"]').click()
+                expect(page.locator('#source-find-results .source-row')).to_have_count(1)
+                expect(page.locator('#source-find-note')).to_contain_text('이미지 후보의 작가·제목')
+                assert store.get_work(b['id'])['sources']==[], 'Searching via an image candidate must not silently link it'
                 page.locator('[data-source-finder-select="0"]').click()
                 expect(page.locator('#connected-source-list [data-fetch]')).to_have_count(1)
                 assert store.get_work(b['id'])['title']=='Image search local title'
                 app.source_search_at=0
-                page.locator('#source-find-method').select_option('hitomi');page.locator('#source-find-start').click()
-                expect(page.locator('#source-find-results .source-row')).to_have_count(1)
+                page.locator('#source-find-method').select_option('image');page.locator('#source-find-start').click()
+                expect(page.locator('#source-find-results .source-row')).to_have_count(5)
                 page.locator('[data-source-finder-select="0"]').click()
                 expect(page.locator('#connected-source-list [data-fetch]')).to_have_count(2)
                 page.locator('#close-detail').click();page.set_viewport_size({'width':1440,'height':1000})

@@ -6,6 +6,7 @@ from urllib.parse import parse_qs,urlsplit,urljoin
 import urllib.request
 from metadata import Document,fetch_metadata,compare_metadata,counterpart_candidates
 from source_record import preferred_evidence
+from sources import parse_source
 
 
 def preview_url(url):
@@ -60,18 +61,30 @@ def first_page_hash(lrr,work,page=1):
     return digest.hexdigest(),'/api/media/'+arcid+'/page'+('?'+value.query if value.query else '')
 
 
-def candidates(work,record,method,fetch,index_fetch=None,lrr=None,cursor=None,page=1,default_provider='ehentai'):
+def candidates(work,record,method,fetch,index_fetch=None,lrr=None,cursor=None,page=1,default_provider='ehentai',from_url=None):
     if method not in ('embedded','image','title','hitomi'):raise ValueError('지원하는 후보 검색 방법을 선택하세요.')
     if default_provider not in ('ehentai','exhentai'):raise ValueError('검색할 출처 계열을 확인하세요.')
     cursor={} if cursor is None else cursor
     if not isinstance(cursor,dict) or set(cursor)-{'page','offset'} or any(type(v) is not int or not 0<=v<=100000 for v in cursor.values()):raise ValueError('검색 위치를 확인하세요.')
     base=baseline(work,record)
     result={'items':[],'baseline':base,'method':method,'status':'checked','failures':0,'message':'후보를 비교한 뒤 연결할 출처를 선택하세요.'}
+    if from_url is not None:
+        if method!='hitomi' or parse_source(from_url)['provider'] not in ('ehentai','exhentai'):
+            raise ValueError('히토미 검색에 사용할 이헨·익헨 후보 주소를 확인하세요.')
+        try:seed=fetch_metadata(from_url,fetch)
+        except urllib.error.HTTPError as error:
+            return {**result,'status':'access_required' if error.code in (401,403,429) else 'unavailable','message':'선택한 원본 후보를 읽지 못했습니다. 접근 상태를 확인하세요.'}
+        except (OSError,ValueError):
+            return {**result,'status':'unavailable','message':'선택한 원본 후보 정보를 확인하지 못했습니다.'}
+        base={**seed,'provider':'local','pages':base['pages'] or seed.get('pages'),
+              'languages':base['languages'] or seed['languages']}
+        result.update(baseline=base,seed_url=seed['url'],message='이미지 후보의 작가·제목으로 히토미를 찾았습니다. 이미지 일치가 확정된 결과는 아니므로 표지·언어·페이지 수를 비교하세요.')
     preferred=preferred_evidence(record.get('evidence',[]))
     linked=next((s['provider'] for s in work.get('sources',[]) if s['provider'] in ('ehentai','exhentai')),None)
     provider=preferred['provider'] if preferred and preferred['provider'] in ('ehentai','exhentai') else linked or default_provider
     if method in ('title','hitomi'):
         value=counterpart_candidates(base,fetch,index_fetch,target='hitomi' if method=='hitomi' else provider,cursor=cursor)
+        if from_url:value['message']=result['message']+' '+value['message']
         return {**result,**value}
     try:
         urls=[]

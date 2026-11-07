@@ -112,7 +112,7 @@ class Studio:
                 'record':self.store.get_source_record(work_id),'work':work}
 
     def find_source_candidates(self,work_id,data):
-        if not isinstance(data,dict) or set(data)-{'method','cursor','page'} or 'method' not in data:raise ValueError('후보 검색 방법을 지정하세요.')
+        if not isinstance(data,dict) or set(data)-{'method','cursor','page','from_url'} or 'method' not in data:raise ValueError('후보 검색 방법을 지정하세요.')
         method=data['method']
         if method not in ('embedded','image','title','hitomi'):raise ValueError('지원하는 검색 방법을 선택하세요.')
         if not self.match_lock.acquire(blocking=False):raise ValueError('다른 출처 검색이 진행 중입니다.')
@@ -127,7 +127,7 @@ class Studio:
                 if method=='image' and not status.get('source_image_search'):raise ValueError('로그인 서비스의 이미지 검색 업데이트가 필요합니다.')
                 if any(s['provider']=='exhentai' and s.get('target_session_available') for s in status.get('sites',[])):default_provider='exhentai'
             fetch,index,blocked=self.source_transport()
-            return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1),default_provider)
+            return find_candidates(work,record,method,fetch,index,self.lrr,data.get('cursor'),data.get('page',1),default_provider,data.get('from_url'))
         finally:self.match_lock.release()
 
     def source_transport(self):

@@ -169,7 +169,7 @@ def preferred_evidence(evidence):
 
 def source_record(work,evidence=()):
     """Our own versioned format; no account cookies, credentials, or page-access tokens."""
-    fields=('title','artists','languages','tags','raw_tags','pages','category','posted','uploader')
+    fields=('title','artists','languages','tags','raw_tags','pages','category','posted','uploader','rating','rating_count')
     sources=[]
     for source in work.get('sources',[]):
         sources.append({k:source[k] for k in ('provider','external_id','url')}|{

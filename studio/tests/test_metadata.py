@@ -45,6 +45,22 @@ def hitomi_js():
 
 
 class MetadataTests(unittest.TestCase):
+    def test_source_ratings_do_not_overwrite_my_rating(self):
+        rated=eh_html()+'<div id="rating_label">Average: 4.35</div><span id="rating_count">1,234</span>'
+        for url in (E,E.replace('e-hentai.org','exhentai.org')):
+            meta=parse_html(url,rated)
+            self.assertEqual((meta['rating'],meta['rating_count']),(4.35,1234))
+            with tempfile.TemporaryDirectory() as directory:
+                store=Store(Path(directory)/'studio.db');work=store.create_work('Generated')
+                store.update_work(work['id'],{'rating':2})
+                store.import_metadata(work['id'],meta)
+                saved=store.get_work(work['id'])
+                self.assertEqual(saved['rating'],2)
+                self.assertEqual(saved['sources'][0]['metadata']['rating'],4.35)
+                for value in [float('nan'),float('inf'),True,-1,6,'4.35']:
+                    with self.assertRaises(ValueError):store.import_metadata(work['id'],{**meta,'rating':value})
+        self.assertNotIn('rating',parse_html(E,eh_html()+'<div id="rating_label">Not Yet Rated</div>'))
+
     def test_html_scoping_languages_and_identity_not_related_cards_or_scripts(self):
         h=parse_html(H,hitomi_html());e=parse_html(E,eh_html())
         self.assertEqual(h['title'],'A Garden')

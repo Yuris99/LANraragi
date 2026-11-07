@@ -34,7 +34,17 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(result['url'],url);self.assertEqual(result['origin'],'saved')
         self.assertEqual(result['work_id'],work['id'])
         self.assertEqual(result['provider'],'exhentai')
+        self.assertEqual(self.store.resolve_reference('exhentai','X123')['url'],url)
         with self.assertRaises(ValueError):self.store.resolve_reference('ehentai','000123')
+        with self.assertRaises(ValueError):self.store.resolve_reference('ehentai','X123')
+        with self.assertRaisesRegex(ValueError,'검증 전'):self.store.request_download('exhentai','X123','nas','command')
+
+    def test_existing_ex_file_opens_without_new_download(self):
+        work=self.store.create_work('Generated EX',lrr_id='a'*40)
+        self.store.upsert_source(work['id'],{'url':'https://exhentai.org/g/123/abcdef/'})
+        result=self.store.request_download('exhentai','X123','nas','command')
+        self.assertEqual(result,{'state':'available','work_id':work['id']})
+        self.assertEqual(self.store.jobs(),[])
 
     def test_same_number_from_other_source_cannot_supply_a_missing_token(self):
         work=self.store.create_work('Synthetic different source')

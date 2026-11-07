@@ -302,7 +302,7 @@ class Store(EditionCatalog,AutomaticSources):
         if not isinstance(query,str) or len(query)>120:raise ValueError('검색어가 너무 깁니다.')
         term='%'+query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
         with self.db() as db:
-            rows=db.execute("SELECT u.tag,count(*) AS count FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL AND u.tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
+            rows=db.execute("SELECT u.tag,count(*) AS count FROM user_tags u JOIN works w ON w.id=u.work_id WHERE w.merged_into IS NULL AND visible_tag(u.tag) AND u.tag LIKE ? ESCAPE '\\' GROUP BY tag ORDER BY count DESC,tag LIMIT 100",(term,)).fetchall()
         return [dict(row) for row in rows]
 
     @staticmethod
@@ -441,7 +441,7 @@ class Store(EditionCatalog,AutomaticSources):
         if metadata is not None and (not isinstance(metadata,dict) or len(json.dumps(metadata).encode())>256*1024):
             raise ValueError('출처 메타데이터 형식을 확인하세요.')
         if metadata is not None:
-            allowed={'provider','external_id','url','title','tags','raw_tags','artists','languages','collector','pages','comments','title_original','title_localized'}
+            allowed={'provider','external_id','url','title','tags','raw_tags','artists','languages','collector','pages','comments','title_original','title_localized','rating','rating_count'}
             if set(metadata)-allowed or any(metadata.get(key)!=identity[key] for key in ('provider','external_id','url')):
                 raise ValueError('출처 메타데이터의 번호·URL을 확인하세요.')
             if not isinstance(metadata.get('title'),str) or not 0<len(metadata['title'])<=2000:
@@ -452,6 +452,10 @@ class Store(EditionCatalog,AutomaticSources):
             comments_list(metadata.get('comments',[]))
             if metadata.get('pages') is not None and (type(metadata['pages']) is not int or not 1<=metadata['pages']<=100000):
                 raise ValueError('출처 페이지 수를 확인하세요.')
+            if 'rating' in metadata and (type(metadata['rating']) not in (int,float) or not 0<=metadata['rating']<=5):
+                raise ValueError('출처 평점을 확인하세요.')
+            if 'rating_count' in metadata and (type(metadata['rating_count']) is not int or not 0<=metadata['rating_count']<10**12):
+                raise ValueError('출처 평점 참여 수를 확인하세요.')
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             if lease_guard:self.check_automatic_lease(db,lease_guard)
@@ -685,6 +689,10 @@ class Store(EditionCatalog,AutomaticSources):
         if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
             raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
         value=reference.strip();origin='url'
+        prefix=re.fullmatch(r'([EXex])([0-9]{1,20})',value)
+        if prefix:
+            if {'e':'ehentai','x':'exhentai'}[prefix[1].lower()]!=provider:raise ValueError('번호 접두사와 선택한 출처가 다릅니다.')
+            value=prefix[2]
         if re.fullmatch('[0-9]{1,20}',value):
             number=str(int(value))
             if number=='0':raise ValueError('올바른 작품 번호를 입력하세요.')
@@ -706,12 +714,12 @@ class Store(EditionCatalog,AutomaticSources):
                 'available':bool(work and work['lrr_id'])}
 
     def request_download(self,provider,reference,target,engine):
-        if provider=='exhentai':raise ValueError('익헨의 인증된 동일 출처 다운로드는 아직 검증 전입니다. 자동 정보 연결과 별개입니다.')
         if target not in ('nas','pc') or engine not in ('lanraragi','command') or (target=='pc' and engine=='lanraragi'):
             raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')
         source=self.resolve_reference(provider,reference)
         if source['available']:
             return {'state':'available','work_id':source['work_id']}
+        if provider=='exhentai':raise ValueError('익헨 번호·URL 확인은 지원하지만 새 파일 다운로드는 인증된 동일 출처 검증 전입니다.')
         return {'state':'queued','job':self.public_job(self.queue(source['url'],target,engine,source['work_id']))}
 
     def job(self, job_id):
