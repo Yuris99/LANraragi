@@ -805,6 +805,14 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         return {**source,'origin':origin,'work_id':work['id'] if work else None,
                 'available':bool(work and work['lrr_id'])}
 
+    def link_reference(self,work_id,provider,reference,extra=None):
+        if extra is not None and (not isinstance(extra,dict) or set(extra)-{'tags','comments'}):raise ValueError('연결할 태그·댓글만 지정하세요.')
+        work=self.get_work(work_id)
+        source=self.resolve_reference(provider,reference)
+        if source['work_id'] and source['work_id']!=work['id']:
+            raise ValueError('이미 다른 작품에 연결된 출처입니다. 연결된 작품과 판본을 확인하세요.')
+        return self.upsert_source(work['id'],{'url':source['url'],**(extra or {})})
+
     def request_download(self,provider,reference,target,engine):
         if target not in ('nas','pc') or engine not in ('lanraragi','command') or (target=='pc' and engine=='lanraragi'):
             raise ValueError('저장 대상 또는 엔진이 올바르지 않습니다.')

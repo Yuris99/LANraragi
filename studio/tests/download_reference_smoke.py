@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import urllib.error
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -32,7 +33,10 @@ def main():
         store.upsert_source(saved['id'],{'url':'https://e-hentai.org/g/123/abcdef/'})
         existing=store.create_work('Synthetic existing file',lrr_id='a'*40)
         store.upsert_source(existing['id'],{'url':'https://hitomi.la/galleries/999.html'})
-        app=Studio(store,FixtureLRR());server=make_server('127.0.0.1',0,app)
+        app=Studio(store,FixtureLRR())
+        def deny_lookup(url):raise urllib.error.HTTPError(url,403,'Generated session required',{},None)
+        app.source_transport=lambda:(deny_lookup,None,{})
+        server=make_server('127.0.0.1',0,app)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with sync_playwright() as pw:

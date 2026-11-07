@@ -751,14 +751,32 @@ async function renderWorkSeries(work) {
         $('#series-save-note',root).textContent='기존 시리즈를 선택하거나 새 이름을 입력하세요.';
     } catch(error) {if(root.isConnected) $('#series-save-note',root).textContent=error.message;}
 }
+function setupSourceReference(work) {
+    const form=$('#source-form');
+    if (work.sources.some(source=>source.provider==='hitomi') && !work.sources.some(source=>['ehentai','exhentai'].includes(source.provider))) form.elements.provider.value='hitomi';
+    const update=()=>{
+        const family=form.elements.provider.value==='ehentai-family';
+        form.elements.url.placeholder='예: 1234567';
+        $('#source-reference-help').textContent=family?'ExHentai 번호만 입력하면 저장된 연결 또는 해당 사이트의 번호 검색으로 주소를 확인합니다. E번호는 E-Hentai, X번호는 ExHentai입니다. 검색이 제한되면 번호/토큰 코드나 전체 URL을 사용하세요.':'Hitomi 작품 번호만 입력하세요. 전체 URL도 사용할 수 있습니다.';
+    };
+    form.querySelectorAll('[name=provider]').forEach(input=>input.onchange=update);
+    form.elements.url.addEventListener('input',()=>{
+        const value=form.elements.url.value.trim();
+        if (/^https:\/\/(?:www\.)?hitomi\.la\//i.test(value)) form.elements.provider.value='hitomi';
+        else if (/^https:\/\/(?:e-hentai\.org|exhentai\.org)\//i.test(value)) form.elements.provider.value='ehentai-family';
+        update();
+    });
+    update();
+}
 function renderDetail(work) {
     pauseVoicePlayers();
     $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div id="detail-facets">${detailFacets(work)}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button>${work.lrr_id ? `<button class="quiet danger" id="delete-work-file">원본 파일 삭제</button>` : ""}</div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.filter(visibleTag).map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
     <section class="detail-section" id="work-series"></section><section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
-    <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(ExHentai 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
+    <section class="detail-section"><h3>번호·코드로 출처 연결</h3><p class="muted">현재 작품에 출처를 연결하고 다른 사이트의 같은 작품을 자동으로 확인합니다. 파일을 새로 다운로드하지 않습니다. 로그인·접근 제한은 위의 자동 연결 상태에서 확인하세요.</p><form id="source-form" class="source-form"><fieldset class="download-sources"><legend>연결할 출처</legend><div class="download-source-options"><label><input type="radio" name="provider" value="ehentai-family" checked><span>ExHentai</span></label><label><input type="radio" name="provider" value="hitomi"><span>Hitomi</span></label></div></fieldset><label>작품 번호·코드 또는 URL<input name="url" type="text" required maxlength="2048" autocomplete="off" aria-describedby="source-reference-help" placeholder="예: 1234567/abcdef0123"></label><p id="source-reference-help" class="muted"></p><button class="primary" type="submit">현재 작품에 출처 연결</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
     renderSourceFinder(work);
+    setupSourceReference(work);
     renderWorkSeries(work);
     renderEdition(work);
     refreshAutomaticSources().catch(() => {});
@@ -934,7 +952,13 @@ document.addEventListener("submit", guard(async (event) => {
         await navigateRoute({ kind: "reader", id: state.reader.work.id, page });
     }
     if (form.id === "editor-form") { const work = await api("/api/works", { title: data.title, artist: data.artist }); await api(`/api/works/${work.id}/edition`, {kind:data.kind || "comic",language:data.language || "",label:data.label || ""}); if (data.url) await api(`/api/works/${work.id}/sources`, { url: data.url }); form.closest("dialog").close(); form.reset(); await load(); await showDetail(work.id); }
-    if (form.id === "source-form") { const value = { url: data.url }; if (data.tags) value.tags = data.tags; if (data.comments) value.comments = JSON.parse(data.comments); await api(`/api/works/${state.detail.id}/sources`, value); await showDetail(state.detail.id); await load(); }
+    if (form.id === "source-form") {
+        const button=form.querySelector('[type=submit]');button.disabled=true;
+        try {
+            const value={provider:data.provider,reference:data.url};if(data.tags)value.tags=data.tags;if(data.comments)value.comments=JSON.parse(data.comments);
+            await api(`/api/works/${state.detail.id}/sources/reference`,value);await showDetail(state.detail.id);await load();toast('이 작품에 출처를 연결했습니다. 자동 연결 상태에서 정보 수집 결과를 확인하세요.');
+        } finally {button.disabled=false;}
+    }
     if (form.id === "html-metadata-form") {
         if ($("#metadata-save").disabled) return;
         $("#metadata-save").disabled = true;
@@ -989,8 +1013,8 @@ let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
     const provider = $('#download-form').elements.provider.value;
-    $('#download-form [name=reference]').placeholder=provider==='ehentai-family'?'예: 1234567/abcdef0123':'예: 1234567';
-    $("#download-reference-help").textContent = provider==='ehentai-family' ? '새 작품은 번호/토큰 코드, 저장된 작품은 번호·E번호·X번호로 추가하세요. E-Hentai·ExHentai URL도 붙여 넣을 수 있습니다.' : 'Hitomi는 작품 번호만 입력하면 됩니다. URL도 붙여 넣을 수 있습니다.';
+    $('#download-form [name=reference]').placeholder='예: 1234567';
+    $("#download-reference-help").textContent = provider==='ehentai-family' ? '번호만 입력하면 저장된 연결 또는 ExHentai 번호 검색으로 주소를 확인합니다. E번호·X번호, 번호/토큰 코드, 전체 URL도 사용할 수 있습니다.' : 'Hitomi는 작품 번호만 입력하면 됩니다. URL도 붙여 넣을 수 있습니다.';
     refreshDownloadMethod();
 }
 $("#download-form [name=reference]").oninput = resetDownloadPreview;

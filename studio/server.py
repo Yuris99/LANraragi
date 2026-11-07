@@ -28,10 +28,11 @@ from source_record import archive_evidence,preferred_evidence
 from source_finder import candidates as find_candidates,preview_image
 from tag_display import dictionary as tag_dictionary
 from file_deletion import FileDeletion,blocked as file_deleted
+from metadata import Document,MAX_DOCUMENT
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=40
+STUDIO_UPDATE=41
 
 
 def supports_download(plugins,url):
@@ -238,6 +239,35 @@ class Studio:
                 # Durable leases permit recovery; never log source data or secrets.
                 pass
             finally:self.match_lock.release()
+
+    def resolve_source_reference(self,provider,reference):
+        try:return self.store.resolve_reference(provider,reference)
+        except ValueError:
+            number=re.fullmatch(r'([EXex]?)([0-9]{1,20})',reference.strip()) if isinstance(reference,str) else None
+            if provider not in ('ehentai','exhentai','ehentai-family') or not number or not int(number[2]):raise
+            prefix=number[1].lower();variant={'e':'ehentai','x':'exhentai'}.get(prefix,'exhentai' if provider=='ehentai-family' else provider)
+            if provider!='ehentai-family' and variant!=provider:raise
+            gid=str(int(number[2]))
+            with self.store.db() as db:
+                rows=db.execute("SELECT provider FROM sources WHERE provider IN ('ehentai','exhentai') AND external_id=?",(gid,)).fetchall()
+                if rows and (provider=='ehentai-family' and not prefix or any(row['provider']==variant for row in rows)):raise
+        host='exhentai.org' if variant=='exhentai' else 'e-hentai.org'
+        search='https://'+host+'/?f_search='+urllib.parse.quote('gid:'+gid,safe='')
+        with self.manual_source_access():
+            fetch,_,_=self.source_transport()
+            try:html=fetch(search)
+            except (urllib.error.URLError,ValueError) as error:
+                raise ValueError('번호 검색에 접근하지 못했습니다. 로그인 연결을 확인하거나 번호/토큰 코드 또는 전체 작품 URL을 입력하세요.') from error
+        if not isinstance(html,str) or len(html.encode('utf-8'))>MAX_DOCUMENT:raise ValueError('번호 검색 응답 형식을 확인하세요.')
+        if re.search(r'<title>\s*(?:just a moment|attention required)|cf-chl-|challenge-platform',html,re.I):raise ValueError('번호 검색에 사이트 인증이 필요합니다. 로그인 연결을 확인하거나 번호/토큰 코드를 입력하세요.')
+        urls=set()
+        for node in Document(html).root.walk():
+            if node.tag!='a':continue
+            url=urllib.parse.urljoin(search,node.attrs.get('href',''))
+            if not re.fullmatch('https://'+re.escape(host)+'/g/'+gid+r'/[A-Za-z0-9]+/?',url):continue
+            urls.add(parse_source(url)['url'])
+        if len(urls)!=1:raise ValueError('번호에 정확히 일치하는 출처를 확정하지 못했습니다. 번호/토큰 코드 또는 전체 작품 URL을 입력하세요.')
+        return {**self.store.resolve_reference(provider,urls.pop()),'origin':'number-search'}
 
     def sync(self):
         if not self.sync_lock.acquire(blocking=False):
@@ -769,21 +799,24 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(store.queue_folder_import(data['collections'],data['request_key']),202)
         match=re.fullmatch('/api/folders/([0-9a-f]{32})/cancel',path)
         if match:return self.respond(store.cancel_folder_import(match[1]))
-        if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
+        if path in ('/api/downloads/resolve','/api/source-references/resolve'):
+            allowed={'provider','reference'}|({'target','engine'} if path=='/api/downloads/resolve' else set())
+            if set(data)-allowed or not {'provider','reference'}<=set(data):raise ValueError('출처와 작품 번호·코드만 지정하세요.')
+            return self.respond(self.app.resolve_source_reference(data.get('provider'),data.get('reference')))
         if path=='/api/downloads':
-            source=store.resolve_reference(data.get('provider'),data.get('reference'))
+            source=self.app.resolve_source_reference(data.get('provider'),data.get('reference'))
             if data.get('engine')=='lanraragi' and source['provider']!='exhentai':
                 if not source['available'] and not supports_download(self.app.lrr.json('/api/plugins/download'),source['url']):
                     raise ValueError('이 출처를 지원하는 서버 다운로드 플러그인이 없습니다. 연결한 외부 다운로드 작업자를 선택하세요.')
             if source['provider']=='exhentai' and data.get('engine')=='command':
                 if not source['available'] and not self.app.download_status()['exhentai_workers'].get(data.get('target')):
                     raise ValueError('로그인 세션을 사용하는 익헨 다운로드 작업자의 연결·업데이트를 기다려 주세요.')
-            return self.respond(store.request_download(data.get('provider'),data.get('reference'),data.get('target'),data.get('engine')))
+            return self.respond(store.request_download(data.get('provider'),source['url'],data.get('target'),data.get('engine')))
         if path=='/api/downloads/verify':
             if set(data)!={'reference','target'}:raise ValueError('익헨 주소·번호와 저장 대상만 지정하세요.')
             target=data['target']
             if not self.app.download_status()['exhentai_workers'].get(target):raise ValueError('익헨 다운로드 작업자 연결·업데이트를 기다려 주세요.')
-            source=store.resolve_reference('exhentai',data['reference'])
+            source=self.app.resolve_source_reference('exhentai',data['reference'])
             return self.respond({'state':'queued','job':store.public_job(store.queue(source['url'],target,'command',source['work_id'],verification=True))})
         if path=='/api/tags/batch':return self.respond(store.edit_user_tags(data.get('work_ids'),data.get('add'),data.get('remove')))
         if path=='/api/tags/rename':return self.respond(store.rename_user_tag(data.get('source'),data.get('target')))
@@ -799,6 +832,11 @@ class Handler(BaseHTTPRequestHandler):
             with self.app.manual_source_access():
                 store.begin_matching(match[1])
                 return self.respond({'items':source_candidates(data['number'])})
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/sources/reference',path)
+        if match:
+            if set(data)-{'provider','reference','tags','comments'} or not {'provider','reference'}<=set(data):raise ValueError('출처와 작품 번호·코드만 지정하세요.')
+            source=self.app.resolve_source_reference(data['provider'],data['reference'])
+            return self.respond(store.link_reference(match[1],data['provider'],source['url'],{key:data[key] for key in ('tags','comments') if key in data}))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/sources',path)
         if match:
             supported_source(data.get('url'))
