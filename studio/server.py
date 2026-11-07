@@ -29,7 +29,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=31
+STUDIO_UPDATE=32
 
 
 def supported_login_status(value):

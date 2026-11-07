@@ -478,9 +478,13 @@ function tagLabelContent(tag) {
     const data=tagData(tag);
     return `${data.kind ? `<span class="tag-namespace">${esc(data.kind)}</span>` : ''}<span class="tag-value">${esc(data.label)}</span>`;
 }
-const tagLabel = tag => `<span class="tag-label" data-tag-label="${esc(tag)}">${tagLabelContent(tag)}</span>`;
+function tagHint(tag) {
+    const data=tagData(tag);
+    return [data.ko===tag ? tag : `${data.ko} · ${tag}`,data.description,data.scope].join('\n');
+}
+const tagLabel = tag => `<span class="tag-label" data-tag-label="${esc(tag)}" title="${esc(tagHint(tag))}">${tagLabelContent(tag)}</span>`;
 const tagInfo = tag => `<button class="tag-info" type="button" data-tag-info="${esc(tag)}" aria-label="태그 설명: ${esc(tagText(tag))}" aria-controls="tag-explanation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button>`;
-const tagPair = (tag,body) => `<span class="tag-pair">${body}${tagInfo(tag)}</span>`;
+const tagPair = (tag,body) => `<span class="tag-pair" title="${esc(tagHint(tag))}">${body}${tagInfo(tag)}</span>`;
 function drawTagExplanation(tag) {
     const data=tagData(tag);
     $('#tag-explanation-title').textContent=tagText(tag);
