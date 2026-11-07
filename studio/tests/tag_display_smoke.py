@@ -47,6 +47,8 @@ def main():
                     label=page.locator('#tag-strip-list [data-tag-label="female:glasses"]')
                     expect(label).to_contain_text('안경')
                     expect(label).to_have_attribute('title','안경 · female:glasses\n인물이 안경을 착용합니다.\n여성 인물에 적용되는 태그 분류입니다.')
+                    supplied=page.locator('#tag-strip-list [data-tag-label="language:korean"]')
+                    expect(supplied).to_have_attribute('title','한국어 · language:korean\n한국어로 된(번역 포함) 작품.\n작품에 사용된 언어·번역 상태입니다.')
                     if width>=500:
                         before_hover=page.url
                         label.hover()
@@ -74,6 +76,8 @@ def main():
                     page.screenshot(path=str(output/f'explanation-{width}.png'))
                     page.locator('#tag-explanation [data-tag-language]').select_option('en')
                     expect(label).to_contain_text('glasses')
+                    expect(supplied).to_contain_text('korean')
+                    expect(supplied).to_have_attribute('title','한국어 · language:korean\n한국어로 된(번역 포함) 작품.\n작품에 사용된 언어·번역 상태입니다.')
                     page.locator('#close-tag-explanation').click()
                     page.reload();expect(label).to_contain_text('glasses')
                     page.locator('[data-tag-language]').first.select_option('ko')
