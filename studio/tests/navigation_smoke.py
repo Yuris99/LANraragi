@@ -51,6 +51,7 @@ def main():
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
                 page.goto(base+'/#/library?q=History&sort=title&direction=asc&limit=24&page=2')
                 expect(page.locator('.card')).to_have_count(24)
+                assert urllib.parse.urlsplit(page.url).path=='/manga' and not urllib.parse.urlsplit(page.url).fragment
                 assert page.locator('#page-number').inner_text()=='2 / 3 페이지'
                 assert page.locator('#search').input_value()=='History'
                 work_id=page.locator('.card').first.get_attribute('data-id');short=page.locator('.card').first.get_attribute('data-short-id')
@@ -107,8 +108,8 @@ def main():
                 with patch.object(store,'get_work',side_effect=delayed_get):
                     page.locator('.card').first.click();assert started.wait(1)
                     page.go_back();page.wait_for_timeout(600)
-                    assert not page.locator('#detail').is_visible() and page.url.endswith('/library')
-                direct.goto(base+'/#/works/not-an-id/read/7');direct.wait_for_url('**/library');direct.locator('.card').first.wait_for()
+                    assert not page.locator('#detail').is_visible() and page.url.endswith('/manga')
+                direct.goto(base+'/#/works/not-an-id/read/7');direct.wait_for_url('**/manga');direct.locator('.card').first.wait_for()
                 lrr.fail_files_once=True
                 retry=context.new_page();retry.on('pageerror',lambda error:errors.append(str(error)));retry.goto(reader_url.rsplit('/',1)[0]+'/6')
                 retry.locator('#detail[open]').wait_for();assert retry.url==detail_url

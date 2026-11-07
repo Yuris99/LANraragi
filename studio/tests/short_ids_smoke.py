@@ -37,14 +37,14 @@ def main():
                 page.goto(base);page.locator('.card').first.wait_for()
                 assert page.locator('[data-view=unread]').count()==0
                 page.locator('#open-number').click();page.locator('#short-form [name=number]').fill('123');page.locator('#short-form .primary').click()
-                page.wait_for_url('**/#/123');page.locator('#detail[open]').wait_for();assert 'Hitomi fixture' in page.locator('#detail h2').inner_text()
+                page.wait_for_url('**/manga/123');page.locator('#detail[open]').wait_for();assert 'Hitomi fixture' in page.locator('#detail h2').inner_text()
                 for ref,title in [('E123','E fixture'),('N123','N fixture'),(local['short_id'],'Local fixture')]:
                     page.goto(base+'/#/'+ref);page.locator('#detail[open]').wait_for();assert page.locator('#detail h2').inner_text()==title
                     assert page.url.endswith('/'+ref)
-                page.goto(base+'/#/E999/6');page.wait_for_url('**/#/123/6');page.locator('#reader[open]').wait_for()
-                page.locator('#reader-next').click();page.wait_for_url('**/#/123/7');page.go_back();page.wait_for_url('**/#/123/6')
+                page.goto(base+'/#/E999/6');page.wait_for_url('**/manga/123/6');page.locator('#reader[open]').wait_for()
+                page.locator('#reader-next').click();page.wait_for_url('**/manga/123/7');page.go_back();page.wait_for_url('**/manga/123/6')
                 page.reload();page.locator('#reader[open]').wait_for();assert page.locator('#reader-position').inner_text()=='6 / 7'
-                page.goto(base+'/#/works/'+local['id']+'/read/7');page.wait_for_url('**/#/'+local['short_id']+'/7');page.locator('#reader[open]').wait_for()
+                page.goto(base+'/#/works/'+local['id']+'/read/7');page.wait_for_url('**/manga/'+local['short_id']+'/7');page.locator('#reader[open]').wait_for()
                 page.goto(base+'/#/library');page.locator('.card').first.wait_for()
                 page.locator('#filter-tags-nav').click()
                 tag=page.locator('[data-filter-tag="theme:blue"]');tag.wait_for();assert tag.locator('.count').inner_text()=='3'
@@ -60,7 +60,7 @@ def main():
                 page.goto(base+'/#/123');page.locator('#detail[open]').wait_for()
                 page.locator('[data-tag="theme:blue"]').click();page.wait_for_function('()=>document.querySelectorAll(".card").length===1')
                 assert 'all_tag=' in page.url and 'view=favorite' in page.url
-                page.goto(base+'/#/library?view=unread');page.wait_for_url('**/#/library');page.locator('.card').first.wait_for()
+                page.goto(base+'/#/library?view=unread');page.wait_for_url('**/manga');page.locator('.card').first.wait_for()
                 for width,height in [(1440,1000),(390,844)]:
                     page.set_viewport_size({'width':width,'height':height})
                     assert page.locator('#open-number').is_visible()
@@ -68,7 +68,7 @@ def main():
                     page.locator('#filter-tags-nav').click();page.locator('[data-filter-tag="theme:blue"]').wait_for()
                     assert page.locator('#tag-filter').evaluate('(el)=>el.scrollWidth<=el.clientWidth')
                     page.locator('#tag-filter [data-close]').click()
-                page.goto(base+'/#/456');page.wait_for_url('**/#/library');page.locator('.card').first.wait_for()
+                page.goto(base+'/#/456');page.wait_for_url('**/manga');page.locator('.card').first.wait_for()
                 assert store.jobs()==[] and store.list_works()['total']==4
                 assert store.get_work(e['id'])['sources'][0]['url']=='https://e-hentai.org/g/123/token/'
                 assert not errors,errors

@@ -50,11 +50,12 @@ class PresetTests(unittest.TestCase):
                     return urllib.request.urlopen(urllib.request.Request(base+path,
                         data=None if data is None else json.dumps(data).encode(),
                         headers={'Authorization':credential,'Content-Type':'application/json'}),timeout=5)
-                for path in ['/library?q=example','/E123','/E123/7','/downloads','/works/'+'a'*32+'/read/6']:
+                for path in ['/manga','/manga/','/manga?q=example','/manga/E123','/manga/E123/7','/manga/downloads','/manga/works/'+'a'*32+'/read/6',
+                             '/library?q=example','/E123','/E123/7','/downloads','/works/'+'a'*32+'/read/6']:
                     with request(path) as response:self.assertIn(b'Library Studio',response.read())
                     with self.assertRaises(urllib.error.HTTPError) as error:request(path,credential='Bearer generated-worker')
                     self.assertEqual(error.exception.code,403)
-                for path in ['/audio','/audio/','/audio/api/health','/api/missing','/.env','/unrecognized']:
+                for path in ['/audio','/audio/','/audio/api/health','/api/missing','/.env','/unrecognized','/manga/audio/','/manga/api/missing','/mangaverse']:
                     with self.assertRaises(urllib.error.HTTPError) as error:request(path)
                     self.assertEqual(error.exception.code,404)
                 with request('/api/tag-presets',{'name':'Generated','tags':['female:glasses']}) as response:preset=json.load(response)

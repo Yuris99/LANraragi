@@ -276,21 +276,23 @@ let libraryContext = libraryState({ limit: settings.limit });
 let libraryKey = "", routeHref = "", routeTask = Promise.resolve(), routeRevision = 0, progressTask = Promise.resolve(), pendingReader = null;
 history.scrollRestoration = "manual";
 function routePath(route) {
-    if (route.kind === "jobs") return "/downloads";
+    if (route.kind === "jobs") return "/manga/downloads";
     const short = workShortIds.get(route.id) || route.short;
-    if (route.kind === "detail") return short ? `/${short}` : `/works/${route.id}`;
-    if (route.kind === "reader") return short ? `/${short}/${route.page}` : `/works/${route.id}/read/${route.page}`;
+    if (route.kind === "detail") return short ? `/manga/${short}` : `/manga/works/${route.id}`;
+    if (route.kind === "reader") return short ? `/manga/${short}/${route.page}` : `/manga/works/${route.id}/read/${route.page}`;
     const value = libraryState(route.library), params = new URLSearchParams();
     for (const [key, field, fallback] of [["view", "view", "library"], ["page", "page", 1], ["q", "query", ""], ["tag", "tag", ""], ["all_tag", "allTag", ""], ["provider", "provider", ""], ["sort", "sort", "added"], ["direction", "direction", "desc"], ["limit", "limit", 48]]) {
         if (value[field] !== fallback && !(key==='all_tag' && value.tagCombo.length)) params.set(key, value[field]);
     }
     for (const tag of value.tagCombo) params.append('all_tag',tag);
-    return "/library" + (params.size ? "?" + params : "");
+    return "/manga" + (params.size ? "?" + params : "");
 }
 const currentAddress = () => location.pathname + location.search + location.hash;
 function addressRoute() {
-    // Old hash bookmarks are parsed once, then replaced with a clean path.
-    const raw = location.hash.startsWith('#/') ? location.hash.slice(1) : location.pathname + location.search;
+    // Old hash/root bookmarks and new manga paths share one route parser.
+    const requested = location.hash.startsWith('#/') ? location.hash.slice(1) : location.pathname + location.search;
+    const relative = requested.replace(/^\/manga(?=\/|\?|$)/i,'');
+    const raw = !relative || relative.startsWith('?') ? '/'+relative : relative;
     const split = raw.indexOf("?"), path = split < 0 ? raw : raw.slice(0, split);
     if (['/','/unsen','/unsen/'].includes(raw)) return {kind:'library',library:libraryState({limit:settings.limit})};
     if (['/','/library','/library/','/unsen','/unsen/'].includes(path)) {

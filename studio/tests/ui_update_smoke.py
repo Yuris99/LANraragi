@@ -107,7 +107,7 @@ def main():
         page.locator('#reader[open]').wait_for()
         page.wait_for_function('()=>document.querySelector("#reader-position").textContent==="3 / 3"')
         page.locator('#close-reader').click();page.locator('#detail[open]').wait_for()
-        assert page.url==base+'/#/'+short
+        assert page.url==base+'/manga/'+short
         page.locator('#close-detail').click()
         page.locator('#settings-button').click();page.locator('#thumbnail-blur').uncheck()
         page.locator('#settings [data-close]').click();page.reload();page.locator('.card').wait_for()
