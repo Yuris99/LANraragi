@@ -81,14 +81,15 @@ class PinnedExtractorTests(unittest.TestCase):
         <table><tr><td>Posted:</td><td class="gdt2">2020-01-01 00:00:00</td></tr>
         <tr><td>Language:</td><td class="gdt2">English </td></tr>
         <tr><td>File Size:</td><td class="gdt2">1 KB</td></tr>
-        <tr><td>Length:</td><td class="gdt2">1 pages</td></tr></table>
+        <tr><td>Length:</td><td class="gdt2">2 pages</td></tr></table>
         <span id="favcount">0 times</span><span>Average: 4.00<</span>
         <a href="https://exhentai.org/s/aaaaaaaaaa/123-1">Page</a>'''
         def request(session,method,url,**kwargs):
             calls.append(url)
             if url==URL:body=gallery.encode()
             elif url=='https://exhentai.org/s/aaaaaaaaaa/123-1':body=b'<img id="img" src="https://ehgt.org/generated.png">'
-            elif url=='https://ehgt.org/generated.png':body=PNG
+            elif url=='https://exhentai.org/api.php':body=json.dumps({'i3':'<a onclick="go(3,\'bbbbbbbbbb\')"></a><img id="img" src="https://ehgt.org/second.png">','i6':''}).encode()
+            elif url in ('https://ehgt.org/generated.png','https://ehgt.org/second.png'):body=PNG
             else:raise AssertionError('Unexpected generated request: '+url)
             response=requests.Response();response.url=url;response.status_code=200;response._content=body;response.raw=io.BytesIO(body)
             response.raw.chunked=False
@@ -99,9 +100,16 @@ class PinnedExtractorTests(unittest.TestCase):
             with patch('requests.Session.request',request),patch('gallery_dl.extractor.common.Extractor.sleep'):
                 self.assertEqual(strict_ex_download(URL,root,cookies),0)
             self.assertTrue((root/'0001.png').is_file())
-            self.assertEqual(package_images(root,{'provider':'exhentai','external_id':'123','url':URL}),1)
+            self.assertTrue((root/'0002.png').is_file())
+            self.assertEqual(package_images(root,{'provider':'exhentai','external_id':'123','url':URL}),2)
             self.assertTrue((root/'exhentai-123.cbz').is_file())
             self.assertFalse(any('e-hentai.org' in call for call in calls))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);cookies=jar(root/'cookies.txt');calls.clear()
+            with patch('requests.Session.request',request),patch('gallery_dl.extractor.common.Extractor.sleep'):
+                self.assertEqual(strict_ex_download(URL,root,cookies,verification=True),0)
+            self.assertEqual(len(list(root.glob('*.png'))),1)
+            self.assertNotIn('https://exhentai.org/api.php',calls)
 
     def test_missing_cookies_no_requests_and_redirect_is_not_followed(self):
         with tempfile.TemporaryDirectory() as directory:
