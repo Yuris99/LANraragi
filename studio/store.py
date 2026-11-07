@@ -18,9 +18,10 @@ def uid():
 
 from editions import EditionCatalog, SCHEMA as EDITION_SCHEMA
 from auto_sources import AutomaticSources, SCHEMA as AUTO_SOURCE_SCHEMA
+from series import SeriesCatalog, SCHEMA as SERIES_SCHEMA
 
 
-class Store(EditionCatalog,AutomaticSources):
+class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
     def __init__(self, path):
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -86,6 +87,7 @@ class Store(EditionCatalog,AutomaticSources):
             ''')
             db.executescript(EDITION_SCHEMA)
             db.executescript(AUTO_SOURCE_SCHEMA)
+            db.executescript(SERIES_SCHEMA)
             upload_columns={r['name'] for r in db.execute('PRAGMA table_info(uploads)')}
             if 'state' not in upload_columns:db.execute("ALTER TABLE uploads ADD COLUMN state TEXT NOT NULL DEFAULT 'stored'")
             work_columns={r['name'] for r in db.execute('PRAGMA table_info(works)')}
@@ -114,6 +116,8 @@ class Store(EditionCatalog,AutomaticSources):
         db.create_function('studio_tag',1,canonical_tag,deterministic=True)
         db.create_function('visible_tag',1,visible_tag,deterministic=True)
         db.create_function('tag_words',1,tag_words,deterministic=True)
+        db.create_function('studio_artists',1,lambda value:json.dumps([part.strip().casefold() for part in value.split(',') if part.strip()]),deterministic=True)
+        db.create_function('studio_fold',1,str.casefold,deterministic=True)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
         try:
@@ -187,19 +191,30 @@ class Store(EditionCatalog,AutomaticSources):
             result['all_tags'] = list(dict.fromkeys(canonical_tag(t) for t in result['tags'] + result['user_tags'] + [
                 t for s in result['sources'] for t in s['tags']] if visible_tag(t)))
             result['short_id']=self.short_identity(result)
+            result['series']=self.work_series(work_id)
             result['edition']=self.edition_details(result)
             result['cover_asset_id']=result['edition'].get('cover_asset_id')
             result['edition_summary']={k:result['edition'][k] for k in ('kind','language','label','translator','group_id')}
             return result
 
     def list_works(self, query='', sort='added', descending=True, page=1, limit=48,
-                   provider='', favorite=False, unread=False, tag='', all_tag='', all_tags=None):
+                   provider='', favorite=False, unread=False, tag='', all_tag='', all_tags=None,artist='',series=''):
         order = {'added': 'added', 'title': 'title COLLATE NOCASE', 'artist': 'artist COLLATE NOCASE',
                  'pages': 'pages', 'bytes': 'bytes', 'rating': 'rating',
-                 'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()'}
+                 'last_read': 'COALESCE(last_read,0)', 'random': 'RANDOM()', 'series':'sm.position'}
         if sort not in order or not 1 <= limit <= 120 or not 1 <= page <= 100000:
             raise ValueError('정렬 또는 페이지 범위가 올바르지 않습니다.')
         where, args = ['works.merged_into IS NULL'], []
+        if not isinstance(artist,str) or len(artist)>500 or any(ord(c)<32 for c in artist):raise ValueError('작가 이름을 확인하세요.')
+        if not isinstance(series,str) or series and not re.fullmatch('[0-9a-f]{32}',series):raise ValueError('시리즈 묶음을 확인하세요.')
+        if sort=='series' and not series:raise ValueError('시리즈 순서는 시리즈 묶음에서 선택하세요.')
+        if artist:
+            where.append('''(EXISTS (SELECT 1 FROM json_each(studio_artists(works.artist)) a WHERE a.value=?)
+                OR EXISTS (SELECT 1 FROM json_each(works.tags) t WHERE studio_fold(studio_tag(t.value))=?)
+                OR EXISTS (SELECT 1 FROM user_tags u WHERE u.work_id=works.id AND studio_fold(studio_tag(u.tag))=?)
+                OR EXISTS (SELECT 1 FROM sources s,json_each(s.tags) t WHERE s.work_id=works.id AND studio_fold(studio_tag(t.value))=?))''')
+            args.extend([artist.strip().casefold()]+['artist:'+artist.strip().casefold()]*3)
+        if series:where.append('sm.series_id=?');args.append(series)
         if query:
             # Parameters preserve SQL safety; LIKE wildcards are treated literally.
             term = '%' + query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%'
@@ -233,8 +248,11 @@ class Store(EditionCatalog,AutomaticSources):
             where.append('last_read IS NULL')
         condition = ' WHERE ' + ' AND '.join(where) if where else ''
         with self.db() as db:
-            total = db.execute('SELECT count(*) FROM works'+condition, args).fetchone()[0]
-            rows = db.execute('SELECT works.*,n.number AS local_number FROM works JOIN work_numbers n ON n.work_id=works.id'+condition+' ORDER BY '+order[sort]+
+            selected_series=db.execute('SELECT id,name FROM reading_series WHERE id=?',(series,)).fetchone() if series else None
+            if series and not selected_series:raise KeyError('시리즈를 찾을 수 없습니다.')
+            joined=' JOIN series_members sm ON sm.work_id=works.id' if series else ''
+            total = db.execute('SELECT count(*) FROM works'+joined+condition, args).fetchone()[0]
+            rows = db.execute('SELECT works.*,n.number AS local_number'+(',sm.position AS series_position' if series else '')+' FROM works JOIN work_numbers n ON n.work_id=works.id'+joined+condition+' ORDER BY '+order[sort]+
                               (' DESC' if descending else ' ASC')+',id LIMIT ? OFFSET ?',
                               [*args, limit, (page-1)*limit]).fetchall()
             sources={row['id']:[] for row in rows}
@@ -246,8 +264,10 @@ class Store(EditionCatalog,AutomaticSources):
                 for item in db.execute('SELECT work_id,tag FROM user_tags WHERE work_id IN ('+placeholders+') ORDER BY tag',list(sources)):
                     user_tags[item['work_id']].append(item['tag'])
             items=[]
+            memberships=self.series_for_works(db,list(sources))
             for row in rows:
                 work=self.work_row(row);work['sources']=sources[row['id']]
+                work['series']=memberships[row['id']]
                 work['user_tags']=user_tags[row['id']]
                 work['all_tags']=list(dict.fromkeys(canonical_tag(tag) for tag in work['tags']+work['user_tags']+[tag for source in work['sources'] for tag in source['tags']] if visible_tag(tag)))
                 work['short_id']=self.short_identity(work)
@@ -257,7 +277,7 @@ class Store(EditionCatalog,AutomaticSources):
                 for work in items:
                     work['edition_summary']={k:meta.get(work['id'],{}).get(k,v) for k,v in {'kind':'comic','language':'','label':'','translator':'','group_id':None}.items()}
                     work['cover_asset_id']=meta.get(work['id'],{}).get('cover_asset_id')
-        return dict(items=items,total=total,page=page,limit=limit)
+        return dict(items=items,total=total,page=page,limit=limit,series=dict(selected_series) if selected_series else None)
 
     @staticmethod
     def user_tag_values(value):
@@ -582,6 +602,7 @@ class Store(EditionCatalog,AutomaticSources):
         for field,lock in [('title','title_locked'),('artist','artist_locked')]:
             if old[lock] and target[lock] and old[field]!=target[field]:raise ValueError('manual_metadata_conflict')
         # Keep the untouched old work row as an archive of scalar preferences.
+        if db.execute('SELECT 1 FROM series_members WHERE work_id IN (?,?)',(old_id,survivor_id)).fetchone():raise ValueError('series_metadata_requires_review')
         tags=list(dict.fromkeys(json.loads(old['tags'])+json.loads(target['tags'])))
         user_values={r[0] for r in db.execute('SELECT tag FROM user_tags WHERE work_id IN (?,?)',(old_id,survivor_id))}
         if len(user_values|set(tags))>100:raise ValueError('merged_user_tag_limit')

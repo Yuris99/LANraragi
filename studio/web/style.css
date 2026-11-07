@@ -216,6 +216,18 @@ summary:hover{color:var(--text)}
 #counterpart-results+h3{margin-top:28px}
 
 /* Downloads */
+.detail-facets{display:grid;gap:16px;margin:20px 0}
+.detail-facets strong{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+.series-memberships{display:grid;gap:16px;margin:16px 0}
+.series-membership{padding-bottom:16px;border-bottom:1px solid var(--line)}
+.series-position{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin-top:10px}
+.series-position label{margin:0;flex:0 1 100px}
+.series-position input{min-width:0;width:100%}
+#work-series-form{max-width:480px}
+#catalog-filters{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+#catalog-filters:empty{display:none}
+.series-order{font-size:13px;color:var(--accent);margin:6px 0}
+
 .section-intro{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:8px 0 20px}
 .section-intro p{font-size:14px;color:var(--muted);margin:0}
 .job{padding:16px 18px;background:var(--surface);border-radius:var(--radius);margin-bottom:10px;display:flex;justify-content:space-between;gap:20px}

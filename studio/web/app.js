@@ -1,7 +1,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const selectedWorks = new Set();
 let tagTargets = [];
-const state = { page: 1, view: "library", provider: "", query: "", tag: "", tagCombo: [], sort: "added", direction: "desc", detail: null, reader: null };
+const state = { page: 1, view: "library", provider: "", query: "", tag: "", tagCombo: [], artist:'',series:'', sort: "added", direction: "desc", detail: null, reader: null };
 let settings;
 try { settings = JSON.parse(localStorage.getItem("studio-view") || "{}"); } catch { settings = {}; }
 settings = { size: "medium", limit: 48, layout: "grid", direction: "ltr", tagLanguage: "ko", ...settings };
@@ -130,6 +130,7 @@ async function refreshAutomaticSources() {
         state.detail = {...work,autoLinkUpdated:value.updated}; cacheWork(work);
         // Refresh source data only; never replace an open editor or media player.
         if ($('#connected-source-list')) $('#connected-source-list').innerHTML = sourceRows(work.sources);
+        if ($('#detail-facets')) $('#detail-facets').innerHTML=detailFacets(work);
         if ($('#combined-source-tags')) $('#combined-source-tags').innerHTML = work.all_tags.map(tag => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join('');
     }
 }
@@ -276,7 +277,8 @@ function libraryState(value = {}) {
     return { view: libraryViews.includes(value.view) ? value.view : "library", page: integer(value.page, 1, 1000000),
         query: String(value.query || "").slice(0, 1024), tag: String(value.tag || "").slice(0, 120), allTag: String(value.allTag || "").slice(0, 300),
         tagCombo: Array.isArray(value.tagCombo) ? [...new Set(value.tagCombo.filter(t=>typeof t==='string' && t.length && t.length<=300))].slice(0,12) : [],
-        provider: ["ehentai", "exhentai", "hitomi"].includes(value.provider) ? sourceFamily(value.provider) : "", sort: ["added", "title", "artist", "pages", "bytes", "rating", "last_read", "random"].includes(value.sort) ? value.sort : "added",
+        artist:typeof value.artist==='string'?value.artist.slice(0,500):'',series:/^[a-f0-9]{32}$/.test(value.series || '')?value.series:'',
+        provider: ["ehentai", "exhentai", "hitomi"].includes(value.provider) ? sourceFamily(value.provider) : "", sort: value.sort==='series' && /^[a-f0-9]{32}$/.test(value.series || '')?'series':["added", "title", "artist", "pages", "bytes", "rating", "last_read", "random"].includes(value.sort) ? value.sort : "added",
         direction: value.direction === "asc" ? "asc" : "desc", limit: [24, 48, 96].includes(Number(value.limit)) ? Number(value.limit) : 48,
         scroll: Number.isFinite(value.scroll) && value.scroll >= 0 ? value.scroll : 0 };
 }
@@ -289,7 +291,7 @@ function routePath(route) {
     if (route.kind === "detail") return short ? `/manga/${short}` : `/manga/works/${route.id}`;
     if (route.kind === "reader") return short ? `/manga/${short}/${route.page}` : `/manga/works/${route.id}/read/${route.page}`;
     const value = libraryState(route.library), params = new URLSearchParams();
-    for (const [key, field, fallback] of [["view", "view", "library"], ["page", "page", 1], ["q", "query", ""], ["tag", "tag", ""], ["all_tag", "allTag", ""], ["provider", "provider", ""], ["sort", "sort", "added"], ["direction", "direction", "desc"], ["limit", "limit", 48]]) {
+    for (const [key, field, fallback] of [["view", "view", "library"], ["page", "page", 1], ["q", "query", ""], ["tag", "tag", ""], ["all_tag", "allTag", ""], ['artist','artist',''],['series','series',''],["provider", "provider", ""], ["sort", "sort", "added"], ["direction", "direction", "desc"], ["limit", "limit", 48]]) {
         if (value[field] !== fallback && !(key==='all_tag' && value.tagCombo.length)) params.set(key, value[field]);
     }
     for (const tag of value.tagCombo) params.append('all_tag',tag);
@@ -306,7 +308,7 @@ function addressRoute() {
     if (['/','/library','/library/','/unsen','/unsen/'].includes(path)) {
         const p = new URLSearchParams(split < 0 ? "" : raw.slice(split + 1));
         const tags=p.getAll('all_tag');
-        return { kind: "library", library: libraryState({ view: p.get("view"), page: p.get("page"), query: p.get("q"), tag: p.get("tag"), allTag: tags.length===1 ? tags[0] : '', tagCombo:tags.length>1 ? tags : [], provider: p.get("provider"), sort: p.get("sort"), direction: p.get("direction"), limit: p.get("limit") }) };
+        return { kind: "library", library: libraryState({ view: p.get("view"), page: p.get("page"), query: p.get("q"), tag: p.get("tag"), allTag: tags.length===1 ? tags[0] : '', tagCombo:tags.length>1 ? tags : [],artist:p.get('artist'),series:p.get('series'), provider: p.get("provider"), sort: p.get("sort"), direction: p.get("direction"), limit: p.get("limit") }) };
     }
     if (raw === "/downloads") return { kind: "jobs" };
     const short = /^\/([EXNL]?[0-9]{1,32})(?:\/([0-9]+))?$/.exec(raw.toUpperCase());
@@ -335,12 +337,18 @@ function updateView() {
     const activeTag = activeTagNames();
     $("#active-tag").hidden = !activeTag; $("#active-tag-name").textContent = activeTag ? `태그: ${activeTag}` : "";
     $("#direction").textContent = state.direction === "desc" ? "↓" : "↑";
+    $('#sort option[value="series"]').disabled=!state.series;
+    $('#catalog-filters').innerHTML=(state.artist?`<span>작가: ${esc(state.artist)} <button class="quiet" type="button" data-clear-facet="artist">해제</button></span>`:'')+(state.series?`<span>시리즈: ${esc(state.seriesName || '묶음')} <button class="quiet" type="button" data-clear-facet="series">해제</button></span>`:'');
     renderPresetTabs();
 }
 async function navigateRoute(route, { replace = false, refresh = false } = {}) {
     clearTimeout(state.searchTimer); setAddress(route, replace); return applyRoute(refresh);
 }
 function navigateLibrary() { return navigateRoute({ kind: "library", library: { ...currentLibrary(), scroll: 0 } }); }
+function browseFacet({artist='',tag='',series=''}={}) {
+    Object.assign(state,{view:'library',query:'',tag:'',allTag:tag,tagCombo:[],provider:'',artist,series,seriesName:'',page:1,sort:series?'series':'added',direction:series?'asc':'desc'});
+    return navigateLibrary();
+}
 async function applyRoute(refresh = false) {
     if (!refresh && routeHref === location.href) return routeTask;
     routeHref = location.href;
@@ -446,17 +454,18 @@ async function load({ fromRoute = false } = {}) {
     const displayedLibrary = currentLibrary();
     if (!fromRoute && addressRoute().kind === "library") { setAddress({ kind: "library", library: displayedLibrary }); routeHref = location.href; }
     const request = ++requestNumber;
-    const query = new URLSearchParams({ q: state.query, tag: state.tag, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
+    const query = new URLSearchParams({ q: state.query, tag: state.tag, sort: state.sort, direction: state.direction, page: state.page, limit: settings.limit, provider: state.provider,artist:state.artist,series:state.series, favorite: state.view === "favorite" ? "1" : "0", unread: state.view === "unread" ? "1" : "0" });
     for (const tag of selectedTagFilters()) query.append('all_tag',tag);
     const result = await api(`/api/works?${query}`);
     if (request !== requestNumber) return;
+    state.seriesName=result.series?.name || '';updateView();
     result.items.forEach(cacheWork);
     $("#total").textContent = `${result.total.toLocaleString()} 작품`;
     selectedWorks.clear();
-    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" aria-labelledby="work-title-${work.id}"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3><button class="card-title" id="work-title-${work.id}" data-id="${work.id}" type="button">${esc(work.display_title || work.title)}</button></h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
+    $("#grid").innerHTML = result.items.map((work) => `<article class="card" data-id="${work.id}" data-short-id="${esc(work.short_id)}" aria-labelledby="work-title-${work.id}"><label class="card-select"><input type="checkbox" data-select-work="${work.id}" aria-label="${esc(work.display_title || work.title)} 선택"></label>${cover(work)}<div><h3><button class="card-title" id="work-title-${work.id}" data-id="${work.id}" type="button">${esc(work.display_title || work.title)}</button></h3><div class="card-artist">${esc(work.artist || "작가 미등록")}</div>${work.series_position?`<div class="series-order">권 순서 ${work.series_position}</div>`:''}${work.edition_summary && (work.edition_summary.language || work.edition_summary.label) ? `<div class="muted">${esc([work.edition_summary.language,work.edition_summary.label].filter(Boolean).join(" · "))}</div>` : ""}</div><div class="card-sources">${sources(work)}</div></article>`).join("");
     updateSelection();
     $("#empty").hidden = result.items.length > 0;
-    const filtered = Boolean(state.query || state.tag || selectedTagFilters().length || state.provider || state.view === "favorite");
+    const filtered = Boolean(state.query || state.tag || selectedTagFilters().length || state.provider || state.artist || state.series || state.view === "favorite");
     $("#empty h2").textContent = filtered ? "조건에 맞는 작품이 없습니다" : "보관함을 채워 보세요";
     $("#empty p").textContent = filtered ? "검색어·태그·출처 필터를 바꾸거나 해제해 보세요." : "LANraragi 라이브러리를 동기화하거나 작품을 추가해 출처를 연결할 수 있습니다.";
     $("#empty-sync").hidden = filtered;
@@ -675,7 +684,7 @@ function sourceRows(values) {
             const m=s.metadata || {},rating=typeof m.rating==='number' && Number.isFinite(m.rating) && m.rating>=0 && m.rating<=5 ? `<p class="source-rating">출처 평점 ${m.rating.toFixed(2)} / 5${Number.isSafeInteger(m.rating_count)?` · ${m.rating_count.toLocaleString('ko-KR')}표`:''}</p>`:'';
             return `<div class="source-header">${sourceShortcut(s)}<span class="source-actions"><button class="quiet" data-fetch="${s.id}">작품 정보 갱신</button><button class="quiet" data-comments="${s.id}">댓글 갱신</button></span></div>${rating}<small>${s.metadata?.title ? `출처 제목: ${esc(s.display_title || s.metadata.title)} · ` : ''}${s.status === 'fetched' ? `수집 ${new Date(s.fetched * 1000).toLocaleString('ko-KR')}` : '수동 등록 · 원격 정보 미확인'}</small>`;
         }).join('');
-        return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `${tagPair(tag,`<span class="tag">${tagLabel(tag)}</span>`)}`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
+        return `<div class="source-row"><strong>${providerName[family]}</strong>${links}<p class="muted">태그 ${tags.length} · 댓글 ${comments.length}</p><div class="tags">${tags.map(tag => `${tagPair(tag,`<button class="tag" type="button" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)}`).join('')}</div>${comments.length ? `<details><summary>보관한 댓글 ${comments.length}개</summary>${comments.map(c => `<div class="comment"><small>${esc(c.author)} · ${esc(c.posted_at)}</small>${esc(c.text)}</div>`).join('')}</details>` : ''}</div>`;
     }).join('') || '<p class="muted">작품 원본 주소를 연결하세요. 이헨·익헨은 하나의 출처 계열로 표시합니다.</p>';
 }
 function readingActions(work) {
@@ -686,14 +695,53 @@ function readingActions(work) {
     const label = voice ? (work.edition.kind === 'voice_video' ? '보이스코믹 재생' : '만화+음성') : opened ? `이어보기 · ${page}쪽` : '읽기';
     return `<button class="primary" id="read-work" ${available ? '' : 'disabled'}>${label}</button>${opened ? '<button class="quiet" id="read-work-start">처음부터</button>' : ''}`;
 }
+function detailFacets(work) {
+    const artists=new Map();
+    for (const name of [...(work.artist || '').split(','),...(work.sources || []).flatMap(s=>s.metadata?.artists || []),...work.all_tags.filter(t=>t.startsWith('artist:')).map(t=>t.slice(7))]) {
+        if (name.trim() && !artists.has(name.trim().toLocaleLowerCase())) artists.set(name.trim().toLocaleLowerCase(),name.trim());
+    }
+    const series=work.all_tags.filter(t=>t.startsWith('parody:') || t.startsWith('series:'));
+    return `<div class="detail-facets"><div><strong>작가</strong><div class="tags">${[...artists.values()].map(name=>`<button class="tag" type="button" data-browse-artist="${esc(name)}">${esc(name)}</button>`).join('') || '<span class="muted">작가 미등록</span>'}</div></div><div><strong>원작·시리즈</strong><div class="tags">${series.map(tag=>tagPair(tag,`<button class="tag" type="button" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join('') || '<span class="muted">원작·시리즈 정보 없음</span>'}</div></div></div>`;
+}
+async function renderWorkSeries(work) {
+    const root=$('#work-series');
+    root.innerHTML=`<h3>시리즈 묶음</h3><p class="muted">연속 작품을 같은 묶음에 추가하고 권 순서대로 모아 보세요.</p><div class="series-memberships">${(work.series || []).map(s=>`<div class="series-membership"><a class="tag" href="/manga?series=${s.id}&sort=series&direction=asc" data-browse-series="${s.id}">${esc(s.name)} · ${s.count}작품</a><form class="series-position" data-series-id="${s.id}"><label>권 순서<input name="position" type="number" min="1" max="100000" value="${s.position}" required></label><button class="quiet" type="submit">순서 저장</button><button class="quiet" type="button" data-series-remove="${s.id}">묶음에서 제외</button></form></div>`).join('') || '<p class="muted">아직 묶은 시리즈가 없습니다.</p>'}</div><details><summary>시리즈에 추가</summary><form id="work-series-form"><label>시리즈 선택<select name="series_id" disabled><option value="">새 시리즈 만들기</option></select></label><label id="series-new-name">새 시리즈 이름<input name="name" maxlength="120" required></label><label>권 순서<input name="position" type="number" min="1" max="100000" placeholder="비우면 마지막 순서"></label><button class="quiet" type="submit" disabled>이 작품 추가</button><p class="muted" id="series-save-note" role="status">시리즈 목록을 불러오는 중입니다.</p></form></details>`;
+    const refresh=async value=>{state.detail=value;cacheWork(value);renderDetail(value);await load();};
+    root.onclick=guard(async event=>{
+        const button=event.target.closest('[data-series-remove]');if (!button) return;
+        button.disabled=true;
+        try {await refresh(await api(`/api/works/${work.id}/series/${button.dataset.seriesRemove}/remove`,{}));}
+        finally {button.disabled=false;}
+    });
+    root.onsubmit=guard(async event=>{
+        event.preventDefault();event.stopPropagation();
+        const form=event.target,fields=form.elements,button=form.querySelector('[type="submit"]');
+        const id=form.dataset.seriesId || fields.series_id.value;
+        const position=fields.position.value;
+        button.disabled=true;
+        try {
+            const value=await api(`/api/works/${work.id}/series`,{...(id?{series_id:id}:{name:fields.name.value}),...(position?{position:Number(position)}:{})});
+            await refresh(value);toast('시리즈 묶음을 저장했습니다.');
+        } finally {button.disabled=false;}
+    });
+    try {
+        const groups=await api('/api/series');if (state.detail?.id!==work.id || !root.isConnected) return;
+        const select=$('[name="series_id"]',root);
+        select.innerHTML='<option value="">새 시리즈 만들기</option>'+groups.map(s=>`<option value="${s.id}">${esc(s.name)} · ${s.count}작품</option>`).join('');select.disabled=false;
+        select.onchange=()=>{$('#series-new-name',root).hidden=Boolean(select.value);$('[name="name"]',root).required=!select.value;};
+        $('#work-series-form [type="submit"]',root).disabled=false;
+        $('#series-save-note',root).textContent='기존 시리즈를 선택하거나 새 이름을 입력하세요.';
+    } catch(error) {if(root.isConnected) $('#series-save-note',root).textContent=error.message;}
+}
 function renderDetail(work) {
     pauseVoicePlayers();
-    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div class="card-artist">${esc(work.artist || "작가 미등록")}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
+    $("#detail-content").innerHTML = `<div class="detail-layout">${cover(work)}<div><h2>${esc(work.display_title || work.title)}</h2><div id="detail-facets">${detailFacets(work)}</div><div class="detail-meta"><span>번호 ${esc(work.short_id)}</span><span>${work.pages} 페이지</span><span>${(work.bytes / 1048576).toFixed(1)} MiB</span><span>${work.last_read ? `최근 열람 ${new Date(work.last_read * 1000).toLocaleDateString("ko-KR")}` : "열람 기록 없음"}</span></div><div class="rating" aria-label="별점">${[1, 2, 3, 4, 5].map((n) => `<button data-rating="${n}" aria-label="${n}점" aria-pressed="${n <= work.rating}" class="${n <= work.rating ? "on" : ""}"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>`).join("")}<button data-rating="0" class="rating-clear" aria-label="별점 지우기">×</button></div><div class="detail-actions">${readingActions(work)}<button class="quiet" id="favorite-work">${work.favorite ? "즐겨찾기 해제" : "즐겨찾기"}</button>${work.lrr_id ? `<a class="quiet" href="/api/media/${work.lrr_id}/download" download>↓ PC로 받기</a>` : ""}<button class="quiet" id="edit-work">제목·작가 수정</button></div><p class="muted">${work.lrr_id ? "라이브러리에 저장된 만화 파일" : work.edition?.assets.some(asset => asset.kind !== "cover") ? "보이스코믹 미디어 연결됨" : "파일을 첨부하거나 만화 판본을 연결하세요."}</p></div></div>
     <section class="detail-section"><h3>내 태그 <button class="quiet" id="edit-user-tags">추가·삭제</button></h3><div class="tags">${work.user_tags.filter(visibleTag).map((tag) => `<span class="tag"><button data-user-filter="${esc(tag)}">${tagLabel(tag)}</button><button data-remove-user-tag="${esc(tag)}" aria-label="${esc(tag)} 제거">×</button></span>`).join("") || '<span class="muted">사용자 태그가 없습니다.</span>'}</div></section>
     <section class="detail-section"><h3>통합 태그</h3><div class="tags" id="combined-source-tags">${work.all_tags.map((tag) => tagPair(tag,`<button class="tag" data-tag="${esc(tag)}">${tagLabel(tag)}</button>`)).join("") || `<span class="muted">등록된 태그가 없습니다.</span>`}</div></section>
-    <section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
+    <section class="detail-section" id="work-series"></section><section class="detail-section" id="source-finder"></section><section class="detail-section"><h3>사이트 자동 연결</h3><p id="auto-source-state" role="status">자동 연결 상태 확인 중</p><div id="counterpart-results" role="status"></div><h3>연결된 출처 <span class="muted">번호를 누르면 원본 페이지로 이동합니다.</span></h3><div id="connected-source-list">${sourceRows(work.sources)}</div>
     <section class="detail-section"><h3>작품 URL로 자동 연결</h3><p class="muted">E-Hentai(익헨 포함)·Hitomi의 작품 URL 하나를 저장하면 다른 사이트의 같은 작품을 자동으로 확인합니다. 로그인·접근 제한이 있으면 위의 자동 연결 상태에 표시됩니다.</p><form id="source-form" class="source-form"><label>작품 URL<input name="url" type="url" required placeholder="작품 상세 페이지의 전체 주소를 붙여 넣으세요"></label><button class="primary">URL 저장 · 자동 연결 시작</button><details><summary>태그·댓글 직접 입력 (선택)</summary><label>원본 태그<input name="tags" placeholder="쉼표로 구분"></label><label>댓글 JSON<textarea name="comments" placeholder='[{"id":"1","text":"댓글"}]'></textarea></label></details></form><details><summary>저장한 HTML 가져오기 (선택)</summary><form id="html-metadata-form"><h3>저장한 HTML에서 작품 정보 읽기</h3><label>원본 작품 URL<input name="url" type="url" required></label><label>저장한 HTML 파일<input id="metadata-file" type="file" accept=".html,.htm,.txt"></label><label>페이지 전체 HTML<textarea name="html" required placeholder="HTML을 데이터로만 읽습니다. 스크립트·광고·이미지는 실행하지 않습니다."></textarea></label><button id="metadata-preview" type="button" class="quiet">추출 미리보기</button><p id="metadata-preview-result" role="status"></p><button class="primary" type="submit" id="metadata-save" disabled>확인한 출처 정보 연결</button><p class="muted">기존 작품명·사용자 태그·파일은 유지합니다. 계정 정보가 포함된 HTML은 넣지 마세요.</p></form></details></section></section>`;
     renderSourceFinder(work);
+    renderWorkSeries(work);
     renderEdition(work);
     refreshAutomaticSources().catch(() => {});
     if (!$("#detail").open) $("#detail").showModal();
@@ -743,6 +791,12 @@ function guard(fn) { return (...args) => Promise.resolve().then(() => fn(...args
 document.addEventListener("click", guard(async (event) => {
     if (event.target.closest(".card-select")) return;
     const button = event.target.closest("button,a,.card"); if (!button) return;
+    if (button.dataset.browseArtist!==undefined) {event.preventDefault();await browseFacet({artist:button.dataset.browseArtist});return;}
+    if (button.dataset.browseSeries) {event.preventDefault();await browseFacet({series:button.dataset.browseSeries});return;}
+    if (button.dataset.clearFacet) {
+        state[button.dataset.clearFacet]='';if(!state.series && state.sort==='series') {state.sort='added';state.direction='desc';}
+        state.page=1;await navigateLibrary();return;
+    }
     if (button.dataset.close !== undefined) button.closest("dialog").close();
     if (button.dataset.view) await view(button.dataset.view);
     const provider = button.dataset.provider ?? button.dataset.filter;
@@ -781,8 +835,7 @@ document.addEventListener("click", guard(async (event) => {
     if (button.dataset.removeUserTag) { await api("/api/tags/batch", {work_ids:[state.detail.id],remove:[button.dataset.removeUserTag]}); await showDetail(state.detail.id); await load(); }
     if (button.id === "edit-user-tags") await openTagEditor([state.detail.id]);
     if (button.dataset.tag || button.dataset.filterTag) {
-        state.tagCombo=[];state.allTag = button.dataset.filterTag || button.dataset.tag; state.tag = ""; state.page = 1;
-        await navigateLibrary();
+        await browseFacet({tag:button.dataset.filterTag || button.dataset.tag});
     }
 }));
 

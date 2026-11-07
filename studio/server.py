@@ -29,7 +29,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=32
+STUDIO_UPDATE=33
 
 
 def supported_login_status(value):
@@ -461,11 +461,12 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.get_source_record(match[1]))
         if path=='/api/tag-dictionary':return self.respond(tag_dictionary())
         if path=='/api/library/tags':return self.respond(store.library_tags(q('q'),q('kind')))
+        if path=='/api/series':return self.respond(store.list_series())
         match=re.fullmatch(r'/api/short/([^/]+)',path)
         if match:return self.respond(store.resolve_short_id(match[1]))
         if path=='/api/works':
             return self.respond(store.list_works(q('q'),q('sort','added'),q('direction','desc')=='desc',
-                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag'),all_tags=qs.get('all_tag',[])))
+                int(q('page','1')),int(q('limit','48')),q('provider'),q('favorite')=='1',q('unread')=='1',q('tag'),all_tags=qs.get('all_tag',[]),artist=q('artist'),series=q('series')))
         match=re.fullmatch('/api/works/([0-9a-f]{32})',path)
         if match:return self.respond(store.get_work(match[1]))
         if path=='/api/jobs':
@@ -599,6 +600,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def post(self, data):
         path=urllib.parse.urlsplit(self.path).path;store=self.app.store
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/series',path)
+        if match:return self.respond(store.set_work_series(match[1],data))
+        match=re.fullmatch('/api/works/([0-9a-f]{32})/series/([0-9a-f]{32})/remove',path)
+        if match:
+            if data:raise ValueError('추가 필드는 지정하지 마세요.')
+            return self.respond(store.remove_work_series(match[1],match[2]))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/source-candidates',path)
         if match:return self.respond(self.app.find_source_candidates(match[1],data))
         match=re.fullmatch('/api/works/([0-9a-f]{32})/(source-record|restore-source)',path)
