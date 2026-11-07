@@ -155,6 +155,16 @@ dialog h2{font-size:20px;margin-bottom:12px}
 dialog h3{margin:24px 0 8px}
 label:not(.search){display:flex;flex-direction:column;gap:6px;margin:16px 0;color:var(--muted);font-size:14px;font-weight:500}
 .form-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:24px}
+.download-sources{border:0;min-width:0;margin:4px 0 16px;padding:0}
+.download-sources legend{color:var(--muted);margin-bottom:8px}
+.download-source-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.download-source-options label{position:relative;display:block;margin:0;cursor:pointer}
+.download-source-options input{position:absolute;inset:0;z-index:1;width:100%;height:100%;min-height:0;margin:0;padding:0;border:0;opacity:0;cursor:pointer}
+.download-source-options span{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:10px 14px;border:1px solid var(--control);border-radius:var(--radius);color:var(--muted);background:var(--bg)}
+.download-source-options label:hover span{background:var(--hover);color:var(--text)}
+.download-source-options input:checked+span{border-color:var(--accent);background:var(--raised);color:var(--text);font-weight:600}
+.download-source-options input:focus-visible+span{outline:2px solid var(--text);outline-offset:2px}
+.download-source-options input:disabled+span{opacity:.45;cursor:default}
 .muted{font-size:13px;line-height:1.65;color:var(--faint)}
 dialog .muted{font-size:14px}
 dialog p{max-width:75ch}

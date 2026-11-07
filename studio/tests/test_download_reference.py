@@ -22,6 +22,37 @@ class ReferenceTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.store=Store(Path(self.temp.name)/'studio.db')
 
+    def test_family_input_accepts_both_hosts_and_saved_prefixes(self):
+        work=self.store.create_work('Generated family')
+        eh='https://e-hentai.org/g/123/0123456789/';ex='https://exhentai.org/g/123/0123456789/'
+        for url in (eh,ex):self.store.upsert_source(work['id'],{'url':url})
+        self.assertEqual(self.store.resolve_reference('ehentai-family','E123')['url'],eh)
+        self.assertEqual(self.store.resolve_reference('ehentai-family','X123')['url'],ex)
+        self.assertEqual(self.store.resolve_reference('ehentai-family','123')['url'],ex)
+        self.assertEqual(self.store.request_download('ehentai-family',eh,'nas','command')['job']['url'],eh)
+        self.assertEqual(self.store.resolve_reference('ehentai-family',ex)['url'],ex)
+        with self.assertRaises(ValueError):self.store.resolve_reference('ehentai-family','456')
+        with self.assertRaises(ValueError):self.store.resolve_reference('ehentai-family','https://hitomi.la/galleries/123.html')
+
+    def test_family_reuses_an_available_file_only_with_matching_gallery_token(self):
+        work=self.store.create_work('Generated saved family',lrr_id='a'*40)
+        self.store.upsert_source(work['id'],{'url':'https://e-hentai.org/g/123/0123456789/'})
+        value=self.store.request_download('ehentai-family','https://exhentai.org/g/123/0123456789/','nas','command')
+        self.assertEqual(value,{'state':'available','work_id':work['id']})
+        other=self.store.resolve_reference('ehentai-family','https://exhentai.org/g/123/aaaaaaaaaa/')
+        self.assertFalse(other['available']);self.assertIsNone(other['work_id'])
+        self.assertEqual(self.store.jobs(),[])
+        self.assertEqual(len(self.store.get_work(work['id'])['sources']),1)
+
+    def test_ambiguous_family_number_keeps_separate_editions_and_requires_prefix(self):
+        for provider,token in [('ehentai','0123456789'),('exhentai','aaaaaaaaaa')]:
+            work=self.store.create_work('Generated '+provider)
+            self.store.upsert_source(work['id'],{'url':f'https://{ "e-hentai.org" if provider=="ehentai" else "exhentai.org"}/g/123/{token}/'})
+        with self.assertRaises(ValueError):self.store.resolve_reference('ehentai-family','123')
+        self.assertEqual(self.store.resolve_reference('ehentai-family','E123')['provider'],'ehentai')
+        self.assertEqual(self.store.resolve_reference('ehentai-family','X123')['provider'],'exhentai')
+        self.assertEqual(self.store.list_works()['total'],2)
+
     def test_new_eh_number_requires_full_url_without_any_queue_or_library_change(self):
         with self.assertRaisesRegex(ValueError,'전체 작품 URL'):
             self.store.request_download('ehentai','123','nas','lanraragi')
@@ -133,6 +164,10 @@ class ReferenceTests(unittest.TestCase):
                 with request('/api/downloads',auth) as response:self.assertEqual(json.load(response)['state'],'queued')
                 with self.assertRaises(urllib.error.HTTPError) as error:request('/api/downloads','Bearer reference-worker')
                 self.assertEqual(error.exception.code,403)
+                data=json.dumps({'provider':'ehentai-family','reference':'https://exhentai.org/g/123/0123456789/','target':'nas','engine':'command'}).encode()
+                with self.assertRaises(urllib.error.HTTPError) as error:request('/api/downloads',auth)
+                self.assertEqual(error.exception.code,400)
+                self.assertEqual(len(self.store.jobs()),1)
             finally:server.shutdown();server.server_close();thread.join()
 
 

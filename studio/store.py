@@ -723,12 +723,30 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         return self.job(job_id)
 
     def resolve_reference(self,provider,reference):
-        if provider not in SUPPORTED_PROVIDERS:
+        if provider not in (*SUPPORTED_PROVIDERS,'ehentai-family'):
             raise ValueError('출처를 선택하세요.')
         if not isinstance(reference,str) or not 1<=len(reference.strip())<=2048:
             raise ValueError('작품 번호 또는 전체 URL을 입력하세요.')
         value=reference.strip();origin='url'
         prefix=re.fullmatch(r'([EXex])([0-9]{1,20})',value)
+        if provider=='ehentai-family':
+            if prefix:return self.resolve_reference({'e':'ehentai','x':'exhentai'}[prefix[1].lower()],value)
+            if re.fullmatch('[0-9]{1,20}',value):
+                with self.db() as db:
+                    rows=db.execute("SELECT provider,url,work_id FROM sources WHERE provider IN ('ehentai','exhentai') AND external_id=?",(str(int(value)),)).fetchall()
+                if len(rows)>1 and (len({row['work_id'] for row in rows})>1 or len({row['url'].rstrip('/').rsplit('/',1)[-1] for row in rows})>1):
+                    raise ValueError('같은 번호의 다른 판본이 있습니다. E번호·X번호 또는 전체 URL을 입력하세요.')
+                variant='exhentai' if any(row['provider']=='exhentai' for row in rows) else 'ehentai'
+                return self.resolve_reference(variant,value)
+            source=parse_source(value)
+            if source['provider'] not in ('ehentai','exhentai'):raise ValueError('익헨·이헨의 작품 URL을 입력하세요.')
+            resolved=self.resolve_reference(source['provider'],value)
+            if resolved['work_id'] is None:
+                with self.db() as db:
+                    other=db.execute("SELECT s.url,w.id FROM sources s JOIN works w ON w.id=s.work_id WHERE s.provider IN ('ehentai','exhentai') AND s.external_id=? AND w.lrr_id IS NOT NULL AND w.merged_into IS NULL",(source['external_id'],)).fetchall()
+                matched=[row for row in other if row['url'].rstrip('/').rsplit('/',1)[-1]==source['url'].rstrip('/').rsplit('/',1)[-1]]
+                if len(matched)==1:resolved.update(work_id=matched[0]['id'],available=True)
+            return resolved
         if prefix:
             if {'e':'ehentai','x':'exhentai'}[prefix[1].lower()]!=provider:raise ValueError('번호 접두사와 선택한 출처가 다릅니다.')
             value=prefix[2]
@@ -758,7 +776,7 @@ class Store(EditionCatalog,AutomaticSources,SeriesCatalog):
         source=self.resolve_reference(provider,reference)
         if source['available']:
             return {'state':'available','work_id':source['work_id']}
-        if provider=='exhentai' and engine!='command':raise ValueError('익헨은 로그인 세션을 사용하는 외부 다운로드 작업자를 선택하세요.')
+        if source['provider']=='exhentai' and engine!='command':raise ValueError('익헨은 로그인 세션을 사용하는 외부 다운로드 작업자를 선택하세요.')
         return {'state':'queued','job':self.public_job(self.queue(source['url'],target,engine,source['work_id']))}
 
     def job(self, job_id):

@@ -29,7 +29,7 @@ from tag_display import dictionary as tag_dictionary
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=36
+STUDIO_UPDATE=37
 
 
 def supports_download(plugins,url):
@@ -733,12 +733,11 @@ class Handler(BaseHTTPRequestHandler):
         if match:return self.respond(store.cancel_folder_import(match[1]))
         if path=='/api/downloads/resolve':return self.respond(store.resolve_reference(data.get('provider'),data.get('reference')))
         if path=='/api/downloads':
-            if data.get('engine')=='lanraragi' and data.get('provider')!='exhentai':
-                source=store.resolve_reference(data.get('provider'),data.get('reference'))
+            source=store.resolve_reference(data.get('provider'),data.get('reference'))
+            if data.get('engine')=='lanraragi' and source['provider']!='exhentai':
                 if not source['available'] and not supports_download(self.app.lrr.json('/api/plugins/download'),source['url']):
                     raise ValueError('이 출처를 지원하는 서버 다운로드 플러그인이 없습니다. 연결한 외부 다운로드 작업자를 선택하세요.')
-            if data.get('provider')=='exhentai' and data.get('engine')=='command':
-                source=store.resolve_reference('exhentai',data.get('reference'))
+            if source['provider']=='exhentai' and data.get('engine')=='command':
                 if not source['available'] and not self.app.download_status()['exhentai_workers'].get(data.get('target')):
                     raise ValueError('로그인 세션을 사용하는 익헨 다운로드 작업자의 연결·업데이트를 기다려 주세요.')
             return self.respond(store.request_download(data.get('provider'),data.get('reference'),data.get('target'),data.get('engine')))

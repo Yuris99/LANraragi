@@ -888,35 +888,37 @@ $("#add").onclick = () => $("#editor").showModal();
 let downloadCapabilities=null;
 function refreshDownloadMethod() {
     const form=$('#download-form'),provider=form.elements.provider.value,target=form.elements.target.value;
-    const server=target==='nas' && Boolean(downloadCapabilities?.server_plugins?.[provider]);
-    form.querySelector('[name=engine] option[value=lanraragi]').disabled=!server;
-    if (!server && form.elements.engine.value==='lanraragi') form.elements.engine.value='command';
+    form.elements.engine.value='command';
     const worker=Boolean(downloadCapabilities?.command_workers?.[target]);
-    $('#download-support').textContent=server
-        ? `이 출처의 서버 다운로드 플러그인을 사용할 수 있습니다. 외부 작업자 ${worker?'연결됨':'미연결'}.`
-        : `${target==='pc'?'내 PC 저장은 외부 작업자를 사용합니다.':downloadCapabilities?.server_plugins_known?`${siteNames[provider]}용 서버 다운로드 플러그인이 없습니다. 외부 작업자를 사용하세요.`:'서버 플러그인 지원 여부를 확인할 수 없습니다. 외부 작업자를 선택할 수 있습니다.'} ${worker?'작업자 연결됨.':'작업자 연결 전에는 대기열에서 기다립니다.'}`;
+    $('#download-method').textContent=`다운로드 방식: 외부 엔진 · ${target==='nas'?'NAS':'내 PC'}`;
+    $('#download-support').textContent=!worker ? '다운로드 작업자 미연결 · 저장할 기기의 작업자를 연결해 주세요.'
+        : provider==='ehentai-family' && !downloadCapabilities?.exhentai_workers?.[target]
+        ? '익헨 계정·작업자 연결을 확인해 주세요. 이미 저장된 작품은 바로 열 수 있습니다.'
+        : `다운로드 작업자 연결됨 · ${provider==='hitomi'?'히토미 작품과 정보를 함께 저장합니다.':'저장한 계정 세션으로 익헨 작품을 받습니다.'}`;
 }
 $("#queue").onclick = $("#download-open").onclick = guard(async () => {
     $("#download-dialog").showModal();
+    resetDownloadPreview();
+    $('#download-support').textContent='다운로드 작업자 연결을 확인하고 있습니다.';
     downloadCapabilities=await api('/api/downloads/status');
     refreshDownloadMethod();
 });
 let downloadRevision = 0;
 function resetDownloadPreview() {
     downloadRevision++; $("#download-resolution").textContent = "";
-    const provider = $("#download-form [name=provider]").value;
-    $("#download-reference-help").textContent = provider === "exhentai" ? "저장된 번호·X번호 또는 전체 URL을 입력하세요. 저장된 익헨 세션을 사용하는 외부 작업자로 다운로드합니다." : provider === "ehentai" ? "E-Hentai는 처음 등록할 때 전체 URL이 필요합니다. 저장된 출처는 번호·E번호로 확인할 수 있습니다." : "선택한 사이트의 작품 번호 또는 전체 URL을 입력하세요.";
+    const provider = $('#download-form').elements.provider.value;
+    $("#download-reference-help").textContent = provider==='ehentai-family' ? '이헨·익헨 주소를 모두 사용할 수 있습니다. 처음 받는 작품은 전체 URL, 저장된 작품은 번호·E번호·X번호를 입력하세요.' : '히토미 작품 번호 또는 전체 URL을 입력하세요.';
     refreshDownloadMethod();
 }
 $("#download-form [name=reference]").oninput = resetDownloadPreview;
-$("#download-form [name=provider]").onchange = resetDownloadPreview;
+document.querySelectorAll('#download-form [name=provider]').forEach(input=>input.onchange=resetDownloadPreview);
 $("#download-form [name=target]").onchange = resetDownloadPreview;
 $("#download-preview").onclick = guard(async () => {
     const revision = downloadRevision;
     const data = Object.fromEntries(new FormData($("#download-form")));
     const result = await api("/api/downloads/resolve", data);
     if (revision !== downloadRevision) return;
-    $("#download-resolution").textContent = `${siteNames[result.provider] || providerName[result.provider]} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
+    $("#download-resolution").textContent = `${result.provider==='hitomi'?'히토미':'익헨'} #${result.external_id} · ${result.available ? "이미 보관함에 있음" : result.origin === "saved" ? "저장된 원본 URL 사용" : "입력 확인됨 · 원격 접근 미확인"}`;
 });
 $("#close-detail").onclick = guard(closeDetail); $("#close-reader").onclick = guard(closeReader);
 $("#detail").addEventListener("cancel", (event) => { event.preventDefault(); closeDetail(); });
