@@ -55,12 +55,54 @@
 - `library_kit.py`: `tokens.css`, `bar.css`, `shell.js`, 로그인 화면. 기존 업데이트 채널로 배포 가능.
 - 만화 화면에 적용. 테스트 10개 추가, 기존 Studio 테스트 통과.
 
-### 2단계 · 공통 컴포넌트와 규격 확정 — 다음 작업
+### 2단계 · 공통 컴포넌트와 규격 확정 — 완료(미배포)
 
 - `components.css`를 `library_kit.py`에 추가한다. 대상: 버튼(주·보조·텍스트·위험), 입력칸, 선택칸, 카드, 목록 행, 대화상자, 알림(토스트), 빈 화면, 사이드바 메뉴, 페이지 제목, 배지.
 - 만화 화면을 이 클래스로 정리해 **기준 화면**을 확정한다. 데스크톱·모바일 캡처를 남긴다.
 - 이 문서에 컴포넌트 규격표와 작업자 검사 목록을 추가한다.
 - **2단계를 확정하기 전에는 작업자를 띄우지 않는다.**
+
+#### 2단계 결과 — 공통 컴포넌트 규격
+
+기준 화면: 로그인 후 **`/library-guide`**. 섹션 버튼을 누르면 포인트 색만 바뀐다. 작업자 결과는 이 화면과 나란히 놓고 비교한다.
+
+불러오는 순서(각 섹션 HTML `<head>`):
+
+```html
+<html lang="ko" data-library-section="audio">  <!-- manga|audio|roulette|cyoa|real -->
+<link rel="stylesheet" href="/_library/tokens.css">
+<link rel="stylesheet" href="/_library/components.css">
+<link rel="stylesheet" href="섹션 자체 CSS">     <!-- 공통 뒤에 둔다 -->
+<script src="/_library/shell.js" defer></script>
+```
+
+| 용도 | 클래스 | 비고 |
+| --- | --- | --- |
+| 페이지 기본 | `body.lib-base` | 배경·글꼴·포커스 링 |
+| 레이아웃 | `.lib-sidebar` + `.lib-main` | 232px 사이드바, 900px 이하에서 시트(`.lib-nav-open`) |
+| 섹션 제목 | `.lib-section-title` + `small` | 사이드바 맨 위. 로고는 공통 바에만 둔다 |
+| 메뉴 | `.lib-nav-label`, `.lib-nav`, `.lib-nav-item(.is-active)`, `.lib-count` | 선택 항목 아이콘 = 섹션 색 |
+| 제목 | `.lib-page-head`, `.lib-h1`, `.lib-h2`, `.lib-page-count`, `.lib-lead`, `.lib-muted` | h1 26px / h2 18px |
+| 툴바 | `.lib-toolbar`, `.lib-actions` | 아래 구분선 |
+| 버튼 | `.lib-btn`(보조), `.lib-btn-primary`(주, 반전), `.lib-btn-text`, `.lib-btn-danger`, `.lib-icon-btn` | 주 버튼은 화면당 하나. 섹션 색을 버튼 배경에 쓰지 않는다 |
+| 입력 | `.lib-field`(label), `.lib-input`(input·select·textarea), `.lib-hint`, `.lib-search` | 높이 40px |
+| 필터·태그 | `.lib-chips`, `.lib-chip(.is-selected)`, `.lib-tag`, `.lib-badge(-accent/-danger/-success)` | |
+| 카드 | `.lib-grid`, `.lib-cover-card`, `.lib-cover(-wide/-square/-fill)`, `.lib-cover-title`, `.lib-cover-meta`, `.lib-cover-progress>i` | 기본 3:4, 영상·사진은 wide/square |
+| 목록 | `.lib-list`, `.lib-row`, `.lib-row-main`, `.lib-row-title`, `.lib-row-meta` | |
+| 패널 | `.lib-panel` | |
+| 대화상자 | `dialog.lib-dialog`, `.lib-dialog-actions` | |
+| 알림 | `.lib-notice(-danger/-success)`, `.lib-toast` | |
+| 빈 화면 | `.lib-empty` | 아이콘 + h2 + 설명 + 주 버튼 |
+| 진행·평점 | `.lib-progress>i`, `.lib-rating` | 섹션 색 |
+
+#### 작업자 검사 목록
+
+1. `<html data-library-section>`과 위 불러오기 순서를 지켰다.
+2. 섹션 CSS에 남은 색상값(`#…`, `rgb(…)`, `hsl(…)`)은 `--lib-*` 토큰 연결과 검은 그림자·오버레이(`rgb(0 0 0 / …)`)뿐이다. 검사 명령: `rg -n "#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(" <섹션 CSS>`. 남은 줄마다 이유를 보고한다.
+3. 글꼴은 `--lib-font` 하나다. 외부 웹폰트를 불러오지 않는다.
+4. 상단 바와 겹치는 고정 요소가 없다(`--lib-bar-h` 사용).
+5. 1440×900, 390×844 두 크기로 주요 화면을 캡처해 `/library-guide`와 비교했다.
+6. 기능·API·데이터를 바꾸지 않았다. 기존 테스트를 실행했다.
 
 ### 3단계 · 섹션별 Claude 작업자
 

@@ -90,6 +90,9 @@ class HubLoginHTTPTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.call(path).status, 200)
         self.assertEqual(self.call('/_library/../server.py').status, 401)
+        self.assertEqual(self.call('/_library/components.css').status, 200)
+        self.assertEqual(self.call('/_library/guide.html').status, 401)  # pages are not public kit files
+        self.assertEqual(self.call('/library-guide').status, 401)  # reference page needs sign-in
         self.assertEqual(json.load(self.call('/api/session')), {'authenticated': False})
 
     def test_browser_navigation_redirects_to_login_without_popup(self):

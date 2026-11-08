@@ -560,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             signed=bool(os.environ.get('STUDIO_PASSWORD')) and self.cookie_session()
             return self.respond({'authenticated':signed or self.server.dev})
         if path=='/login':return self.serve_asset('login.html')
+        if path=='/library-guide':return self.serve_asset('guide.html')  # design reference; signed-in only
         match=re.fullmatch(r'/_library/([a-z0-9-]+\.(?:css|js))',path)
         if match:
             if match[1] not in library_kit.ASSETS or match[1].endswith('.html'):return self.respond({'error':'찾을 수 없습니다.'},404)

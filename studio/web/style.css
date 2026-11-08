@@ -54,7 +54,7 @@ html.has-library-bar .brand{margin-top:-4px}
 .nav-item .icon{color:var(--faint)}
 .nav-item:hover{background:var(--surface);color:var(--text)}
 .nav-item.active{background:var(--raised);color:var(--text);font-weight:600}
-.nav-item.active .icon{color:var(--text)}
+.nav-item.active .icon{color:var(--accent)}
 .nav-item i{font-style:normal;margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 .sidebar-bottom{margin-top:auto;padding-top:20px}
 .connection{display:flex;gap:10px;margin:14px 12px 0;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--muted);align-items:center}
