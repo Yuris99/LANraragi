@@ -61,7 +61,7 @@ def main():
                 page=context.new_page();errors=[];requests=[]
                 page.on('pageerror',lambda e:errors.append(str(e)))
                 page.on('request',lambda r:requests.append(r.url))
-                page.goto(base)
+                page.goto(base+'/manga')
                 page.locator('#connections-open').click()
                 page.locator('[data-site-start="ehentai"]').click()
                 page.wait_for_function('()=>document.querySelector("#connections-status").textContent.includes("여는 중")')

@@ -41,7 +41,7 @@ def main():
                         viewport={'width':width,'height':960},is_mobile=width<500,has_touch=width<500,reduced_motion='reduce')
                     context.route('https://**/*',lambda route:route.fulfill(status=200,body='Generated external destination'))
                     page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-                    page.goto(base);expect(page.locator('#grid .card')).to_have_count(1)
+                    page.goto(base+'/manga');expect(page.locator('#grid .card')).to_have_count(1)
                     assert page.locator('[data-provider="nhentai"],[data-filter="nhentai"],option[value="nhentai"]').count()==0
                     assert page.locator('a[href*="nhentai.net"]').count()==0
                     label=page.locator('#tag-strip-list [data-tag-label="female:glasses"]')
@@ -125,7 +125,7 @@ def main():
                 # A dictionary failure must leave the library usable with raw tags.
                 context=browser.new_context(http_credentials={'username':'admin','password':'generated-tags'})
                 context.route('**/api/tag-dictionary',lambda route:route.fulfill(status=503,content_type='application/json',body='{"error":"Generated unavailable"}'))
-                page=context.new_page();page.goto(base)
+                page=context.new_page();page.goto(base+'/manga')
                 expect(page.locator('#grid .card')).to_have_count(1)
                 expect(page.locator('#tag-strip-list [data-tag-label="female:glasses"]')).to_contain_text('glasses')
                 context.close()

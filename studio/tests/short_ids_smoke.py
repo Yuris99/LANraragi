@@ -34,7 +34,7 @@ def main():
                 browser=pw.chromium.launch(executable_path=os.environ.get('STUDIO_TEST_CHROMIUM','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'short-ui-synthetic'},viewport={'width':1440,'height':1000})
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-                page.goto(base);page.locator('.card').first.wait_for()
+                page.goto(base+'/manga');page.locator('.card').first.wait_for()
                 assert page.locator('[data-view=unread]').count()==0
                 page.locator('#open-number').click();page.locator('#short-form [name=number]').fill('123');page.locator('#short-form .primary').click()
                 page.wait_for_url('**/manga/123');page.locator('#detail[open]').wait_for();assert 'Hitomi fixture' in page.locator('#detail h2').inner_text()

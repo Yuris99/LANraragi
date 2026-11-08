@@ -69,7 +69,7 @@ window.testReader={
             context=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True,device_scale_factor=1)
             context.route('**/*',lambda route:route.continue_() if route.request.url.startswith('http://127.0.0.1:') else route.abort())
             page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-            page.goto('http://127.0.0.1:'+str(server.server_port))
+            page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
             page.locator('#reader-image').wait_for()
             cdp=context.new_cdp_session(page)
             cdp.send('Emulation.setTouchEmulationEnabled',{'enabled':True,'maxTouchPoints':5})

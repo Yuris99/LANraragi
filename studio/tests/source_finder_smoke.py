@@ -61,7 +61,7 @@ def main():
                 browser=pw.chromium.launch(executable_path=os.environ.get('STUDIO_TEST_CHROMIUM','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'generated-admin'},viewport={'width':1440,'height':1000})
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('#grid .card[data-id="'+a['id']+'"]').click()
                 page.locator('#restore-original-source').click()
                 expect(page.locator('#connected-source-list a[href="https://exhentai.org/g/987654/abcdefghij/"]')).to_be_visible()

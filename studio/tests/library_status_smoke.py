@@ -28,7 +28,7 @@ def main():
                 page = context.new_page()
                 errors = []
                 page.on('pageerror', lambda error: errors.append(str(error)))
-                url = 'http://127.0.0.1:' + str(server.server_port)
+                url = 'http://127.0.0.1:' + str(server.server_port) + '/manga'
                 page.goto(url)
                 page.wait_for_function('()=>document.querySelector("#library-status").textContent.includes("등록된 파일 0권")')
                 for index in range(3):

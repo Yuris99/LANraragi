@@ -24,7 +24,7 @@ def main():
                 browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'synthetic-organization'})
                 page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('#organize-open').click()
                 page.locator('.organize-number').wait_for()
                 assert page.locator('.organize-number').input_value()=='123456'

@@ -43,7 +43,7 @@ def main():
         browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
         context=browser.new_context(http_credentials={'username':'admin','password':env['STUDIO_PASSWORD']})
         page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-        page.goto(base);page.locator('.card').click();page.locator('#read-work').click()
+        page.goto(base+'/manga');page.locator('.card').click();page.locator('#read-work').click()
         page.locator('#reader[open]').wait_for(state='visible')
         page.wait_for_function("() => document.querySelector('#reader-image').complete && document.querySelector('#reader-image').naturalWidth > 0")
         page.locator('#reader-next').click()

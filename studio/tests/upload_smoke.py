@@ -22,7 +22,7 @@ def main():
             context=browser.new_context(http_credentials={'username':'admin','password':env['STUDIO_PASSWORD']})
             page=context.new_page();errors=[]
             page.on('pageerror',lambda error:errors.append(str(error)))
-            page.goto(base)
+            page.goto(base+'/manga')
             page.locator('#upload').click()
             page.locator('#upload-files').set_input_files(str(fixture))
             page.locator('#upload-start').click()

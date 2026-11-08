@@ -43,7 +43,7 @@ def main():
                 page.on('pageerror',lambda error:errors.append(str(error)))
                 page.on('console',lambda message:console.append(message.text) if message.type=='error' else None)
                 page.on('request',lambda request:requests.append(request.url) if '/api/works?' in request.url else None)
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('[data-filter=ehentai]').click()
                 try:expect(page.locator('#grid .card')).to_have_count(2)
                 except AssertionError:

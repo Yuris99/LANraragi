@@ -51,7 +51,7 @@ def main():
                         style=image.evaluate('(el)=>({filter:getComputedStyle(el).filter,fit:getComputedStyle(el).objectFit,transform:getComputedStyle(el).transform})')
                         assert style=={'filter':'blur(10px)' if expected else 'none','fit':'contain','transform':'none'},style
                     assert page.locator('.card canvas').count()==0
-                page.goto(base);loaded();blurred(True)
+                page.goto(base+'/manga');loaded();blurred(True)
                 page.screenshot(path=str(Path(__file__).resolve().parents[2]/'work/thumbnail-blur-preview.png'))
                 page.locator('.card').first.click()
                 assert page.locator('#detail img').evaluate('(el)=>getComputedStyle(el).filter')=='none'
@@ -86,8 +86,8 @@ def main():
                 page.eval_on_selector_all(".card-select,.cover .pages,.favorite-star", "els=>els.forEach(el=>el.style.visibility='')")
                 page.screenshot(path=str(Path(__file__).resolve().parents[2]/'work/thumbnail-contain-preview.png'))
                 page.locator('#privacy-route').click();blurred(True);page.reload();loaded();blurred(True)
-                page.goto(base+'/unsen');loaded();blurred(False);page.goto(base);loaded();blurred(True)
-                old=context.new_page();old.add_init_script('localStorage.setItem("studio-view",JSON.stringify({thumbnailMosaic:false}))');old.goto(base)
+                page.goto(base+'/unsen');loaded();blurred(False);page.goto(base+'/manga');loaded();blurred(True)
+                old=context.new_page();old.add_init_script('localStorage.setItem("studio-view",JSON.stringify({thumbnailMosaic:false}))');old.goto(base+'/manga')
                 old.wait_for_function('()=>document.querySelectorAll(".card img").length===3')
                 assert old.locator('#thumbnail-blur').is_checked() is False
                 assert old.locator('.card img').first.evaluate('(el)=>getComputedStyle(el).filter')=='none'

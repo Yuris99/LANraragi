@@ -88,7 +88,7 @@ ASSETS['bar.css'] = r'''/* Section switch menu, loaded into the menu's shadow ro
   box-shadow:var(--lib-shadow-pop,0 10px 40px rgb(0 0 0 / .5));color:var(--lib-text,#f1f0ee);font-size:14px;line-height:1.4;
   transform-origin:top left;animation:in var(--lib-fast,120ms) var(--lib-ease,ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(-4px) scale(.98)}}
-.head{display:flex;align-items:center;gap:10px;padding:6px 10px 8px;font-weight:650;letter-spacing:-.01em}
+.head.item{color:var(--lib-text,#f1f0ee);font-weight:650;letter-spacing:-.01em;padding-left:6px}
 .mark{display:flex;align-items:flex-end;gap:2px;width:24px;height:24px;padding:5px 5px 4px;border-radius:6px;background:var(--lib-surface,#171615)}
 .mark i{display:block;width:3px;border-radius:1px;background:var(--lib-text,#f1f0ee)}
 .mark i:nth-child(1){height:12px}.mark i:nth-child(2){height:9px;background:var(--lib-accent,#e8b04a)}.mark i:nth-child(3){height:14px}
@@ -122,7 +122,7 @@ ASSETS['shell.js'] = r'''// Library section switch. One script for every section
     window.__libraryShell = true;
 
     const SECTIONS = [
-        { id: 'manga', label: '만화', href: '/', match: p => !/^\/(audio|roulette|cyoa|real|diet)(\/|$)/.test(p),
+        { id: 'manga', label: '만화', href: '/manga', match: p => !/^\/(audio|roulette|cyoa|real|diet)(\/|$)/.test(p),
           icon: '<path d="M4 5.5c2.6-1 5-1 8 1 3-2 5.4-2 8-1v13c-2.6-1-5-1-8 1-3-2-5.4-2-8-1z"/><path d="M12 6.5v13"/>' },
         { id: 'audio', label: '음성', href: '/audio/', match: p => /^\/audio(\/|$)/.test(p),
           icon: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/>' },
@@ -149,7 +149,8 @@ ASSETS['shell.js'] = r'''// Library section switch. One script for every section
     root.innerHTML = `
 <link rel="stylesheet" href="/_library/bar.css">
 <div class="menu" role="menu" aria-label="Library 섹션">
-  <div class="head" aria-hidden="true"><span class="mark"><i></i><i></i><i></i></span>Library</div>
+  <a class="item head" role="menuitem" href="/" title="Library 허브"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Library</span></a>
+  <hr>
   ${SECTIONS.map(s => `<a class="item tab-${s.id}" role="menuitem" href="${s.href}"${s === current ? ' aria-current="page"' : ''}>${svg(s.icon)}<span>${s.label}</span></a>`).join('')}
   <hr>
   <button class="item out" type="button" role="menuitem">${svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>')}<span>로그아웃</span></button>
@@ -312,6 +313,96 @@ ASSETS['login.html'] = r'''<!doctype html>
     <p id="login-error" class="error" role="alert" hidden></p>
     <button id="login-submit" type="submit">로그인</button>
   </form>
+</main>
+</body>
+</html>
+'''
+
+ASSETS['hub.css'] = r'''*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--lib-font);font-size:var(--lib-text-md);line-height:1.55;-webkit-font-smoothing:antialiased;word-break:keep-all}
+.hub{max-width:960px;margin:0 auto;padding:var(--lib-space-6) var(--lib-space-4) var(--lib-space-7)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:var(--lib-space-4);margin-bottom:var(--lib-space-7)}
+.brand{display:flex;gap:12px;align-items:center;font-size:var(--lib-text-lg);font-weight:600;letter-spacing:-.01em}
+.brand small{display:block;font-size:var(--lib-text-xs);font-weight:400;color:var(--lib-faint);letter-spacing:0;margin-top:1px}
+.mark{display:flex;align-items:flex-end;gap:2px;width:32px;height:32px;padding:6px 6px 5px;border-radius:7px;background:var(--lib-raised)}
+.mark i{display:block;width:5px;border-radius:1px;background:var(--lib-text)}
+.mark i:nth-child(1){height:18px}.mark i:nth-child(2){height:14px;background:var(--lib-accent)}.mark i:nth-child(3){height:20px}
+.out{font:inherit;font-size:var(--lib-text-sm);display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--lib-line);border-radius:var(--lib-radius);background:none;color:var(--lib-muted);cursor:pointer;transition:background var(--lib-fast),color var(--lib-fast)}
+.out:hover{background:var(--lib-surface);color:var(--lib-text)}
+h1{margin:0 0 var(--lib-space-4);font-size:var(--lib-text-xl);font-weight:650;letter-spacing:-.02em}
+.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--lib-space-3)}
+.tile{--a:var(--lib-accent);position:relative;display:flex;flex-direction:column;gap:var(--lib-space-5);min-height:148px;height:100%;padding:var(--lib-space-4) var(--lib-space-4) var(--lib-space-4);
+  background:var(--lib-surface);border:1px solid var(--lib-line);border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;
+  transition:background var(--lib-fast) var(--lib-ease),border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
+.tile:hover{background:var(--lib-raised);border-color:color-mix(in srgb,var(--a) 45%,var(--lib-line))}
+.tile:active{transform:scale(.985)}
+.tile:focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
+.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 14%,transparent);color:var(--a)}
+.icon svg{width:22px;height:22px}
+.tile>span:last-child{margin-top:auto}
+.name,.desc{display:block}
+.out svg{width:16px;height:16px}
+.go svg{width:18px;height:18px;display:block}
+.name{font-size:var(--lib-text-lg);font-weight:600;letter-spacing:-.01em}
+.desc{margin-top:2px;font-size:var(--lib-text-sm);color:var(--lib-faint)}
+.go{position:absolute;top:var(--lib-space-4);right:var(--lib-space-4);color:var(--lib-faint);opacity:0;transform:translateX(-4px);transition:opacity var(--lib-fast),transform var(--lib-med) var(--lib-ease)}
+.tile:hover .go,.tile:focus-visible .go{opacity:1;transform:none;color:var(--a)}
+.manga{--a:var(--lib-accent-manga)}.audio{--a:var(--lib-accent-audio)}.roulette{--a:var(--lib-accent-roulette)}.cyoa{--a:var(--lib-accent-cyoa)}.real{--a:var(--lib-accent-real)}
+@media (max-width:520px){.hub{padding-top:var(--lib-space-5)}.top{margin-bottom:var(--lib-space-6)}.grid{grid-template-columns:1fr 1fr}.tile{min-height:128px}}
+@media (hover:none){.go{display:none}}
+'''
+
+ASSETS['hub.js'] = r'''// Library hub at /. Old manga bookmarks (/#/E123, /?q=…) still open the manga section.
+(() => {
+    const legacy = () => {
+        if (!location.hash.startsWith('#/') && !location.search) return false;
+        location.replace('/manga' + location.search + location.hash);
+        return true;
+    };
+    addEventListener('hashchange', legacy);
+    if (legacy()) return;
+    document.querySelector('.out').addEventListener('click', async () => {
+        try { await fetch('/api/session/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) { /* go to login anyway */ }
+        location.assign('/login');
+    });
+})();
+'''
+
+_HUB_SECTIONS = [
+    ('manga', '/manga', '만화', '만화·동인지 서재',
+     '<path d="M4 5.5c2.6-1 5-1 8 1 3-2 5.4-2 8-1v13c-2.6-1-5-1-8 1-3-2-5.4-2-8-1z"/><path d="M12 6.5v13"/>'),
+    ('audio', '/audio/', '음성', '동인 음성',
+     '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6" rx="1.5"/><rect x="16.5" y="14" width="4" height="6" rx="1.5"/>'),
+    ('roulette', '/roulette/', '룰렛', '무작위 뽑기',
+     '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5V12l6 6M12 12l-6 6"/><circle cx="12" cy="12" r="1.6"/>'),
+    ('cyoa', '/cyoa/', 'CYOA', '선택형 이야기',
+     '<circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7.5v9M6 10c0 2 2 2 4 2h6"/>'),
+    ('real', '/real/', '실사', '사진·영상',
+     '<rect x="3.5" y="6.5" width="17" height="12.5" rx="2"/><path d="M8.5 6.5 10 4h4l1.5 2.5"/><circle cx="12" cy="12.7" r="3.3"/>'),
+]
+_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">%s</svg>'
+
+ASSETS['hub.html'] = r'''<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Library</title>
+<link rel="stylesheet" href="/_library/tokens.css"><link rel="stylesheet" href="/_library/hub.css">
+<script src="/_library/hub.js" defer></script></head>
+<body>
+<main class="hub">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Library<small>개인 서재</small></span></div>
+    <button class="out" type="button">''' + _SVG % '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>' + r'''로그아웃</button>
+  </header>
+  <h1>섹션</h1>
+  <ul class="grid">
+''' + ''.join(
+    '    <li><a class="tile %s" href="%s"><span class="icon">%s</span><span class="go">%s</span>'
+    '<span><span class="name">%s</span><span class="desc">%s</span></span></a></li>\n'
+    % (sid, href, _SVG % icon, _SVG % '<path d="M7 17 17 7M9 7h8v8"/>', name, desc)
+    for sid, href, name, desc, icon in _HUB_SECTIONS) + r'''  </ul>
 </main>
 </body>
 </html>

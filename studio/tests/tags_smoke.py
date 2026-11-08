@@ -31,7 +31,7 @@ def main():
                 browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'synthetic-tags-only'})
                 page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('.card').first.wait_for()
                 page.locator('#select-page').check();page.locator('#batch-tags').click()
                 page.locator('#tag-form [name=add]').fill('소장, old')

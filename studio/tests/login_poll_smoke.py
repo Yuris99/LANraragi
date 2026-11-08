@@ -59,7 +59,7 @@ async function api(url, data) {
             page = browser.new_page(viewport={'width':1200, 'height':1000})
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.goto('http://127.0.0.1:' + str(server.server_port))
+            page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
             page.locator('#login-text-tools summary').click()
             text = page.locator('#login-text')
             text.fill('generated-')

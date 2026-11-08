@@ -46,7 +46,7 @@ def main():
                 context=browser.new_context(http_credentials={'username':'admin','password':os.environ['STUDIO_PASSWORD']},accept_downloads=True)
                 page=context.new_page();errors=[]
                 page.on('pageerror',lambda error:errors.append(str(error)))
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('.card').wait_for()
                 page.locator('.card').click()
                 page.locator('#read-work').click()

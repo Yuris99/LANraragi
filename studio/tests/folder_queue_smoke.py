@@ -94,7 +94,7 @@ def main():
         browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
         context=browser.new_context(http_credentials={'username':'admin','password':values['STUDIO_PASSWORD']},viewport={'width':1440,'height':1000})
         page=context.new_page();page.on('pageerror',lambda error:errors.append(str(error)))
-        page.goto(base);page.locator('#folder-open').click();page.wait_for_function('()=>document.querySelector("#folder-worker-status").textContent.includes("아직 연결")')
+        page.goto(base+'/manga');page.locator('#folder-open').click();page.wait_for_function('()=>document.querySelector("#folder-worker-status").textContent.includes("아직 연결")')
         assert page.locator('#folder-start').is_disabled()
         assert tick()['worker']=='ready'
         page.locator('#folder-refresh').click();page.wait_for_function('()=>!document.querySelector("#folder-start").disabled')

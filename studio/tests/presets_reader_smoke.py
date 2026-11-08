@@ -91,7 +91,7 @@ def main():
                     expect(page.locator('html')).not_to_have_class('media-masked')
                     page.reload();expect(page.locator('#grid .card')).to_have_count(3)
                     expect(page.locator('html')).not_to_have_class('media-masked')
-                    page.goto(base);expect(page.locator('#grid .card')).to_have_count(3)
+                    page.goto(base+'/manga');expect(page.locator('#grid .card')).to_have_count(3)
                     expect(page.locator('html')).to_have_class('media-masked')
                     # Audio is a normal navigation link owned by the separate service.
                     context.route(base+'/audio/',lambda route:route.fulfill(content_type='text/html',body='<p>Generated Audio studio</p>'))

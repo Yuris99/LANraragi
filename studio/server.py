@@ -34,7 +34,7 @@ import library_kit
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=43
+STUDIO_UPDATE=44
 
 
 def supports_download(plugins,url):
@@ -560,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             signed=bool(os.environ.get('STUDIO_PASSWORD')) and self.cookie_session()
             return self.respond({'authenticated':signed or self.server.dev})
         if path=='/login':return self.serve_asset('login.html')
+        if path=='/':return self.serve_asset('hub.html')  # Library hub; manga lives at /manga
         if path=='/library-guide':return self.serve_asset('guide.html')  # design reference; signed-in only
         match=re.fullmatch(r'/_library/([a-z0-9-]+\.(?:css|js))',path)
         if match:
@@ -655,7 +656,7 @@ class Handler(BaseHTTPRequestHandler):
                 while block:=response.read(256*1024):self.wfile.write(block)
             return
         if path.startswith('/api/'):return self.respond({'error':'찾을 수 없습니다.'},404)
-        assets={'/':'index.html','/manga':'index.html','/manga/':'index.html','/unsen':'index.html','/unsen/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        assets={'/manga':'index.html','/manga/':'index.html','/unsen':'index.html','/unsen/':'index.html','/app.js':'app.js','/style.css':'style.css'}
         filename=assets.get(path)
         page_path=re.sub(r'^/manga(?=/|$)','',path,flags=re.I)
         if re.fullmatch(r'/(?:library|downloads)|/[EXNL]?[0-9]{1,32}(?:/[0-9]{1,7})?|/works/[0-9a-f]{32}(?:/read/[0-9]{1,7})?',page_path,re.I):filename='index.html'

@@ -43,7 +43,7 @@ def main():
                 browser=pw.chromium.launch(executable_path=os.environ.get('STUDIO_TEST_CHROMIUM','/usr/bin/chromium'),headless=True,args=['--no-sandbox'])
                 context=browser.new_context(http_credentials={'username':'admin','password':'reference-smoke'})
                 page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-                page.goto('http://127.0.0.1:'+str(server.server_port))
+                page.goto('http://127.0.0.1:'+str(server.server_port)+'/manga')
                 page.locator('#download-open').click();form=page.locator('#download-form')
                 expect(form.get_by_role('radio')).to_have_count(2)
                 expect(form.get_by_role('radio',name='ExHentai',exact=True)).to_be_checked()
