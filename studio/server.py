@@ -34,7 +34,7 @@ import library_kit
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
-STUDIO_UPDATE=41
+STUDIO_UPDATE=42
 
 
 def supports_download(plugins,url):
