@@ -1,10 +1,9 @@
 <!doctype html>
-<html lang="ko">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Library Studio · Audio</title><link rel="stylesheet" href="style.css?v=19"><link rel="stylesheet" href="player.css"><script src="tag-labels.js" defer></script><script src="library-core.js?v=19" defer></script><script src="player-core.js" defer></script><script src="player.js" defer></script><script src="app.js?v=19" defer></script><script src="files-playlists.js?v=18" defer></script><script src="catalog-controls.js?v=19" defer></script><link rel="stylesheet" href="files-playlists.css?v=18"></head>
-<body>
+<html lang="ko" data-library-section="audio">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Library · 음성</title><link rel="stylesheet" href="/_library/tokens.css"><link rel="stylesheet" href="/_library/components.css"><link rel="stylesheet" href="style.css?v=20"><link rel="stylesheet" href="player.css?v=20"><script src="tag-labels.js" defer></script><script src="library-core.js?v=19" defer></script><script src="player-core.js" defer></script><script src="player.js" defer></script><script src="app.js?v=19" defer></script><script src="files-playlists.js?v=18" defer></script><script src="catalog-controls.js?v=19" defer></script><link rel="stylesheet" href="files-playlists.css?v=20"><script src="/_library/shell.js" defer></script></head>
+<body class="lib-base">
 <aside class="sidebar">
-  <a class="brand" href="#"><span class="brand-icon" data-icon="music" aria-hidden="true"></span><span>Library <b>Studio</b><small>Audio collection</small></span></a>
-  <nav class="studio-switch" aria-label="라이브러리 종류 전환"><a href="https://library.yuris.io/#/library">동인지</a><a href="./" aria-current="page">오디오</a></nav>
+  <div class="lib-section-title">음성<small>동인 음성</small></div>
   <div class="nav-label">라이브러리</div>
   <nav aria-label="음성 보관함"><button class="nav-item active" data-filter="all"><span data-icon="library" aria-hidden="true"></span>전체 보관함</button><button class="nav-item" data-filter="resume"><span data-icon="clock" aria-hidden="true"></span>이어듣기</button><button id="favorites-nav" class="nav-item" aria-pressed="false"><span data-icon="star" aria-hidden="true"></span>즐겨찾기</button></nav>
   <div class="nav-label">감상 버전</div>
@@ -22,7 +21,7 @@
     <nav id="pagination" class="pagination" aria-label="보관함 페이지" hidden><button id="previous-page" class="quiet">← 이전</button><span id="page-number"></span><button id="next-page" class="quiet">다음 →</button></nav>
   </section>
   <section id="work-view" hidden aria-label="작품 감상"><div class="work-navigation"><button id="back-library" class="quiet"><span data-icon="back" aria-hidden="true"></span>보관함</button><button id="manage-work" class="quiet">작품 관리</button></div><div id="detail"></div></section>
-  <div class="page-footer">Library Studio <span>Audio · 하나의 원작, 여러 감상 버전</span></div>
+  <div class="page-footer">Library · 음성 <span>하나의 원작, 여러 감상 버전</span></div>
 </main>
 <dialog id="manager" aria-labelledby="manager-title"><div class="dialog-heading"><div><h2 id="manager-title">작품 추가</h2></div><button id="close-manager" class="icon-button" aria-label="작품 관리 닫기">×</button></div><div class="manager-tabs"><button class="chip selected" data-panel="new-work">새 작품</button><button class="chip" data-panel="new-edition">버전 추가</button><button class="chip" data-panel="edition-settings">파일·출처 관리</button></div><p id="manager-status" role="status" hidden></p>
   <section id="new-work" class="manager-panel"><p class="muted">먼저 작품을 등록하고, 그 아래에 보유한 음성·영상 버전을 추가합니다.</p><form id="work-form"><label>작품 제목<input name="title" required maxlength="1000" placeholder="작품 제목"></label><label>RJ 코드 (선택)<input name="rj_code" placeholder="RJ01234567" pattern="RJ[0-9]{6,12}" maxlength="14"></label><p class="form-hint">번호나 제목이 같아도 자동으로 합치지 않습니다.</p><button class="primary">등록하고 버전 추가 →</button></form></section>
@@ -43,7 +42,7 @@
   </form>
 </dialog>
 <div id="status" role="status" aria-live="polite" hidden></div>
-<footer id="player-bar" hidden><div><span class="playing-label">현재 트랙</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="reopen-player" class="primary">플레이어 열기</button></footer>
+<footer id="player-bar" hidden><div><span class="playing-label">현재 트랙</span><strong id="playing">재생할 트랙을 선택하세요</strong></div><button id="reopen-player" class="quiet">플레이어 열기</button></footer>
 <section id="cinema" role="dialog" aria-modal="true" aria-label="전체 화면 감상 플레이어" hidden>
   <div class="cinema-header" id="player-header"><button id="close-player" aria-label="플레이어 닫기"><span data-icon="back" aria-hidden="true"></span></button><strong id="player-title">트랙 선택</strong><button id="player-settings-button" aria-label="자막·재생 설정" aria-controls="player-settings" aria-expanded="false"><span data-icon="settings" aria-hidden="true"></span></button><button id="player-queue-button" aria-label="트랙 목록" aria-controls="player-queue" aria-expanded="false"><span data-icon="list" aria-hidden="true"></span></button><button id="fullscreen" aria-label="전체 화면"><span data-icon="fullscreen" aria-hidden="true"></span></button></div>
   <div class="screen"><video id="media" playsinline preload="metadata"></video><div id="caption" aria-live="off"></div><button id="screen-controls" aria-label="재생 조작 버튼 숨기기" aria-controls="player-header player-transport player-controls" aria-expanded="true"></button></div>

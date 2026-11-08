@@ -1,12 +1,12 @@
 [hidden]{display:none!important}
 body.cinema-open{overflow:hidden}
-#cinema{position:fixed;inset:0;z-index:1000;background:#000;color:#fff;width:100%;height:100vh;height:100dvh;color-scheme:dark;overflow:hidden}
-#cinema:fullscreen{width:100vw;height:100vh;background:#000}
+#cinema{position:fixed;inset:var(--lib-bar-h,0px) 0 0 0;z-index:1000;background:#000;color:var(--lib-text-bright,#fff);width:100%;height:calc(100vh - var(--lib-bar-h,0px));height:calc(100dvh - var(--lib-bar-h,0px));color-scheme:dark;overflow:hidden}
+#cinema:fullscreen{inset:0;width:100vw;height:100vh;background:#000}
 .screen{position:absolute;inset:0;background:#000;overflow:hidden}
 .screen video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#caption{position:absolute;z-index:1;top:72%;left:50%;transform:translate(-50%,-50%);width:max-content;max-width:92%;max-height:95%;overflow:hidden;white-space:pre-wrap;text-align:center;line-height:1.45;font-weight:600;font-size:28px;color:#fff;text-shadow:0 2px 3px #000,1px 0 2px #000,-1px 0 2px #000;background:#0006;border-radius:5px;padding:4px 10px;pointer-events:none;overflow-wrap:anywhere}
+#caption{position:absolute;z-index:1;top:72%;left:50%;transform:translate(-50%,-50%);width:max-content;max-width:92%;max-height:95%;overflow:hidden;white-space:pre-wrap;text-align:center;line-height:1.45;font-weight:600;font-size:28px;color:var(--lib-text-bright,#fff);text-shadow:0 2px 3px #000,1px 0 2px #000,-1px 0 2px #000;background:#0006;border-radius:5px;padding:4px 10px;pointer-events:none;overflow-wrap:anywhere}
 #caption:empty{display:none}
-#cinema button{min-height:44px;min-width:44px;touch-action:manipulation;background:#202020b3;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-size:15px}
+#cinema button{min-height:44px;min-width:44px;touch-action:manipulation;background:var(--lib-overlay,#202020b3);color:var(--lib-text-bright,#fff);border:0;border-radius:var(--lib-radius,8px);padding:9px 12px;font-size:15px}
 #cinema button:disabled{opacity:.3}
 #cinema #screen-controls{position:absolute;inset:0;z-index:2;width:100%;height:100%;background:transparent;border:0;border-radius:0;padding:0;cursor:default;filter:none}
 #screen-controls:focus-visible{outline:2px solid var(--accent);outline-offset:-5px}
@@ -15,29 +15,29 @@ body.cinema-open{overflow:hidden}
 #cinema .cinema-header button{border-radius:50%;background:#0004;font-size:22px}
 .transport{position:absolute;z-index:4;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:space-between;gap:16px;width:min(510px,calc(100% - 40px));pointer-events:none}
 #cinema .transport button{pointer-events:auto;background:#0008;border-radius:50%;width:52px;height:52px;padding:0;font-size:20px;text-shadow:0 1px 4px #000}
-#cinema #toggle-play{width:72px;height:72px;font-size:31px;flex-shrink:0;background:#0009}
+#cinema #toggle-play{width:72px;height:72px;font-size:31px;flex-shrink:0;background:var(--lib-text,#0009);color:var(--lib-on-text,#fff);text-shadow:none}
 #cinema #back-ten,#cinema #forward-ten{font-size:16px}
 .cinema-controls{position:absolute;z-index:4;bottom:0;left:0;right:0;max-height:70dvh;overflow:auto;overscroll-behavior:contain;padding:35px max(22px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(22px,env(safe-area-inset-left));background:linear-gradient(transparent,#000a 35px,#000d)}
-#player-status{color:#e0c68c;font-size:12px;margin:0 0 8px;line-height:1.4}
+#player-status{color:var(--lib-accent,#e0c68c);font-size:12px;margin:0 0 8px;line-height:1.4}
 #player-status:empty{display:none}
 .timeline{display:flex;align-items:center;gap:12px;font-size:12px;font-variant-numeric:tabular-nums}
 .timeline input{flex:1;min-width:0;padding:0;margin:0;min-height:40px;accent-color:var(--accent);cursor:pointer}
-.player-panels{margin-top:12px;background:#171717f5;border:1px solid #383838;border-radius:10px;padding:14px 18px;max-height:49dvh;overflow:auto}
+.player-panels{margin-top:12px;background:var(--lib-surface,#171717f5);border:1px solid var(--lib-line,#383838);border-radius:var(--lib-radius-lg,10px);padding:14px 18px;max-height:49dvh;overflow:auto}
 .player-panels details:not([open]){display:none}
 .player-panels summary{cursor:pointer;font-size:13px;min-height:30px;line-height:30px;margin-bottom:12px}
-.player-panels p{font-size:12px;margin:8px 0;color:#bbb}
+.player-panels p{font-size:12px;margin:8px 0;color:var(--lib-muted,#bbb)}
 .player-options{display:grid;grid-template-columns:1.4fr .8fr 1.2fr;gap:12px}
-.player-options label,.settings-grid label{font-size:12px;color:#ccc}
-.player-options select{margin:5px 0 14px;font-size:13px;background:#232323;min-height:44px;border-color:#454545}
+.player-options label,.settings-grid label{font-size:12px;color:var(--lib-muted,#ccc)}
+.player-options select{margin:5px 0 14px;font-size:13px;background:var(--lib-raised,#232323);min-height:44px;border-color:var(--lib-control,#454545)}
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.settings-grid input{margin:5px 0 12px;min-height:36px;accent-color:var(--accent);background:#222;border-color:#454545}
+.settings-grid input{margin:5px 0 12px;min-height:36px;accent-color:var(--accent);background:var(--lib-raised,#222);border-color:var(--lib-control,#454545)}
 .settings-grid .check{display:flex;align-items:center;gap:7px}
 .settings-grid .check input{width:auto;min-height:28px;margin:0}
 .settings-grid output{color:var(--accent);font-size:11px}
-.wake-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#b7cbee}
+.wake-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--lib-muted,#b7cbee)}
 #queue{padding:0;margin:8px 0;list-style:none}
 #queue li{display:flex;gap:6px;margin:8px 0}
-#queue .queue-title{flex:1;min-width:0;text-align:left;overflow-wrap:anywhere;border:1px solid #3b3b3b}
+#queue .queue-title{flex:1;min-width:0;text-align:left;overflow-wrap:anywhere;border:1px solid var(--lib-line,#3b3b3b)}
 #queue .current .queue-title{border-color:var(--accent);color:var(--accent)}
 .cinema-header,.transport,.cinema-controls{opacity:1;visibility:visible;transition:opacity .16s ease,visibility .16s ease}
 #cinema.controls-hidden .cinema-header,#cinema.controls-hidden .transport,#cinema.controls-hidden .cinema-controls{opacity:0;visibility:hidden;pointer-events:none}
