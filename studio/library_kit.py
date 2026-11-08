@@ -39,6 +39,8 @@ ASSETS['tokens.css'] = r'''/* Library design tokens — the single visual base f
   --lib-danger-bg:#2c1a17;
   --lib-success:#8fc79a;
   --lib-success-bg:#16241a;
+  --lib-warning:#ecd77a;
+  --lib-warning-bg:#262212;
   /* Shape */
   --lib-radius:8px;
   --lib-radius-sm:4px;
@@ -327,6 +329,7 @@ select.lib-input{cursor:pointer}
 .lib-badge-accent{background:var(--lib-accent-soft);color:var(--lib-accent)}
 .lib-badge-danger{background:var(--lib-danger-bg);color:var(--lib-danger)}
 .lib-badge-success{background:var(--lib-success-bg);color:var(--lib-success)}
+.lib-badge-warning{background:var(--lib-warning-bg);color:var(--lib-warning)}
 
 /* Media grid and cover card (works, voice editions, galleries, stories) */
 .lib-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--lib-card-width,185px),1fr));gap:28px 20px}
@@ -362,6 +365,7 @@ select.lib-input{cursor:pointer}
 .lib-notice{padding:10px 12px;border-radius:var(--lib-radius);background:var(--lib-raised);color:var(--lib-muted);font-size:var(--lib-text-sm)}
 .lib-notice-danger{background:var(--lib-danger-bg);color:var(--lib-danger)}
 .lib-notice-success{background:var(--lib-success-bg);color:var(--lib-success)}
+.lib-notice-warning{background:var(--lib-warning-bg);color:var(--lib-warning)}
 .lib-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99;width:max-content;max-width:min(560px,calc(100vw - 32px));padding:12px 20px;border:0;border-radius:var(--lib-radius);background:var(--lib-text);color:var(--lib-on-text);box-shadow:0 10px 40px rgb(0 0 0 / .5);font-size:var(--lib-text-md);line-height:1.5;overflow-wrap:anywhere}
 
 /* Empty state */
@@ -420,6 +424,7 @@ ASSETS['guide.html'] = r'''<!doctype html>
     <div class="lib-row"><span class="lib-badge lib-badge-accent">재생 중</span><div class="lib-row-main"><div class="lib-row-title">목록 행 제목</div><div class="lib-row-meta">보조 정보 · 12:40</div></div><span class="lib-rating" aria-label="평점 4">★★★★☆</span></div>
     <div class="lib-row"><span class="lib-badge">대기</span><div class="lib-row-main"><div class="lib-row-title">두 번째 행</div><div class="lib-row-meta">보조 정보</div></div><span class="lib-badge lib-badge-success">완료</span></div>
     <div class="lib-row"><span class="lib-badge">대기</span><div class="lib-row-main"><div class="lib-row-title">오류가 난 행</div><div class="lib-row-meta">보조 정보</div></div><span class="lib-badge lib-badge-danger">실패</span></div>
+    <div class="lib-row"><span class="lib-badge">대기</span><div class="lib-row-main"><div class="lib-row-title">확인이 필요한 행</div><div class="lib-row-meta">보조 정보</div></div><span class="lib-badge lib-badge-warning">검토 필요</span></div>
   </div>
 
   <h2 class="lib-h2 guide-h">패널 · 입력</h2>
@@ -433,6 +438,7 @@ ASSETS['guide.html'] = r'''<!doctype html>
       <div class="lib-progress" aria-label="진행률 60%"><i class="guide-60"></i></div>
       <div class="lib-notice">일반 안내</div>
       <div class="lib-notice lib-notice-success">저장했습니다.</div>
+      <div class="lib-notice lib-notice-warning">번역을 검토해야 합니다.</div>
       <div class="lib-notice lib-notice-danger">연결할 수 없습니다.</div>
       <div><span class="lib-tag">태그</span> <span class="lib-tag">female:example</span> <span class="lib-badge">42</span></div>
       <div class="lib-actions"><button class="lib-btn" id="guide-dialog-open">대화상자 열기</button><button class="lib-btn" id="guide-toast-open">알림 띄우기</button></div>
