@@ -8,6 +8,16 @@ from subtitles import parse_subtitles
 
 
 class VariantCatalogTests(unittest.TestCase):
+    def test_subtitles_multiple_blank_lines_and_compact_arrow(self):
+        raw='1\r\n00:00:00,000-->00:00:01,000\r\nFirst\r\n\r\n\r\n2\r\n00:00:01,050 --> 00:00:03,050\r\nSecond\r\n\r\n \t\r\n3\r\n00:00:04,050--> 00:00:08,050\r\nThird'
+        cues=parse_subtitles(raw)
+        self.assertEqual([c['text'] for c in cues],['First','Second','Third'])
+        self.assertEqual(cues[-1]['end'],8.05)
+
+    def test_subtitles_invalid_timing_still_rejected(self):
+        for raw in ('1\n00:00:01,000-->00:00:00,000\nInvalid','1\n00:60:00,000-->00:60:01,000\nInvalid','1\n00:00:00,00x-->00:00:01,000\nInvalid'):
+            with self.subTest(raw=raw),self.assertRaises(ValueError):parse_subtitles(raw)
+
     setUp = fixtures.CatalogTests.setUp
     source = fixtures.CatalogTests.source
     def test_rj_grouping_never_merges_and_duplicate_rolls_back(self):

@@ -33,18 +33,24 @@ const document={getElementById:get,createElement:()=>new Element(),querySelector
 let now=0,timerId=0;const timers=new Map();
 const setTimer=(fn,delay)=>{timers.set(++timerId,{fn,at:now+delay});return timerId;};
 const tick=async(ms)=>{now+=ms;for(const[id,timer]of [...timers])if(timer.at<=now){timers.delete(id);timer.fn();}await flush();};
-const updates=[];
-const context={window:{PlayerCore:core,isSecureContext:true},document,localStorage:{getItem:()=>null,setItem(){}},navigator:{wakeLock:{request:async()=>{wakeRequests++;return{addEventListener(){},release:async()=>{wakeReleases++;}};}}},
-  fetch:async(url,options)=>{const body=options?.body?JSON.parse(options.body):{};updates.push([url,body]);return{ok:true,json:async()=>({resume:body.seconds||0})};},Event:class{},console,setTimeout:setTimer,clearTimeout:id=>timers.delete(id),queueMicrotask};
+const updates=[],basePath=process.env.AUDIO_TEST_BASE||'';
+const context={location:{pathname:basePath+'/'},window:{PlayerCore:core,isSecureContext:true},document,localStorage:{getItem:()=>null,setItem(){}},navigator:{wakeLock:{request:async()=>{wakeRequests++;return{addEventListener(){},release:async()=>{wakeReleases++;}};}}},
+  fetch:async(url,options)=>{assert.ok(url.startsWith(basePath+'/api/'),'Player requests stay inside the Audio path');const body=options?.body?JSON.parse(options.body):{};updates.push([url,body]);return{ok:true,json:async()=>({resume:body.seconds||0})};},Event:class{},console,setTimeout:setTimer,clearTimeout:id=>timers.delete(id),queueMicrotask};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../web/player.js'),'utf8'),context);
 const flush=async()=>{await new Promise(setImmediate);};
 (async()=>{
   const a={id:'a',edition_id:'e',title:'first',duration:10,resume:0,subtitles:[]};
   const b={id:'b',edition_id:'e',title:'last',duration:10,resume:0,subtitles:[]};
   await context.window.StudioPlayer.open([a,b],a);await flush();
-  assert.equal(stage.hidden,false);
+  assert.equal(stage.hidden,false);assert.equal(media.src,`${basePath}/api/tracks/a/media`);
   assert.equal(fullscreens,0,'Opening a track must not change the user browser/window to fullscreen');
   assert.equal(media.paused,false);
+  media.currentTime=2;const priorUpdates=updates.length;
+  context.window.AudioTrackTitle=track=>track.title_ko?track.title_ko+'\n'+track.title:track.title;
+  context.window.StudioPlayer.updateTitleMetadata([{...a,title_ko:'수정한 제목',title_translation_kind:'manual'}]);
+  assert.equal(get('player-title').textContent,'수정한 제목\nfirst');assert.equal(media.currentTime,2);
+  assert.equal(media.paused,false);assert.equal(updates.length,priorUpdates,'Editing a displayed title never reloads media or saves playback progress');
+  context.window.StudioPlayer.updateTitleMetadata([a]);context.window.AudioTrackTitle=track=>track.title;
   assert.equal(wakeRequests,1);
   get('caption').textContent='caption stays visible';const captionTop=get('caption').style.top;
   await tick(3000);assert.equal(stage.classList.contains('controls-hidden'),true);

@@ -3,7 +3,7 @@ import html
 import re
 
 STAMP = r'(?:\d{1,4}:)?\d{2}:\d{2}[.,]\d{3}'
-TIMING = re.compile(r'^(' + STAMP + r')\s+-->\s+(' + STAMP + r')(?:\s+.*)?$')
+TIMING = re.compile(r'^(' + STAMP + r')\s*-->\s*(' + STAMP + r')(?:\s+.*)?$')
 
 
 def seconds(value):
@@ -20,7 +20,7 @@ def seconds(value):
 def parse_subtitles(raw):
     if len(raw.encode('utf-8')) > 4 * 1024 * 1024:
         raise ValueError('자막은 4 MiB 이하여야 합니다.')
-    blocks = re.split(r'\n[ \t]*\n', raw.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n').strip())
+    blocks = re.split(r'\n(?:[ \t]*\n)+', raw.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n').strip())
     cues = []
     for block in blocks:
         lines = block.split('\n')

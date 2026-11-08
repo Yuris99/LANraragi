@@ -1,10 +1,11 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id), core = window.PlayerCore;
+  const basePath = typeof location !== 'undefined' && location.pathname.startsWith('/audio/') ? '/audio' : '';
   const stage = $('cinema'), media = $('media'), caption = $('caption');
   let tracks = [], current = null, cues = [], wake = null, wakePending = false;
   let generation = 0, progressPending = false, lastSaved = 0, loading = false, switching = false;
-  let resume = 0, returnFocus = null, orderPending = false;
+  let resume = 0, returnFocus = null, orderPending = false, saveOrder = null;
   let controlsTimer = null, controlsVisible = true, seeking = false, keyboardMode = false;
   const chrome = [$('player-header'), $('player-transport'), $('player-controls')];
   const preferences = {size:28, vertical:72, horizontal:50, delay:0, enabled:true, keepAwake:true, speed:1, mode:'all'};
@@ -15,6 +16,10 @@
   preferences.mode = preferences.mode === 'single' ? 'single' : 'all';
 
   const note = message => { $('player-status').textContent = message; if (message) showControls(); };
+  function renderPlayButton(playing) {
+    $('toggle-play').innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${playing ? '<path d="M8 5v14M16 5v14"/>' : '<path d="m8 4 12 8-12 8Z"/>'}</svg>`;
+    $('toggle-play').setAttribute('aria-label', playing ? '일시정지' : '재생');
+  }
   function canHideControls() {
     const focused = document.activeElement;
     return !stage.hidden && !media.paused && !media.ended && !media.error && !loading && !switching && !seeking && !keyboardMode
@@ -41,7 +46,7 @@
     showControls();
   }
   async function request(path, data) {
-    const response = await fetch(path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    const response = await fetch(basePath + path, data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
     const value = await response.json();
     if (!response.ok) throw new Error(value.error || '요청을 처리할 수 없습니다.');
     return value;
@@ -106,7 +111,7 @@
     $('queue').replaceChildren();
     for (const track of tracks) {
       const li = document.createElement('li'); li.className = track.id === current?.id ? 'current' : '';
-      const play = document.createElement('button'); play.textContent = track.title; play.className = 'queue-title';
+      const play = document.createElement('button'); play.textContent = window.AudioTrackTitle?.(track) || track.title; play.className = 'queue-title';
       play.addEventListener('click', () => safe(() => select(track, true))); li.append(play);
       for (const [delta, symbol, name] of [[-1,'↑','위로'],[1,'↓','아래로']]) {
         const button = document.createElement('button'); button.textContent = symbol;
@@ -118,7 +123,8 @@
           orderPending = true; updateQueue();
           const updated = core.move(tracks, track.id, delta);
           try {
-            await request(`/api/editions/${track.edition_id}/order`, {track_ids:updated.map(t => t.id)});
+            if(saveOrder)await saveOrder(updated.map(t => t.id));
+            else await request(`/api/editions/${track.edition_id}/order`, {track_ids:updated.map(t => t.id)});
             tracks = updated; note('트랙 순서를 저장했습니다.');
           } finally { orderPending = false; updateQueue(); navigation(); }
         }));
@@ -131,7 +137,7 @@
     const select = $('subtitle-select'); select.replaceChildren();
     const off = document.createElement('option'); off.value = ''; off.textContent = '자막 없음'; select.append(off);
     for (const subtitle of track.subtitles || []) {
-      const option = document.createElement('option'); option.value = subtitle.id; option.textContent = `${subtitle.label} · ${subtitle.language}`; select.append(option);
+      const option = document.createElement('option'); option.value = subtitle.id; option.textContent = `${subtitle.label} · ${window.LibraryCore?.subtitleLanguageLabel?.(subtitle)||subtitle.language}`; select.append(option);
     }
     const first = track.subtitles?.[0];
     select.value = first?.id || '';
@@ -151,9 +157,9 @@
       loading = true; current = track; cues = []; caption.textContent = ''; lastSaved = 0;
       const token = ++generation;
       resume = restore ? track.resume || 0 : 0;
-      $('player-title').textContent = track.title;
-      $('playing').textContent = track.title;
-      media.src = `/api/tracks/${track.id}/media`; media.load();
+      $('player-title').textContent = window.AudioTrackTitle?.(track) || track.title;
+      $('playing').textContent = window.AudioTrackTitle?.(track) || track.title;
+      media.src = `${basePath}/api/tracks/${track.id}/media`; media.load();
       $('seek').value = '0'; $('seek').disabled = true;
       $('elapsed').textContent = '0:00'; $('total').textContent = '0:00';
       updateQueue(); note('불러오는 중…');
@@ -181,6 +187,7 @@
     $('close-player').focus();
     // Fill the page without changing the user's browser/window mode.
     // Native fullscreen is requested only by the dedicated fullscreen button.
+    saveOrder = typeof options.order === 'function' ? options.order : null;
     tracks = [...list];
     return select(track, !options.fromStart);
   }
@@ -223,8 +230,8 @@
       safe(saveProgress).finally(() => { progressPending = false; });
     }
   });
-  media.addEventListener('play', () => { if (stage.hidden) { media.pause(); return; } $('toggle-play').textContent = 'Ⅱ'; $('toggle-play').setAttribute('aria-label','일시정지'); showControls(); safe(acquireWake); });
-  media.addEventListener('pause', () => { $('toggle-play').textContent = '▶'; $('toggle-play').setAttribute('aria-label','재생'); showControls(); safe(releaseWake); if (!switching && !stage.hidden) safe(saveProgress); });
+  media.addEventListener('play', () => { if (stage.hidden) { media.pause(); return; } renderPlayButton(true); showControls(); safe(acquireWake); });
+  media.addEventListener('pause', () => { renderPlayButton(false); showControls(); safe(releaseWake); if (!switching && !stage.hidden) safe(saveProgress); });
   media.addEventListener('seeked', () => { renderCaptions(); if (!loading && !stage.hidden) safe(saveProgress); });
   media.addEventListener('ended', () => safe(async () => {
     if (stage.hidden) return;
@@ -287,5 +294,10 @@
     }
   });
   settings();
-  window.StudioPlayer = {open, move:core.move};
+  function updateTitleMetadata(updated) {
+    const byId=new Map(updated.map(track=>[track.id,track]));
+    for(const track of tracks){const fresh=byId.get(track.id);if(fresh){track.title_ko=fresh.title_ko;track.title_translation_kind=fresh.title_translation_kind;track.title_translation=fresh.title_translation;}}
+    if(current){$('player-title').textContent=window.AudioTrackTitle?.(current)||current.title;$('playing').textContent=window.AudioTrackTitle?.(current)||current.title;updateQueue();}
+  }
+  window.StudioPlayer = {open, move:core.move, updateTitleMetadata};
 })();

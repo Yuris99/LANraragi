@@ -1,0 +1,2135 @@
+{
+  "schema": 1,
+  "tags": [
+    {
+      "key": "여성 우위",
+      "tag": "女性優位",
+      "ko": "여성 우위",
+      "aliases": [
+        "女性優位"
+      ],
+      "official_id": "536",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "자위 서포트",
+      "tag": "オナサポ",
+      "ko": "자위 서포트",
+      "aliases": [
+        "オナサポ"
+      ],
+      "official_id": "514",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "구속",
+      "tag": "拘束",
+      "ko": "구속",
+      "aliases": [
+        "拘束"
+      ],
+      "official_id": "146",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "언어고문/음어",
+      "tag": "言葉責め",
+      "ko": "언어고문/음어",
+      "aliases": [
+        "言葉責め"
+      ],
+      "official_id": "144",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "힐링",
+      "tag": "癒し",
+      "ko": "힐링",
+      "aliases": [
+        "癒し"
+      ],
+      "official_id": "56",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "음어",
+      "tag": "淫語",
+      "ko": "음어",
+      "aliases": [
+        "淫語"
+      ],
+      "official_id": "68",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "천사/악마",
+      "tag": "天使/悪魔",
+      "ko": "천사/악마",
+      "aliases": [
+        "天使/悪魔"
+      ],
+      "official_id": "237",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "판타지",
+      "tag": "ファンタジー",
+      "ko": "판타지",
+      "aliases": [
+        "ファンタジー"
+      ],
+      "official_id": "16",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "소프트 엣찌",
+      "tag": "ソフトエッチ",
+      "ko": "소프트 엣찌",
+      "aliases": [
+        "ソフトエッチ"
+      ],
+      "official_id": "295",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "손으로",
+      "tag": "手コキ",
+      "ko": "손으로",
+      "aliases": [
+        "手コキ"
+      ],
+      "official_id": "124",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "속삭임",
+      "tag": "ささやき",
+      "ko": "속삭임",
+      "aliases": [
+        "ささやき"
+      ],
+      "official_id": "503",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "애태우기",
+      "tag": "焦らし",
+      "ko": "애태우기",
+      "aliases": [
+        "焦らし"
+      ],
+      "official_id": "152",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "흑발",
+      "tag": "黒髪",
+      "ko": "흑발",
+      "aliases": [
+        "黒髪"
+      ],
+      "official_id": "171",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "연속 절정",
+      "tag": "連続絶頂",
+      "ko": "연속 절정",
+      "aliases": [
+        "連続絶頂"
+      ],
+      "official_id": "70",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "ol",
+      "tag": "OL",
+      "ko": "OL",
+      "aliases": [
+        "OL"
+      ],
+      "official_id": "232",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "오피스/직장",
+      "tag": "オフィス/職場",
+      "ko": "오피스/직장",
+      "aliases": [
+        "オフィス/職場"
+      ],
+      "official_id": "2",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "타락",
+      "tag": "悪堕ち",
+      "ko": "타락",
+      "aliases": [
+        "悪堕ち"
+      ],
+      "official_id": "325",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "질내 사정",
+      "tag": "中出し",
+      "ko": "질내 사정",
+      "aliases": [
+        "中出し"
+      ],
+      "official_id": "128",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "원치않음",
+      "tag": "合意なし",
+      "ko": "원치않음",
+      "aliases": [
+        "合意なし"
+      ],
+      "official_id": "113",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "가슴",
+      "tag": "おっぱい",
+      "ko": "가슴",
+      "aliases": [
+        "おっぱい"
+      ],
+      "official_id": "65",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "역전 없음",
+      "tag": "逆転無し",
+      "ko": "역전 없음",
+      "aliases": [
+        "逆転無し"
+      ],
+      "official_id": "433",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "경찰/형사",
+      "tag": "警察/刑事",
+      "ko": "경찰/형사",
+      "aliases": [
+        "警察/刑事"
+      ],
+      "official_id": "284",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "거유/폭유",
+      "tag": "巨乳/爆乳",
+      "ko": "거유/폭유",
+      "aliases": [
+        "巨乳/爆乳"
+      ],
+      "official_id": "182",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "asmr",
+      "tag": "ASMR",
+      "ko": "ASMR",
+      "aliases": [
+        "ASMR"
+      ],
+      "official_id": "497",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "올 해피",
+      "tag": "オールハッピー",
+      "ko": "올 해피",
+      "aliases": [
+        "オールハッピー"
+      ],
+      "official_id": "58",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "바이노럴/더미헤드폰",
+      "tag": "バイノーラル/ダミヘ",
+      "ko": "바이노럴/더미헤드폰",
+      "aliases": [
+        "バイノーラル/ダミヘ"
+      ],
+      "official_id": "496",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "순애",
+      "tag": "純愛",
+      "ko": "순애",
+      "aliases": [
+        "純愛"
+      ],
+      "official_id": "32",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "러브 코메디",
+      "tag": "ラブコメ",
+      "ko": "러브 코메디",
+      "aliases": [
+        "ラブコメ"
+      ],
+      "official_id": "455",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "러브러브/달콤달콤",
+      "tag": "ラブラブ/あまあま",
+      "ko": "러브러브/달콤달콤",
+      "aliases": [
+        "ラブラブ/あまあま"
+      ],
+      "official_id": "4",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "트랜스/암시보이스",
+      "tag": "トランス/暗示ボイス",
+      "ko": "트랜스/암시보이스",
+      "aliases": [
+        "トランス/暗示ボイス"
+      ],
+      "official_id": "314",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여동생",
+      "tag": "妹",
+      "ko": "여동생",
+      "aliases": [
+        "妹"
+      ],
+      "official_id": "212",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "정신지배",
+      "tag": "精神支配",
+      "ko": "정신지배",
+      "aliases": [
+        "精神支配"
+      ],
+      "official_id": "326",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "남성 수",
+      "tag": "男性受け",
+      "ko": "남성 수",
+      "aliases": [
+        "男性受け"
+      ],
+      "official_id": "156",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "귀핥기",
+      "tag": "耳舐め",
+      "ko": "귀핥기",
+      "aliases": [
+        "耳舐め"
+      ],
+      "official_id": "500",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "옥외",
+      "tag": "屋外",
+      "ko": "옥외",
+      "aliases": [
+        "屋外"
+      ],
+      "official_id": "3",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "트랜스/암시",
+      "tag": "トランス/暗示",
+      "ko": "트랜스/암시",
+      "aliases": [
+        "トランス/暗示"
+      ],
+      "official_id": "157",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "미인계",
+      "tag": "色仕掛け",
+      "ko": "미인계",
+      "aliases": [
+        "色仕掛け"
+      ],
+      "official_id": "448",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "역 하렘",
+      "tag": "逆ハーレム",
+      "ko": "역 하렘",
+      "aliases": [
+        "逆ハーレム"
+      ],
+      "official_id": "420",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "복수 플레이/난교",
+      "tag": "複数プレイ/乱交",
+      "ko": "복수 플레이/난교",
+      "aliases": [
+        "複数プレイ/乱交"
+      ],
+      "official_id": "116",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "명령/억지로",
+      "tag": "命令/無理矢理",
+      "ko": "명령/억지로",
+      "aliases": [
+        "命令/無理矢理"
+      ],
+      "official_id": "114",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "수치/치욕",
+      "tag": "羞恥/恥辱",
+      "ko": "수치/치욕",
+      "aliases": [
+        "羞恥/恥辱"
+      ],
+      "official_id": "149",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "도구/이물질",
+      "tag": "道具/異物",
+      "ko": "도구/이물질",
+      "aliases": [
+        "道具/異物"
+      ],
+      "official_id": "257",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여의사",
+      "tag": "女医",
+      "ko": "여의사",
+      "aliases": [
+        "女医"
+      ],
+      "official_id": "225",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "소녀",
+      "tag": "少女",
+      "ko": "소녀",
+      "aliases": [
+        "少女"
+      ],
+      "official_id": "206",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "쌍둥이",
+      "tag": "双子",
+      "ko": "쌍둥이",
+      "aliases": [
+        "双子"
+      ],
+      "official_id": "223",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "ㄹㄹ",
+      "tag": "つるぺた",
+      "ko": "ㄹㄹ",
+      "aliases": [
+        "つるぺた"
+      ],
+      "official_id": "207",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "자위",
+      "tag": "オナニー",
+      "ko": "자위",
+      "aliases": [
+        "オナニー"
+      ],
+      "official_id": "135",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "가르침",
+      "tag": "しつけ",
+      "ko": "가르침",
+      "aliases": [
+        "しつけ"
+      ],
+      "official_id": "140",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "vtuber",
+      "tag": "VTuber",
+      "ko": "VTuber",
+      "aliases": [
+        "VTuber"
+      ],
+      "official_id": "513",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "주종",
+      "tag": "主従",
+      "ko": "주종",
+      "aliases": [
+        "主従"
+      ],
+      "official_id": "288",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "쾌락함락",
+      "tag": "快楽堕ち",
+      "ko": "쾌락함락",
+      "aliases": [
+        "快楽堕ち"
+      ],
+      "official_id": "526",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "하렘",
+      "tag": "ハーレム",
+      "ko": "하렘",
+      "aliases": [
+        "ハーレム"
+      ],
+      "official_id": "46",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "오호고에",
+      "tag": "オホ声",
+      "ko": "오호고에",
+      "aliases": [
+        "オホ声"
+      ],
+      "official_id": "524",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "아랫것",
+      "tag": "下僕",
+      "ko": "아랫것",
+      "aliases": [
+        "下僕"
+      ],
+      "official_id": "147",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "기모노",
+      "tag": "着物/和服",
+      "ko": "기모노",
+      "aliases": [
+        "着物/和服"
+      ],
+      "official_id": "91",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "통통",
+      "tag": "ムチムチ",
+      "ko": "통통",
+      "aliases": [
+        "ムチムチ"
+      ],
+      "official_id": "179",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "무표정",
+      "tag": "無表情",
+      "ko": "무표정",
+      "aliases": [
+        "無表情"
+      ],
+      "official_id": "198",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여성시점",
+      "tag": "女性視点",
+      "ko": "여성시점",
+      "aliases": [
+        "女性視点"
+      ],
+      "official_id": "60",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "학생",
+      "tag": "学生",
+      "ko": "학생",
+      "aliases": [
+        "学生"
+      ],
+      "official_id": "400",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "동급생/동료",
+      "tag": "同級生/同僚",
+      "ko": "동급생/동료",
+      "aliases": [
+        "同級生/同僚"
+      ],
+      "official_id": "281",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "성전환(ts)",
+      "tag": "性転換(TS)",
+      "ko": "성전환(TS)",
+      "aliases": [
+        "性転換(TS)"
+      ],
+      "official_id": "245",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "백합",
+      "tag": "百合",
+      "ko": "백합",
+      "aliases": [
+        "百合"
+      ],
+      "official_id": "158",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "레즈/여자끼리",
+      "tag": "レズ/女同士",
+      "ko": "레즈/여자끼리",
+      "aliases": [
+        "レズ/女同士"
+      ],
+      "official_id": "118",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "마법 소녀",
+      "tag": "魔法少女",
+      "ko": "마법 소녀",
+      "aliases": [
+        "魔法少女"
+      ],
+      "official_id": "240",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "허~접♡",
+      "tag": "ざぁ～こ♡",
+      "ko": "허~접♡",
+      "aliases": [
+        "ざぁ～こ♡"
+      ],
+      "official_id": "525",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "갈색 피부",
+      "tag": "褐色/日焼け",
+      "ko": "갈색 피부",
+      "aliases": [
+        "褐色/日焼け"
+      ],
+      "official_id": "321",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "퇴폐/배덕/인모럴",
+      "tag": "退廃/背徳/インモラル",
+      "ko": "퇴폐/배덕/인모럴",
+      "aliases": [
+        "退廃/背徳/インモラル"
+      ],
+      "official_id": "6",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "마니악/변태",
+      "tag": "マニアック/変態",
+      "ko": "마니악/변태",
+      "aliases": [
+        "マニアック/変態"
+      ],
+      "official_id": "66",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "sm",
+      "tag": "SM",
+      "ko": "SM",
+      "aliases": [
+        "SM"
+      ],
+      "official_id": "136",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "스팽킹",
+      "tag": "スパンキング",
+      "ko": "스팽킹",
+      "aliases": [
+        "スパンキング"
+      ],
+      "official_id": "464",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "수녀",
+      "tag": "シスター",
+      "ko": "수녀",
+      "aliases": [
+        "シスター"
+      ],
+      "official_id": "96",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "총 공",
+      "tag": "総攻",
+      "ko": "총 공",
+      "aliases": [
+        "総攻"
+      ],
+      "official_id": "42",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "역간",
+      "tag": "逆レ",
+      "ko": "역간",
+      "aliases": [
+        "逆レ"
+      ],
+      "official_id": "115",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "펠라치오",
+      "tag": "フェラチオ",
+      "ko": "펠라치오",
+      "aliases": [
+        "フェラチオ"
+      ],
+      "official_id": "138",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "메이드",
+      "tag": "メイド",
+      "ko": "메이드",
+      "aliases": [
+        "メイド"
+      ],
+      "official_id": "78",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "오컬트",
+      "tag": "オカルト",
+      "ko": "오컬트",
+      "aliases": [
+        "オカルト"
+      ],
+      "official_id": "26",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "귀청소",
+      "tag": "耳かき",
+      "ko": "귀청소",
+      "aliases": [
+        "耳かき"
+      ],
+      "official_id": "442",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "발로",
+      "tag": "足コキ",
+      "ko": "발로",
+      "aliases": [
+        "足コキ"
+      ],
+      "official_id": "125",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "처녀",
+      "tag": "処女",
+      "ko": "처녀",
+      "aliases": [
+        "処女"
+      ],
+      "official_id": "193",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "평평한 가슴",
+      "tag": "ツルペタ",
+      "ko": "평평한 가슴",
+      "aliases": [
+        "ツルペタ"
+      ],
+      "official_id": "187",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "학원",
+      "tag": "学校/学園",
+      "ko": "학원",
+      "aliases": [
+        "学校/学園"
+      ],
+      "official_id": "1",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "네토리",
+      "tag": "寝取り",
+      "ko": "네토리",
+      "aliases": [
+        "寝取り"
+      ],
+      "official_id": "302",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "선배/후배",
+      "tag": "先輩/後輩",
+      "ko": "선배/후배",
+      "aliases": [
+        "先輩/後輩"
+      ],
+      "official_id": "285",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "연인끼리",
+      "tag": "恋人同士",
+      "ko": "연인끼리",
+      "aliases": [
+        "恋人同士"
+      ],
+      "official_id": "14",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "곁 잠",
+      "tag": "添い寝",
+      "ko": "곁 잠",
+      "aliases": [
+        "添い寝"
+      ],
+      "official_id": "636",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "네토라레",
+      "tag": "寝取られ",
+      "ko": "네토라레",
+      "aliases": [
+        "寝取られ"
+      ],
+      "official_id": "48",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "다우너",
+      "tag": "ダウナー",
+      "ko": "다우너",
+      "aliases": [
+        "ダウナー"
+      ],
+      "official_id": "660",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "체액 대량",
+      "tag": "汁/液大量",
+      "ko": "체액 대량",
+      "aliases": [
+        "汁/液大量"
+      ],
+      "official_id": "69",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "페티시즘",
+      "tag": "フェチ",
+      "ko": "페티시즘",
+      "aliases": [
+        "フェチ"
+      ],
+      "official_id": "64",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "장난감",
+      "tag": "おもちゃ",
+      "ko": "장난감",
+      "aliases": [
+        "おもちゃ"
+      ],
+      "official_id": "263",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "음란",
+      "tag": "淫乱",
+      "ko": "음란",
+      "aliases": [
+        "淫乱"
+      ],
+      "official_id": "142",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "유두 자극",
+      "tag": "乳首責め",
+      "ko": "유두 자극",
+      "aliases": [
+        "乳首責め"
+      ],
+      "official_id": "523",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "빈유/미유",
+      "tag": "貧乳/微乳",
+      "ko": "빈유/미유",
+      "aliases": [
+        "貧乳/微乳"
+      ],
+      "official_id": "183",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "아기플레이",
+      "tag": "赤ちゃんプレイ",
+      "ko": "아기플레이",
+      "aliases": [
+        "赤ちゃんプレイ"
+      ],
+      "official_id": "540",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "오네쇼타",
+      "tag": "おねショタ",
+      "ko": "오네쇼타",
+      "aliases": [
+        "おねショタ"
+      ],
+      "official_id": "504",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "시리즈물",
+      "tag": "シリーズもの",
+      "ko": "시리즈물",
+      "aliases": [
+        "シリーズもの"
+      ],
+      "official_id": "296",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여체화",
+      "tag": "女体化",
+      "ko": "여체화",
+      "aliases": [
+        "女体化"
+      ],
+      "official_id": "250",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "후타나리",
+      "tag": "フタナリ",
+      "ko": "후타나리",
+      "aliases": [
+        "フタナリ"
+      ],
+      "official_id": "190",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "무녀",
+      "tag": "巫女",
+      "ko": "무녀",
+      "aliases": [
+        "巫女"
+      ],
+      "official_id": "80",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "촉수",
+      "tag": "触手",
+      "ko": "촉수",
+      "aliases": [
+        "触手"
+      ],
+      "official_id": "162",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "얀데레",
+      "tag": "ヤンデレ",
+      "ko": "얀데레",
+      "aliases": [
+        "ヤンデレ"
+      ],
+      "official_id": "316",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "일상/생활",
+      "tag": "日常/生活",
+      "ko": "일상/생활",
+      "aliases": [
+        "日常/生活"
+      ],
+      "official_id": "8",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "유두/유륜",
+      "tag": "乳首/乳輪",
+      "ko": "유두/유륜",
+      "aliases": [
+        "乳首/乳輪"
+      ],
+      "official_id": "185",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "방뇨/오줌",
+      "tag": "放尿/おしっこ",
+      "ko": "방뇨/오줌",
+      "aliases": [
+        "放尿/おしっこ"
+      ],
+      "official_id": "159",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "사투리",
+      "tag": "方言",
+      "ko": "사투리",
+      "aliases": [
+        "方言"
+      ],
+      "official_id": "196",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "스캇물",
+      "tag": "スカトロ",
+      "ko": "스캇물",
+      "aliases": [
+        "スカトロ"
+      ],
+      "official_id": "161",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "코스프레",
+      "tag": "コスプレ",
+      "ko": "코스프레",
+      "aliases": [
+        "コスプレ"
+      ],
+      "official_id": "86",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "버니걸",
+      "tag": "バニーガール",
+      "ko": "버니걸",
+      "aliases": [
+        "バニーガール"
+      ],
+      "official_id": "99",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "풍속/소프",
+      "tag": "風俗/ソープ",
+      "ko": "풍속/소프",
+      "aliases": [
+        "風俗/ソープ"
+      ],
+      "official_id": "447",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "파이즈리",
+      "tag": "パイズリ",
+      "ko": "파이즈리",
+      "aliases": [
+        "パイズリ"
+      ],
+      "official_id": "122",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "서큐버스/음마",
+      "tag": "サキュバス/淫魔",
+      "ko": "서큐버스/음마",
+      "aliases": [
+        "サキュバス/淫魔"
+      ],
+      "official_id": "506",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "간호사",
+      "tag": "ナース",
+      "ko": "간호사",
+      "aliases": [
+        "ナース"
+      ],
+      "official_id": "79",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "아날",
+      "tag": "アナル",
+      "ko": "아날",
+      "aliases": [
+        "アナル"
+      ],
+      "official_id": "160",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "광기",
+      "tag": "狂気",
+      "ko": "광기",
+      "aliases": [
+        "狂気"
+      ],
+      "official_id": "205",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "담백",
+      "tag": "淡白/あっさり",
+      "ko": "담백",
+      "aliases": [
+        "淡白/あっさり"
+      ],
+      "official_id": "57",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "낭자애",
+      "tag": "男の娘",
+      "ko": "낭자애",
+      "aliases": [
+        "男の娘"
+      ],
+      "official_id": "303",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "sf",
+      "tag": "SF",
+      "ko": "SF",
+      "aliases": [
+        "SF"
+      ],
+      "official_id": "10",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "보이즈 러브",
+      "tag": "ボーイズラブ",
+      "ko": "보이즈 러브",
+      "aliases": [
+        "ボーイズラブ"
+      ],
+      "official_id": "37",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "암컷 타락",
+      "tag": "メス堕ち",
+      "ko": "암컷 타락",
+      "aliases": [
+        "メス堕ち"
+      ],
+      "official_id": "522",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "누나/언니",
+      "tag": "お姉さん",
+      "ko": "누나/언니",
+      "aliases": [
+        "お姉さん"
+      ],
+      "official_id": "220",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "연상",
+      "tag": "年上",
+      "ko": "연상",
+      "aliases": [
+        "年上"
+      ],
+      "official_id": "209",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "본방 없음",
+      "tag": "本番なし",
+      "ko": "본방 없음",
+      "aliases": [
+        "本番なし"
+      ],
+      "official_id": "528",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "이라마치오",
+      "tag": "イラマチオ",
+      "ko": "이라마치오",
+      "aliases": [
+        "イラマチオ"
+      ],
+      "official_id": "487",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "시오후키",
+      "tag": "潮吹き",
+      "ko": "시오후키",
+      "aliases": [
+        "潮吹き"
+      ],
+      "official_id": "501",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "모유",
+      "tag": "母乳",
+      "ko": "모유",
+      "aliases": [
+        "母乳"
+      ],
+      "official_id": "130",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "전투 에로",
+      "tag": "戦闘エロ",
+      "ko": "전투 에로",
+      "aliases": [
+        "戦闘エロ"
+      ],
+      "official_id": "533",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "붓카케",
+      "tag": "ぶっかけ",
+      "ko": "붓카케",
+      "aliases": [
+        "ぶっかけ"
+      ],
+      "official_id": "126",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "유혹하는 수",
+      "tag": "誘い受け",
+      "ko": "유혹하는 수",
+      "aliases": [
+        "誘い受け"
+      ],
+      "official_id": "289",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "제복",
+      "tag": "制服",
+      "ko": "제복",
+      "aliases": [
+        "制服"
+      ],
+      "official_id": "74",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "본디지",
+      "tag": "ボンデージ",
+      "ko": "본디지",
+      "aliases": [
+        "ボンデージ"
+      ],
+      "official_id": "87",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "왕자님/왕자계",
+      "tag": "王子様/王子系",
+      "ko": "왕자님/왕자계",
+      "aliases": [
+        "王子様/王子系"
+      ],
+      "official_id": "427",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "보쿠코",
+      "tag": "ボクっ娘",
+      "ko": "보쿠코",
+      "aliases": [
+        "ボクっ娘"
+      ],
+      "official_id": "197",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "숏컷",
+      "tag": "ショートカット",
+      "ko": "숏컷",
+      "aliases": [
+        "ショートカット"
+      ],
+      "official_id": "166",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "방치 플레이",
+      "tag": "放置プレイ",
+      "ko": "방치 플레이",
+      "aliases": [
+        "放置プレイ"
+      ],
+      "official_id": "117",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "소꿉친구",
+      "tag": "幼なじみ",
+      "ko": "소꿉친구",
+      "aliases": [
+        "幼なじみ"
+      ],
+      "official_id": "222",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "장신",
+      "tag": "長身",
+      "ko": "장신",
+      "aliases": [
+        "長身"
+      ],
+      "official_id": "177",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "동거",
+      "tag": "同棲",
+      "ko": "동거",
+      "aliases": [
+        "同棲"
+      ],
+      "official_id": "438",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "첫체험",
+      "tag": "初体験",
+      "ko": "첫체험",
+      "aliases": [
+        "初体験"
+      ],
+      "official_id": "437",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "역 ntr",
+      "tag": "逆NTR",
+      "ko": "역 NTR",
+      "aliases": [
+        "逆NTR"
+      ],
+      "official_id": "530",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "마법사/마녀",
+      "tag": "魔法使い/魔女",
+      "ko": "마법사/마녀",
+      "aliases": [
+        "魔法使い/魔女"
+      ],
+      "official_id": "241",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "야외 플레이",
+      "tag": "青姦",
+      "ko": "야외 플레이",
+      "aliases": [
+        "青姦"
+      ],
+      "official_id": "145",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "몰래 터치",
+      "tag": "秘密さわさわ",
+      "ko": "몰래 터치",
+      "aliases": [
+        "秘密さわさわ"
+      ],
+      "official_id": "139",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "빗치",
+      "tag": "ビッチ",
+      "ko": "빗치",
+      "aliases": [
+        "ビッチ"
+      ],
+      "official_id": "416",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "논픽션/체험담",
+      "tag": "ノンフィクション/体験談",
+      "ko": "논픽션/체험담",
+      "aliases": [
+        "ノンフィクション/体験談"
+      ],
+      "official_id": "441",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "푸근함",
+      "tag": "ほのぼの",
+      "ko": "푸근함",
+      "aliases": [
+        "ほのぼの"
+      ],
+      "official_id": "13",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "가두기",
+      "tag": "閉じ込め",
+      "ko": "가두기",
+      "aliases": [
+        "閉じ込め"
+      ],
+      "official_id": "151",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "츤데레",
+      "tag": "ツンデレ",
+      "ko": "츤데레",
+      "aliases": [
+        "ツンデレ"
+      ],
+      "official_id": "59",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "역 애널",
+      "tag": "逆アナル",
+      "ko": "역 애널",
+      "aliases": [
+        "逆アナル"
+      ],
+      "official_id": "532",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "굴욕",
+      "tag": "屈辱",
+      "ko": "굴욕",
+      "aliases": [
+        "屈辱"
+      ],
+      "official_id": "134",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "엘프/요정",
+      "tag": "エルフ/妖精",
+      "ko": "엘프/요정",
+      "aliases": [
+        "エルフ/妖精"
+      ],
+      "official_id": "235",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "자매",
+      "tag": "姉妹",
+      "ko": "자매",
+      "aliases": [
+        "姉妹"
+      ],
+      "official_id": "268",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "아가씨",
+      "tag": "お嬢様",
+      "ko": "아가씨",
+      "aliases": [
+        "お嬢様"
+      ],
+      "official_id": "242",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "로션",
+      "tag": "ローション",
+      "ko": "로션",
+      "aliases": [
+        "ローション"
+      ],
+      "official_id": "266",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "롱헤어",
+      "tag": "ロングヘア",
+      "ko": "롱헤어",
+      "aliases": [
+        "ロングヘア"
+      ],
+      "official_id": "167",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여왕님/공주님",
+      "tag": "女王様/お姫様",
+      "ko": "여왕님/공주님",
+      "aliases": [
+        "女王様/お姫様"
+      ],
+      "official_id": "234",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "동물/펫",
+      "tag": "動物/ペット",
+      "ko": "동물/펫",
+      "aliases": [
+        "動物/ペット"
+      ],
+      "official_id": "454",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "갸루",
+      "tag": "ギャル",
+      "ko": "갸루",
+      "aliases": [
+        "ギャル"
+      ],
+      "official_id": "415",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "다리",
+      "tag": "脚",
+      "ko": "다리",
+      "aliases": [
+        "脚"
+      ],
+      "official_id": "62",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "임신",
+      "tag": "妊娠/孕ませ",
+      "ko": "임신",
+      "aliases": [
+        "妊娠/孕ませ"
+      ],
+      "official_id": "129",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "이종・짝짓기",
+      "tag": "異種えっち",
+      "ko": "이종・짝짓기",
+      "aliases": [
+        "異種えっち"
+      ],
+      "official_id": "324",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "기혼자",
+      "tag": "既婚者",
+      "ko": "기혼자",
+      "aliases": [
+        "既婚者"
+      ],
+      "official_id": "221",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "유부녀",
+      "tag": "人妻",
+      "ko": "유부녀",
+      "aliases": [
+        "人妻"
+      ],
+      "official_id": "219",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "바람",
+      "tag": "浮気",
+      "ko": "바람",
+      "aliases": [
+        "浮気"
+      ],
+      "official_id": "440",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "목줄/구속구",
+      "tag": "首輪/鎖/拘束具",
+      "ko": "목줄/구속구",
+      "aliases": [
+        "首輪/鎖/拘束具"
+      ],
+      "official_id": "256",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "매춘/원교",
+      "tag": "売春/援交",
+      "ko": "매춘/원교",
+      "aliases": [
+        "売春/援交"
+      ],
+      "official_id": "446",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "전사",
+      "tag": "戦士",
+      "ko": "전사",
+      "aliases": [
+        "戦士"
+      ],
+      "official_id": "233",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "스쿨 수영복",
+      "tag": "スクール水着",
+      "ko": "스쿨 수영복",
+      "aliases": [
+        "スクール水着"
+      ],
+      "official_id": "104",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "엽기",
+      "tag": "猟奇",
+      "ko": "엽기",
+      "aliases": [
+        "猟奇"
+      ],
+      "official_id": "199",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "료나",
+      "tag": "リョナ",
+      "ko": "료나",
+      "aliases": [
+        "リョナ"
+      ],
+      "official_id": "313",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "정장",
+      "tag": "スーツ",
+      "ko": "정장",
+      "aliases": [
+        "スーツ"
+      ],
+      "official_id": "105",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "모에",
+      "tag": "萌え",
+      "ko": "모에",
+      "aliases": [
+        "萌え"
+      ],
+      "official_id": "51",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "下克上",
+      "tag": "下克上",
+      "ko": "",
+      "aliases": [
+        "下克上"
+      ],
+      "official_id": "270",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "통째 삼키기",
+      "tag": "丸呑み",
+      "ko": "통째 삼키기",
+      "aliases": [
+        "丸呑み"
+      ],
+      "official_id": "300",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "화간",
+      "tag": "和姦",
+      "ko": "화간",
+      "aliases": [
+        "和姦"
+      ],
+      "official_id": "123",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "음모 없음",
+      "tag": "パイパン",
+      "ko": "음모 없음",
+      "aliases": [
+        "パイパン"
+      ],
+      "official_id": "188",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "구내 사정",
+      "tag": "口内射精",
+      "ko": "구내 사정",
+      "aliases": [
+        "口内射精"
+      ],
+      "official_id": "488",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "정액 삼킴",
+      "tag": "ごっくん/食ザー",
+      "ko": "정액 삼킴",
+      "aliases": [
+        "ごっくん/食ザー"
+      ],
+      "official_id": "489",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "로봇/안드로이드",
+      "tag": "ロボット/アンドロイド",
+      "ko": "로봇/안드로이드",
+      "aliases": [
+        "ロボット/アンドロイド"
+      ],
+      "official_id": "254",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "세일러복",
+      "tag": "セーラー服",
+      "ko": "세일러복",
+      "aliases": [
+        "セーラー服"
+      ],
+      "official_id": "75",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "약물",
+      "tag": "薬物",
+      "ko": "약물",
+      "aliases": [
+        "薬物"
+      ],
+      "official_id": "265",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "변신 히로인",
+      "tag": "変身ヒロイン",
+      "ko": "변신 히로인",
+      "aliases": [
+        "変身ヒロイン"
+      ],
+      "official_id": "269",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "여교사",
+      "tag": "女教師",
+      "ko": "여교사",
+      "aliases": [
+        "女教師"
+      ],
+      "official_id": "226",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "속옷",
+      "tag": "下着",
+      "ko": "속옷",
+      "aliases": [
+        "下着"
+      ],
+      "official_id": "82",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "요괴",
+      "tag": "妖怪",
+      "ko": "요괴",
+      "aliases": [
+        "妖怪"
+      ],
+      "official_id": "243",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "빙의",
+      "tag": "憑依",
+      "ko": "빙의",
+      "aliases": [
+        "憑依"
+      ],
+      "official_id": "443",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "호러",
+      "tag": "ホラー",
+      "ko": "호러",
+      "aliases": [
+        "ホラー"
+      ],
+      "official_id": "19",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "인외/몬스터 소녀",
+      "tag": "人外娘/モンスター娘",
+      "ko": "인외/몬스터 소녀",
+      "aliases": [
+        "人外娘/モンスター娘"
+      ],
+      "official_id": "317",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "남자 임신/출산",
+      "tag": "男子妊娠/出産",
+      "ko": "남자 임신/출산",
+      "aliases": [
+        "男子妊娠/出産"
+      ],
+      "official_id": "426",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "포경",
+      "tag": "包茎",
+      "ko": "포경",
+      "aliases": [
+        "包茎"
+      ],
+      "official_id": "322",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "애니메이션",
+      "tag": "アニメ",
+      "ko": "애니메이션",
+      "aliases": [
+        "アニメ"
+      ],
+      "official_id": "73",
+      "basis": "official_product_api"
+    },
+    {
+      "key": "拷問",
+      "tag": "拷問",
+      "ko": "",
+      "aliases": [
+        "拷問"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "亀頭責め",
+      "tag": "亀頭責め",
+      "ko": "",
+      "aliases": [
+        "亀頭責め"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "조교",
+      "tag": "調教",
+      "ko": "조교",
+      "aliases": [
+        "調教"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "노예",
+      "tag": "奴隷",
+      "ko": "노예",
+      "aliases": [
+        "奴隷"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "역 레이프",
+      "tag": "逆レイプ",
+      "ko": "역 레이프",
+      "aliases": [
+        "逆レイプ"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "최면",
+      "tag": "催眠",
+      "ko": "최면",
+      "aliases": [
+        "催眠"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "최면음성",
+      "tag": "催眠音声",
+      "ko": "최면음성",
+      "aliases": [
+        "催眠音声"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "세뇌",
+      "tag": "洗脳",
+      "ko": "세뇌",
+      "aliases": [
+        "洗脳"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "ai",
+      "tag": "AI",
+      "ko": "",
+      "aliases": [
+        "AI"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "강제",
+      "tag": "強制/無理矢理",
+      "ko": "강제",
+      "aliases": [
+        "強制/無理矢理"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "ママ",
+      "tag": "ママ",
+      "ko": "",
+      "aliases": [
+        "ママ"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "bl/男同性恋",
+      "tag": "BL/男同性恋",
+      "ko": "",
+      "aliases": [
+        "BL/男同性恋"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "魔法",
+      "tag": "魔法",
+      "ko": "",
+      "aliases": [
+        "魔法"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "이종간",
+      "tag": "異種姦",
+      "ko": "이종간",
+      "aliases": [
+        "異種姦"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "감금",
+      "tag": "監禁",
+      "ko": "감금",
+      "aliases": [
+        "監禁"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "寝取らせ",
+      "tag": "寝取らせ",
+      "ko": "",
+      "aliases": [
+        "寝取らせ"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "近親相姦",
+      "tag": "近親相姦",
+      "ko": "",
+      "aliases": [
+        "近親相姦"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "母親",
+      "tag": "母親",
+      "ko": "",
+      "aliases": [
+        "母親"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "娘",
+      "tag": "娘",
+      "ko": "",
+      "aliases": [
+        "娘"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "クンニ",
+      "tag": "クンニ",
+      "ko": "",
+      "aliases": [
+        "クンニ"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "おむつ",
+      "tag": "おむつ",
+      "ko": "",
+      "aliases": [
+        "おむつ"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "喘ぎ真似",
+      "tag": "喘ぎ真似",
+      "ko": "",
+      "aliases": [
+        "喘ぎ真似"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    },
+    {
+      "key": "ストッキング",
+      "tag": "ストッキング",
+      "ko": "",
+      "aliases": [
+        "ストッキング"
+      ],
+      "official_id": "",
+      "basis": "preserved_dlsite_source_or_verified_label"
+    }
+  ]
+}

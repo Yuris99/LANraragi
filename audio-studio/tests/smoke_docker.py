@@ -63,7 +63,8 @@ def main():
         assert metadata['Labels']['com.docker.compose.project'] == PROJECT
 
     health = api('/api/health')
-    assert health['status'] == 'ok' and not health['upstream_access']
+    assert health['status'] == 'ok' and health['upstream_access']
+    assert health['upstream_scope'] == 'public_dlsite_rplay_artwork_tags_and_titles_only'
     video_b64 = ''
     ffmpeg = shutil.which('ffmpeg')
     results = ROOT / 'test-results'

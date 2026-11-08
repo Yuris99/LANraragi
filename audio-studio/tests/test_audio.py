@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import hashlib
+import http.client
 import json
 import os
 import sqlite3
@@ -244,20 +245,71 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request('/api/health', headers={'Authorization': auth})[0], 200)
 
     def test_assets_and_unavailable_upstream_routes(self):
-        for path in ('/', '/app.js', '/style.css'):
+        for path in ('/', '/app.js', '/style.css', '/tag-labels.js'):
             code, headers, _ = self.request(path)
             self.assertEqual(code, 200)
             self.assertIn("default-src 'self'", headers['Content-Security-Policy'])
-            if path == '/app.js':
+            if path in ('/app.js', '/tag-labels.js'):
                 self.assertTrue(headers['Content-Type'].startswith('text/javascript'))
-        self.assertFalse(json.loads(self.request('/api/health')[2])['upstream_access'])
+        health = json.loads(self.request('/api/health')[2])
+        self.assertTrue(health['upstream_access'])
+        self.assertEqual(health['upstream_scope'], 'public_dlsite_rplay_artwork_tags_and_titles_only')
         for path in ('/api/sync', '/api/jobs', '/api/media/anything'):
             self.assertEqual(self.request(path)[0], 404)
+
+    def test_audio_subpath_preserves_assets_media_and_write_security(self):
+        track = self.track()
+        self.server.password = 'subpath-test-only'
+        self.server.allowed_hosts = frozenset({'library.yuris.io'})
+        headers = {'Host': 'library.yuris.io'}
+        self.assertEqual(self.request('/audio/api/health', headers=headers)[0], 401)
+        headers['Authorization'] = 'Basic ' + base64.b64encode(b'admin:subpath-test-only').decode()
+        for path in ('/', '/api/health', '/app.js', '/player.js', '/tag-labels.js'):
+            code, response_headers, raw = self.request('/audio' + path, headers=headers)
+            self.assertEqual(code, 200, raw)
+            if path.endswith('.js'):
+                self.assertTrue(response_headers['Content-Type'].startswith('text/javascript'))
+        code, response_headers, raw = self.request('/audio/api/tracks/' + track['id'] + '/media',
+                                                   headers={**headers, 'Range': 'bytes=0-7'})
+        self.assertEqual(code, 206)
+        self.assertEqual(raw, self.raw[:8])
+        self.assertEqual(response_headers['Content-Range'], f'bytes 0-7/{len(self.raw)}')
+        progress = '/audio/api/tracks/' + track['id'] + '/progress'
+        self.assertEqual(self.request(progress, {'seconds': 0.5},
+                                     headers={**headers, 'Origin': 'https://library.yuris.io'})[0], 200)
+        self.assertEqual(self.request(progress, {'seconds': 0.7},
+                                     headers={**headers, 'Origin': 'https://evil.test'})[0], 403)
+        self.assertEqual(self.request('/audio/api/health',
+                                     headers={**headers, 'Host': 'evil.test'})[0], 403)
+        self.assertEqual(self.store.track(track['id'])['resume'], 0.5)
+        self.assertEqual(self.request('/audiobook/api/health', headers=headers)[0], 404)
+
+    def test_malformed_request_target_keeps_json_error_handling(self):
+        connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=3)
+        self.addCleanup(connection.close)
+        connection.putrequest('GET', 'http://[invalid', skip_host=True)
+        connection.putheader('Host', '127.0.0.1')
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertIn('error', json.loads(response.read()))
 
     def test_refuses_port_already_owned_by_another_server(self):
         with self.assertRaises(OSError):
             make_server(self.store, self.media, port=self.server.server_port)
         self.assertEqual(self.request('/api/health')[0], 200)
+
+    def test_explicit_nas_host_requires_password_and_authentication(self):
+        self.server.allowed_hosts = frozenset({'192.168.219.122'})
+        nas = {'Host': '192.168.219.122:43136'}
+        self.assertEqual(self.request('/api/health', headers=nas)[0], 403)
+        self.server.password = 'nas-test-only'
+        self.assertEqual(self.request('/api/health', headers=nas)[0], 401)
+        auth = 'Basic ' + base64.b64encode(b'admin:nas-test-only').decode()
+        self.assertEqual(self.request('/api/health', headers={**nas, 'Authorization': auth})[0], 200)
+        self.assertEqual(self.request('/api/health', headers={'Host': 'evil.test', 'Authorization': auth})[0], 403)
+        self.assertEqual(self.request('/api/works', {'title': 'bad'},
+                                     headers={**nas, 'Authorization': auth, 'Origin': 'https://evil.test'})[0], 403)
 
     def test_container_bind_preserves_auth_and_host_checks(self):
         with self.assertRaises(ValueError):
