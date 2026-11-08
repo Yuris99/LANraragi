@@ -27,6 +27,65 @@ ERRORS={'file_changed':'파일이 변경되어 삭제를 중단했습니다. 다
         'storage_error':'저장소 접근에 실패했습니다. 파일 삭제 상태를 확인하세요.'}
 
 
+class CpuThrottle:
+    """Pace verification around half a CPU; cpuset remains the kernel ceiling."""
+    def __init__(self):
+        self.cpu=time.process_time();self.wall=time.monotonic()
+
+    def pause(self):
+        delay=2*(time.process_time()-self.cpu)-(time.monotonic()-self.wall)
+        if delay>0:time.sleep(delay)
+        self.cpu=time.process_time();self.wall=time.monotonic()
+
+
+class WorkerIdentity:
+    """Permanently non-root, with DAC only for files and no DAC during SQLite."""
+    def __init__(self,uid,gid):
+        import ctypes
+        import resource
+        if os.name!='posix' or os.getuid()!=0 or uid<=0 or gid<=0:raise ValueError('nonroot_worker_bootstrap_required')
+        self.uid=uid;self.gid=gid;self.ctypes=ctypes
+        class Header(ctypes.Structure):_fields_=[('version',ctypes.c_uint32),('pid',ctypes.c_int)]
+        class Caps(ctypes.Structure):_fields_=[('effective',ctypes.c_uint32),('permitted',ctypes.c_uint32),('inheritable',ctypes.c_uint32)]
+        self.Header=Header;self.Caps=Caps;self.libc=ctypes.CDLL(None,use_errno=True)
+        resource.setrlimit(resource.RLIMIT_NPROC,(32,32))
+        resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+        resource.setrlimit(resource.RLIMIT_NICE,(0,0))
+        os.nice(19)
+        if self.libc.prctl(38,1,0,0,0) or self.libc.prctl(8,1,0,0,0):raise OSError('worker_privilege_setup_failed')
+        os.setgroups([]);os.setresgid(gid,gid,gid);os.setresuid(uid,uid,uid)
+        self.set_effective(2)
+        if self.libc.prctl(8,0,0,0,0):raise OSError('worker_privilege_setup_failed')
+        if os.getresuid()!=(uid,uid,uid) or os.getresgid()!=(gid,gid,gid):raise ValueError('worker_identity_mismatch')
+        try:os.setuid(0)
+        except PermissionError:pass
+        else:raise ValueError('worker_root_recovery_not_blocked')
+        self.snapshot()
+
+    def set_effective(self,value):
+        caps=(self.Caps*2)();caps[0].effective=value;caps[0].permitted=2
+        if self.libc.capset(self.ctypes.byref(self.Header(0x20080522,0)),self.ctypes.byref(caps)):
+            raise OSError(self.ctypes.get_errno(),'worker_capability_transition_failed')
+
+    @contextlib.contextmanager
+    def database_mode(self):
+        self.set_effective(0)
+        try:yield
+        finally:self.set_effective(2)
+
+    def snapshot(self):
+        import resource
+        caps=(self.Caps*2)()
+        if self.libc.capget(self.ctypes.byref(self.Header(0x20080522,0)),self.ctypes.byref(caps)):raise OSError('worker_capability_read_failed')
+        if caps[0].permitted!=2 or caps[0].effective!=2 or caps[0].inheritable or caps[1].permitted or caps[1].effective or caps[1].inheritable:raise ValueError('worker_capability_mismatch')
+        if resource.getrlimit(resource.RLIMIT_NPROC)!=(32,32) or os.getpriority(os.PRIO_PROCESS,0)!=19:raise ValueError('worker_limit_mismatch')
+        if os.getresuid()!=(self.uid,)*3 or os.getresgid()!=(self.gid,)*3:raise ValueError('worker_identity_mismatch')
+        if self.libc.prctl(39,0,0,0,0)!=1 or os.getgroups():raise ValueError('worker_privilege_mismatch')
+        if sorted(os.sched_getaffinity(0))!=[0]:raise ValueError('worker_cpu_affinity_mismatch')
+        return {'mode':'nonroot-rlimit-v2','uid':self.uid,'gid':self.gid,'permitted_caps':2,'file_effective_caps':2,
+                'nproc':list(resource.getrlimit(resource.RLIMIT_NPROC)),'nice':19,'no_new_privileges':True,'cpu_affinity':[0],'hash_cpu_target':0.5}
+
+
 def blocked(db,arcid):
     return db.execute("SELECT 1 FROM file_deletions WHERE lrr_id=? AND state IN ('queued','deleting','complete')",(arcid,)).fetchone() is not None
 
@@ -112,9 +171,10 @@ def stamp(info):return [info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,in
 
 
 class DeletionWorker:
-    def __init__(self,database,originals,uploads,uid=None,gid=None):
+    def __init__(self,database,originals,uploads,uid=None,gid=None,identity=None):
         self.database=Path(database);self.roots={'originals':Path(originals),'uploads':Path(uploads)}
         self.code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        self.identity=identity;self.throttle=CpuThrottle()
         self.uid=os.geteuid() if uid is None else uid;self.gid=os.getegid() if gid is None else gid
         for root in self.roots.values():
             if root==Path('/') or root.is_symlink():raise ValueError('storage_error')
@@ -128,6 +188,7 @@ class DeletionWorker:
         old_uid,old_gid=os.geteuid(),os.getegid();db=None
         try:
             if old_uid==0:os.setegid(self.gid);os.seteuid(self.uid)
+            if self.identity:self.identity.set_effective(0)
             info=self.database.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_uid!=self.uid:raise ValueError('storage_error')
             db=sqlite3.connect(self.database,timeout=15);db.row_factory=sqlite3.Row
@@ -135,6 +196,7 @@ class DeletionWorker:
             with db:yield db
         finally:
             if db:db.close()
+            if self.identity:self.identity.set_effective(2)
             if old_uid==0:os.seteuid(old_uid);os.setegid(old_gid)
 
     def check_work(self,db,row):
@@ -148,8 +210,12 @@ class DeletionWorker:
         with os.fdopen(fd,'rb') as stream:
             info=os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size!=row['bytes'] or not 0<info.st_size<=MAX_BYTES:raise ValueError('file_changed')
-            digest=hashlib.file_digest(stream,'sha256').hexdigest()
-            if digest!=row['sha256'] or stamp(info)!=stamp(os.fstat(stream.fileno())):raise ValueError('file_changed')
+            digest=hashlib.sha256();received=0
+            while block:=stream.read(256*1024):
+                received+=len(block)
+                if received>row['bytes']:raise ValueError('file_changed')
+                digest.update(block);self.throttle.pause()
+            if received!=row['bytes'] or digest.hexdigest()!=row['sha256'] or stamp(info)!=stamp(os.fstat(stream.fileno())):raise ValueError('file_changed')
             return stamp(info)
 
     def find(self,row):
@@ -162,6 +228,7 @@ class DeletionWorker:
             names['uploads']=upload['stored_name']
         for label,root in self.roots.items():
             for current,dirs,files,parent in os.fwalk(root,follow_symlinks=False):
+                self.throttle.pause()
                 visited+=1
                 if visited>20000 or len(Path(current).relative_to(root).parts)>16:raise ValueError('storage_error')
                 relative=Path(current).relative_to(root)
@@ -192,9 +259,11 @@ class DeletionWorker:
 
     def tick(self):
         self.unlinked=False
+        runtime=self.identity.snapshot() if self.identity else None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             value={'seen':time.time(),'code_sha256':self.code_sha256}
+            if runtime:value['runtime']=runtime
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('file-deletion-worker',?)",(json.dumps(value),))
             row=db.execute("SELECT * FROM file_deletions WHERE state IN ('queued','deleting') ORDER BY created LIMIT 1").fetchone()
             if not row:return False
@@ -217,13 +286,54 @@ class DeletionWorker:
         return True
 
 
+def probe_limits(uid,gid):
+    """Disposable kernel test; called without any media or catalog mounts."""
+    import errno
+    import tempfile
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+        root=Path(temporary);root.chmod(0o711)
+        source=root/'generated-root-only';source.write_bytes(b'Generated deletion worker fixture');source.chmod(0)
+        dbdir=root/'database';dbdir.mkdir(mode=0o777);dbdir.chmod(0o777)
+        identity=WorkerIdentity(uid,gid)
+        assert source.read_bytes()==b'Generated deletion worker fixture'
+        with identity.database_mode():
+            try:source.read_bytes()
+            except PermissionError:pass
+            else:raise ValueError('database_capability_not_dropped')
+            with sqlite3.connect(dbdir/'generated.db') as db:db.execute('CREATE TABLE fixture(value)')
+            if (dbdir/'generated.db').stat().st_uid!=uid:raise ValueError('database_owner_mismatch')
+        children=[];limited=False;readfd,writefd=os.pipe()
+        try:
+            for _ in range(40):
+                try:child=os.fork()
+                except OSError as error:
+                    if error.errno!=errno.EAGAIN:raise
+                    limited=True;break
+                if child==0:
+                    os.close(writefd);os.read(readfd,1);os._exit(0)
+                children.append(child)
+        finally:
+            os.close(writefd);os.close(readfd)
+            for child in children:os.waitpid(child,0)
+        if not limited or len(children)>31:raise ValueError('nproc_kernel_limit_not_observed')
+        result={**identity.snapshot(),'kernel_nproc_block_observed':True,'children_started':len(children),
+                'database_owner_preserved':True,'database_dac_disabled':True,'root_recovery_blocked':True}
+        print(json.dumps(result),flush=True)
+
+
 def main():
     import fcntl
-    parser=argparse.ArgumentParser();parser.add_argument('--database',required=True);parser.add_argument('--originals',required=True);parser.add_argument('--uploads',required=True)
+    parser=argparse.ArgumentParser();parser.add_argument('--database');parser.add_argument('--originals');parser.add_argument('--uploads')
     parser.add_argument('--writer-uid',type=int,required=True);parser.add_argument('--writer-gid',type=int,required=True);parser.add_argument('--once',action='store_true')
+    parser.add_argument('--probe-limits',action='store_true')
     args=parser.parse_args()
     if args.writer_uid<=0 or args.writer_gid<=0:raise SystemExit('Non-root catalog owner required')
-    worker=DeletionWorker(args.database,args.originals,args.uploads,args.writer_uid,args.writer_gid)
+    if args.probe_limits:
+        if args.database or args.originals or args.uploads:parser.error('Limit probe must not receive production paths')
+        return probe_limits(args.writer_uid,args.writer_gid)
+    if not all((args.database,args.originals,args.uploads)):parser.error('Database and media roots are required')
+    identity=WorkerIdentity(args.writer_uid,args.writer_gid)
+    worker=DeletionWorker(args.database,args.originals,args.uploads,args.writer_uid,args.writer_gid,identity)
     with worker.db():
         lock=os.open(str(args.database)+'.file-deletion.lock',os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
     with os.fdopen(lock,'w') as stream:
