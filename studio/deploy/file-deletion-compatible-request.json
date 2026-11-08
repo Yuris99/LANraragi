@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "profile": "nonroot-rlimit-v2",
+  "revision": "d4e72ad13f04df7f9ba144c14425d3e3d93b676d",
+  "sha256": {
+    "file_deletion.py": "bc5d4f229a9a9a3651edfb772aea83d63d5abf571fa58bd65bf732227785814c",
+    "deploy/install-file-deletion.sh": "826bf13ad289b191d5da3be899adb8096cc26bba9fb4fa313b300a3d98ceee20"
+  },
+  "minimum_app_generation": 43,
+  "task_id": "task_67f8f67b0224",
+  "dispatch_id": "ctx_6b956f68dec3",
+  "operation_id": "retain the existing NAS task operation_id; do not allocate another",
+  "status": "prepared_pending_changed_resource_profile_approval",
+  "installation_executed": false,
+  "container": "library-studio-file-deletion",
+  "image_id": "sha256:e9362b455709b234c6b1cc57420307e1e2c475044788d01d23f8d9716ac2dfa0",
+  "network": "none",
+  "read_only_rootfs": true,
+  "memory_bytes": 268435456,
+  "swap_bytes": 0,
+  "identity": "existing Studio nonroot real/effective/saved UID and GID; root recovery blocked",
+  "retained_capabilities": [
+    "DAC_OVERRIDE (effective disabled during database access)"
+  ],
+  "nproc": {
+    "soft": 32,
+    "hard": 32,
+    "scope": "same real UID Linux threads; not a per-container pids cgroup"
+  },
+  "cpu": {
+    "affinity": [
+      0
+    ],
+    "shares": 128,
+    "nice": 19,
+    "hash_pacing_cpu_target": 0.5,
+    "kernel_hard_half_cpu_limit": false,
+    "peak_ceiling": "one logical CPU"
+  },
+  "rw_scope": [
+    "existing NASOriginals/manga",
+    "existing NASOriginals/images",
+    "own Studio data",
+    "own Studio uploads"
+  ],
+  "nas_generated_probe_required": true,
+  "backup_before_install_required": true,
+  "existing_services_restart_required": false,
+  "code_auto_update": false,
+  "acceptance": [
+    "exact module SHA matches app43 and immutable worker",
+    "NAS generated-only probe observes kernel EAGAIN, root recovery rejection, DB DAC off and owner preservation",
+    "daemon runtime profile and DB/WAL/SHM ownership verified",
+    "fresh heartbeat and file-deletion ready=true",
+    "catalog/indexed332, pending0 and original-delete requests0 preserved"
+  ],
+  "local_validation": [
+    "19 focused regression checks passed after final runtime assertion",
+    "generated-only real unlink with frozen root0400 code and permanent nonroot DAC passed",
+    "other file and catalog metadata preserved; DB/WAL/SHM owner preserved",
+    "kernel nproc fork rejection observed; generated hash CPU ratio0.475"
+  ]
+}
