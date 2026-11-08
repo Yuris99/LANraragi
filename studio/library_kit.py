@@ -197,7 +197,11 @@ ASSETS['shell.js'] = r'''// Library section switch. One script for every section
         caret.setAttribute('aria-hidden', 'true');
         caret.style.cssText = 'display:inline-block;width:14px;height:14px;margin-left:6px;vertical-align:-1px;opacity:.55';
         caret.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
-        if (name) name.after(caret); else el.append(caret);
+        // Sit beside the highest wrapper of the name that holds no subtitle, so a
+        // translation script rewriting the name's own <span> keeps the caret.
+        let spot = name;
+        while (spot && spot.parentNode !== el && !spot.parentNode.querySelector('small')) spot = spot.parentNode;
+        if (spot) spot.after(caret); else el.append(caret);
         const toggle = event => {
             event.preventDefault(); event.stopPropagation();
             if (opener === el) close(false); else { close(false); open(el); }
