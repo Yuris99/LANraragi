@@ -77,6 +77,16 @@ html[data-library-section="audio"]{--lib-accent:var(--lib-accent-audio);--lib-ac
 html[data-library-section="roulette"]{--lib-accent:var(--lib-accent-roulette);--lib-accent-ink:#2a0d1d;--lib-accent-soft:rgba(238,143,196,.14)}
 html[data-library-section="cyoa"]{--lib-accent:var(--lib-accent-cyoa);--lib-accent-ink:#17122e;--lib-accent-soft:rgba(171,159,242,.14)}
 html[data-library-section="real"]{--lib-accent:var(--lib-accent-real);--lib-accent-ink:#0a1a28;--lib-accent-soft:rgba(114,182,236,.14)}
+/* Section grounds: each section's neutrals lean toward its own accent hue
+   (OKLCH, same lightness as the manga ground, chroma ~.012-.02), so the room
+   itself changes colour, not only the accent. Manga keeps the :root ground.
+   The hub is near-neutral. Text pairs measured: text/bg 17:1, muted/surface
+   9.5:1, faint/raised 5.9:1 in every section. */
+html[data-library-section="audio"]{--lib-bg:#080f0d;--lib-surface:#0f1817;--lib-raised:#172220;--lib-hover:#1f2b29;--lib-line:#202c2a;--lib-control:#3b4b47;--lib-text:#edf1f0;--lib-muted:#b5c0bd;--lib-faint:#939f9c}
+html[data-library-section="roulette"]{--lib-bg:#110b0e;--lib-surface:#1b1418;--lib-raised:#251c21;--lib-hover:#2f252a;--lib-line:#30262b;--lib-control:#4f4349;--lib-text:#f2eff1;--lib-muted:#c3babf;--lib-faint:#a3999e}
+html[data-library-section="cyoa"]{--lib-bg:#0d0c12;--lib-surface:#16151c;--lib-raised:#1f1e27;--lib-hover:#282731;--lib-line:#292832;--lib-control:#464551;--lib-text:#f0f0f3;--lib-muted:#bdbcc4;--lib-faint:#9c9ba5}
+html[data-library-section="real"]{--lib-bg:#090e12;--lib-surface:#11171c;--lib-raised:#192027;--lib-hover:#212a31;--lib-line:#222b32;--lib-control:#3e4851;--lib-text:#eef1f3;--lib-muted:#b7bec4;--lib-faint:#959da4}
+html[data-library-section="hub"]{--lib-bg:#0c0d0f;--lib-surface:#151618;--lib-raised:#1e1f21;--lib-hover:#27282b;--lib-line:#28292c;--lib-control:#45474a;--lib-text:#f0f0f1;--lib-muted:#bcbdbf;--lib-faint:#9b9c9e}
 @media (prefers-reduced-motion:reduce){:root{--lib-fast:0ms;--lib-med:0ms}}
 '''
 
@@ -333,16 +343,13 @@ body{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--l
 h1{margin:0 0 var(--lib-space-4);font-size:var(--lib-text-xl);font-weight:650;letter-spacing:-.02em}
 .grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--lib-space-3)}
 .tile{--a:var(--lib-accent);position:relative;display:flex;flex-direction:column;gap:var(--lib-space-5);min-height:148px;height:100%;padding:var(--lib-space-4) var(--lib-space-4) var(--lib-space-4);
-  background:linear-gradient(150deg,color-mix(in srgb,var(--a) 20%,var(--lib-surface)) 0%,color-mix(in srgb,var(--a) 6%,var(--lib-surface)) 55%,var(--lib-surface) 100%);
-  border:1px solid color-mix(in srgb,var(--a) 22%,var(--lib-line));border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;isolation:isolate;overflow:hidden;
-  transition:border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
-/* Hover deepens the section's own wash; a layer so it can fade. */
-.tile::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(120% 90% at 0% 0%,color-mix(in srgb,var(--a) 22%,transparent),transparent 70%);opacity:0;transition:opacity var(--lib-med) var(--lib-ease)}
-.tile:hover::before,.tile:focus-visible::before{opacity:1}
-.tile:hover{border-color:color-mix(in srgb,var(--a) 50%,var(--lib-line))}
+  /* Flat: each card wears its section's ground, the same tint the section page uses. */
+  background:color-mix(in oklab,var(--a) 7%,var(--lib-surface));border:1px solid color-mix(in oklab,var(--a) 16%,var(--lib-line));border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;
+  transition:background var(--lib-fast) var(--lib-ease),border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
+.tile:hover{background:color-mix(in oklab,var(--a) 11%,var(--lib-raised));border-color:color-mix(in srgb,var(--a) 50%,var(--lib-line))}
 .tile:active{transform:scale(.985)}
 .tile:focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
-.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 20%,transparent);color:var(--a)}
+.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 16%,transparent);color:var(--a)}
 .icon svg{width:22px;height:22px}
 .tile>span:last-child{margin-top:auto}
 .name,.desc{display:block}
@@ -388,7 +395,7 @@ _HUB_SECTIONS = [
 _SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">%s</svg>'
 
 ASSETS['hub.html'] = r'''<!doctype html>
-<html lang="ko">
+<html lang="ko" data-library-section="hub">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Library</title>
