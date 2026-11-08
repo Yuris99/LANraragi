@@ -46,7 +46,11 @@ ASSETS['tokens.css'] = r'''/* Library design tokens — the single visual base f
   --lib-radius-sm:4px;
   --lib-radius-lg:12px;
   --lib-radius-pill:999px;
-  --lib-shadow-pop:0 10px 40px rgb(0 0 0 / .5);
+  --lib-shadow-pop:0 0 0 1px rgb(255 255 255 / .07),0 2px 4px rgb(0 0 0 / .3),0 12px 32px rgb(0 0 0 / .45);
+  /* Cards and panels: a faint light ring for the edge, two soft drops for depth. */
+  --lib-shadow-card:0 0 0 1px rgb(255 255 255 / .06),0 1px 2px rgb(0 0 0 / .25),0 4px 12px rgb(0 0 0 / .18);
+  --lib-shadow-card-hover:0 0 0 1px rgb(255 255 255 / .1),0 2px 4px rgb(0 0 0 / .3),0 10px 24px rgb(0 0 0 / .28);
+  --lib-press:.96;
   --lib-shadow-dialog:0 24px 80px rgb(0 0 0 / .6);
   /* Spacing scale (4px base) */
   --lib-space-1:4px;--lib-space-2:8px;--lib-space-3:12px;--lib-space-4:16px;
@@ -87,23 +91,25 @@ html[data-library-section="roulette"]{--lib-bg:#110b0e;--lib-surface:#1b1418;--l
 html[data-library-section="cyoa"]{--lib-bg:#0d0c12;--lib-surface:#16151c;--lib-raised:#1f1e27;--lib-hover:#282731;--lib-line:#292832;--lib-control:#464551;--lib-text:#f0f0f3;--lib-muted:#bdbcc4;--lib-faint:#9c9ba5}
 html[data-library-section="real"]{--lib-bg:#090e12;--lib-surface:#11171c;--lib-raised:#192027;--lib-hover:#212a31;--lib-line:#222b32;--lib-control:#3e4851;--lib-text:#eef1f3;--lib-muted:#b7bec4;--lib-faint:#959da4}
 html[data-library-section="hub"]{--lib-bg:#0c0d0f;--lib-surface:#151618;--lib-raised:#1e1f21;--lib-hover:#27282b;--lib-line:#28292c;--lib-control:#45474a;--lib-text:#f0f0f1;--lib-muted:#bcbdbf;--lib-faint:#9b9c9e}
-@media (prefers-reduced-motion:reduce){:root{--lib-fast:0ms;--lib-med:0ms}}
+@media (prefers-reduced-motion:reduce){:root{--lib-fast:0ms;--lib-med:0ms;--lib-press:1}}
 '''
 
 ASSETS['bar.css'] = r'''/* Section switch menu, loaded into the menu's shadow root by shell.js. */
 :host{all:initial;font-family:var(--lib-font,system-ui,sans-serif)}
 *{box-sizing:border-box}
 .menu{position:fixed;min-width:208px;max-width:calc(100vw - 16px);padding:6px;display:flex;flex-direction:column;gap:2px;
-  background:var(--lib-raised,#211f1d);border:1px solid var(--lib-line,#2b2927);border-radius:var(--lib-radius-lg,12px);
-  box-shadow:var(--lib-shadow-pop,0 10px 40px rgb(0 0 0 / .5));color:var(--lib-text,#f1f0ee);font-size:14px;line-height:1.4;
-  transform-origin:top left;animation:in var(--lib-fast,120ms) var(--lib-ease,ease-out)}
+  /* Concentric: 14px = 8px item radius + 6px padding. Edge from the shadow ring. */
+  background:var(--lib-raised,#211f1d);border-radius:14px;
+  box-shadow:var(--lib-shadow-pop,0 0 0 1px rgb(255 255 255 / .07),0 12px 32px rgb(0 0 0 / .45));color:var(--lib-text,#f1f0ee);font-size:14px;line-height:1.4;
+  -webkit-font-smoothing:antialiased;transform-origin:top left;animation:in 160ms var(--lib-ease,ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(-4px) scale(.98)}}
 .head.item{color:var(--lib-text,#f1f0ee);font-weight:650;letter-spacing:-.01em;padding-left:6px}
 .mark{display:flex;align-items:flex-end;gap:2px;width:24px;height:24px;padding:5px 5px 4px;border-radius:6px;background:var(--lib-surface,#171615)}
 .mark i{display:block;width:3px;border-radius:1px;background:var(--lib-text,#f1f0ee)}
 .mark i:nth-child(1){height:12px}.mark i:nth-child(2){height:9px;background:var(--lib-accent,#e8b04a)}.mark i:nth-child(3){height:14px}
 a,button{font:inherit;color:inherit;text-decoration:none;background:none;border:0;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent}
-.item{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--lib-radius,8px);color:var(--lib-muted,#c2bcb4);width:100%}
+.item{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--lib-radius,8px);color:var(--lib-muted,#c2bcb4);width:100%;
+  transition-property:background-color,color;transition-duration:var(--lib-fast,120ms)}
 .item svg{width:17px;height:17px;flex:none}
 .item:hover,.item:focus-visible{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee);outline:none}
 .item:focus-visible{box-shadow:inset 0 0 0 2px var(--lib-text,#f1f0ee)}
@@ -114,7 +120,7 @@ a,button{font:inherit;color:inherit;text-decoration:none;background:none;border:
 .tab-manga{--tab-accent:var(--lib-accent-manga,#e8b04a)}.tab-audio{--tab-accent:var(--lib-accent-audio,#5ec8b6)}
 .tab-roulette{--tab-accent:var(--lib-accent-roulette,#ee8fc4)}.tab-cyoa{--tab-accent:var(--lib-accent-cyoa,#ab9ff2)}
 .tab-real{--tab-accent:var(--lib-accent-real,#72b6ec)}
-hr{border:0;border-top:1px solid var(--lib-line,#2b2927);margin:4px 2px}
+hr{border:0;border-top:1px solid var(--lib-line,#2b2927);margin:4px 4px}
 .out{color:var(--lib-faint,#a29b92)}
 @media (pointer:coarse){.item{height:44px}}
 @media (prefers-reduced-motion:reduce){.menu{animation:none}}
@@ -149,7 +155,7 @@ ASSETS['shell.js'] = r'''// Library section switch. One script for every section
     // Sections should also put data-library-section in their HTML so the accent is right before this runs.
     if (!html.dataset.librarySection) html.dataset.librarySection = current.id;
 
-    const svg = body => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    const svg = body => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
     const TRIGGERS = '[data-library-switcher], .lib-section-title, html[data-library-section="real"] .navbar-brand';
 
     const host = document.createElement('library-menu');
@@ -330,38 +336,51 @@ ASSETS['login.html'] = r'''<!doctype html>
 
 ASSETS['hub.css'] = r'''*{box-sizing:border-box}
 html,body{min-height:100%}
-body{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--lib-font);font-size:var(--lib-text-md);line-height:1.55;-webkit-font-smoothing:antialiased;word-break:keep-all}
-.hub{max-width:960px;margin:0 auto;padding:var(--lib-space-6) var(--lib-space-4) var(--lib-space-7)}
-.top{display:flex;align-items:center;justify-content:space-between;gap:var(--lib-space-4);margin-bottom:var(--lib-space-7)}
+body{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--lib-font);font-size:var(--lib-text-md);line-height:1.55;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;word-break:keep-all}
+.hub{max-width:980px;margin:0 auto;padding:var(--lib-space-6) var(--lib-space-5) var(--lib-space-7)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:var(--lib-space-4)}
 .brand{display:flex;gap:12px;align-items:center;font-size:var(--lib-text-lg);font-weight:600;letter-spacing:-.01em}
 .brand small{display:block;font-size:var(--lib-text-xs);font-weight:400;color:var(--lib-faint);letter-spacing:0;margin-top:1px}
-.mark{display:flex;align-items:flex-end;gap:2px;width:32px;height:32px;padding:6px 6px 5px;border-radius:7px;background:var(--lib-raised)}
+.mark{display:flex;align-items:flex-end;gap:2px;width:32px;height:32px;padding:6px 6px 5px;border-radius:8px;background:var(--lib-raised);box-shadow:inset 0 0 0 1px rgb(255 255 255 / .06)}
 .mark i{display:block;width:5px;border-radius:1px;background:var(--lib-text)}
-.mark i:nth-child(1){height:18px}.mark i:nth-child(2){height:14px;background:var(--lib-accent)}.mark i:nth-child(3){height:20px}
-.out{font:inherit;font-size:var(--lib-text-sm);display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border:1px solid var(--lib-line);border-radius:var(--lib-radius);background:none;color:var(--lib-muted);cursor:pointer;transition:background var(--lib-fast),color var(--lib-fast)}
+.mark i:nth-child(1){height:18px}.mark i:nth-child(2){height:14px;background:var(--lib-accent-manga)}.mark i:nth-child(3){height:20px}
+.out{position:relative;font:inherit;font-size:var(--lib-text-sm);display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px 0 10px;border:0;border-radius:var(--lib-radius);background:none;color:var(--lib-faint);cursor:pointer;
+  transition-property:background-color,color,scale;transition-duration:var(--lib-fast);transition-timing-function:var(--lib-ease)}
+.out::after{content:"";position:absolute;inset:-4px}
 .out:hover{background:var(--lib-surface);color:var(--lib-text)}
-h1{margin:0 0 var(--lib-space-4);font-size:var(--lib-text-xl);font-weight:650;letter-spacing:-.02em}
-.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--lib-space-3)}
-.tile{--a:var(--lib-accent);position:relative;display:flex;flex-direction:column;gap:var(--lib-space-5);min-height:148px;height:100%;padding:var(--lib-space-4) var(--lib-space-4) var(--lib-space-4);
-  /* Flat: each card wears its section's ground, the same tint the section page uses. */
-  background:color-mix(in oklab,var(--a) 7%,var(--lib-surface));border:1px solid color-mix(in oklab,var(--a) 16%,var(--lib-line));border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;
-  transition:background var(--lib-fast) var(--lib-ease),border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
-.tile:hover{background:color-mix(in oklab,var(--a) 11%,var(--lib-raised));border-color:color-mix(in srgb,var(--a) 50%,var(--lib-line))}
-.tile:active{transform:scale(.985)}
-.tile:focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
-.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 16%,transparent);color:var(--a)}
-.icon svg{width:22px;height:22px}
-.tile>span:last-child{margin-top:auto}
-.name,.desc{display:block}
+.out:active{scale:var(--lib-press)}
+.out:focus-visible,.tile:focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
 .out svg{width:16px;height:16px}
-.go svg{width:18px;height:18px;display:block}
-.name{font-size:var(--lib-text-lg);font-weight:600;letter-spacing:-.01em}
+.intro{margin:clamp(40px,9vh,88px) 0 var(--lib-space-5)}
+h1{margin:0;font-size:clamp(26px,3.2vw,32px);font-weight:650;letter-spacing:-.025em;line-height:1.2;text-wrap:balance}
+.intro p{margin:6px 0 0;color:var(--lib-faint);text-wrap:pretty}
+.grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--lib-space-3)}
+.tile{--a:var(--lib-accent);position:relative;display:flex;flex-direction:column;min-height:164px;height:100%;padding:var(--lib-space-4);
+  /* Flat: a light wash of the section colour. Edge and depth come from the shadow, not a border. */
+  background:color-mix(in oklab,var(--a) 6%,var(--lib-surface));box-shadow:var(--lib-shadow-card);border-radius:18px;color:inherit;text-decoration:none;
+  transition-property:background-color,box-shadow,translate,scale;transition-duration:var(--lib-med);transition-timing-function:var(--lib-ease)}
+@media (hover:hover){.tile:hover{background:color-mix(in oklab,var(--a) 10%,var(--lib-raised));box-shadow:0 0 0 1px color-mix(in oklab,var(--a) 38%,transparent),0 2px 4px rgb(0 0 0 / .3),0 10px 24px rgb(0 0 0 / .28);translate:0 -2px}}
+.tile:active{scale:.98;translate:0 0}
+/* Concentric with the card: 18px card radius - 16px padding ~ the icon's 10px reads as nested. */
+.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in oklab,var(--a) 16%,transparent);color:var(--a)}
+.icon svg{width:22px;height:22px}
+.label{margin-top:auto;padding-top:var(--lib-space-5)}
+.name,.desc{display:block}
+.name{font-size:var(--lib-text-lg);font-weight:600;letter-spacing:-.01em;line-height:1.3}
 .desc{margin-top:2px;font-size:var(--lib-text-sm);color:var(--lib-faint)}
-.go{position:absolute;top:var(--lib-space-4);right:var(--lib-space-4);color:var(--lib-faint);opacity:0;transform:translateX(-4px);transition:opacity var(--lib-fast),transform var(--lib-med) var(--lib-ease)}
-.tile:hover .go,.tile:focus-visible .go{opacity:1;transform:none;color:var(--a)}
+.key{position:absolute;top:var(--lib-space-4);right:var(--lib-space-4);display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:6px;
+  font:500 var(--lib-text-xs)/1 var(--lib-font-mono);font-variant-numeric:tabular-nums;color:var(--lib-faint);box-shadow:inset 0 0 0 1px var(--lib-line);
+  transition-property:color,box-shadow;transition-duration:var(--lib-fast)}
+.tile:hover .key{color:var(--a);box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--a) 45%,transparent)}
 .manga{--a:var(--lib-accent-manga)}.audio{--a:var(--lib-accent-audio)}.roulette{--a:var(--lib-accent-roulette)}.cyoa{--a:var(--lib-accent-cyoa)}.real{--a:var(--lib-accent-real)}
-@media (max-width:520px){.hub{padding-top:var(--lib-space-5)}.top{margin-bottom:var(--lib-space-6)}.grid{grid-template-columns:1fr 1fr}.tile{min-height:128px}}
-@media (hover:none){.go{display:none}}
+/* Staged entrance on arrival only: header, heading, then cards 60ms apart. */
+@keyframes rise{from{opacity:0;translate:0 8px}}
+.top,.intro,.grid li{animation:rise 420ms var(--lib-ease) both}
+.intro{animation-delay:60ms}
+.grid li:nth-child(1){animation-delay:120ms}.grid li:nth-child(2){animation-delay:180ms}.grid li:nth-child(3){animation-delay:240ms}.grid li:nth-child(4){animation-delay:300ms}.grid li:nth-child(5){animation-delay:360ms}
+@media (prefers-reduced-motion:reduce){.top,.intro,.grid li{animation:none}.tile{transition-duration:0ms}}
+@media (max-width:520px){.hub{padding:var(--lib-space-5) var(--lib-space-4) var(--lib-space-6)}.intro{margin:var(--lib-space-6) 0 var(--lib-space-4)}.grid{grid-template-columns:1fr 1fr;gap:10px}.tile{min-height:140px;border-radius:16px}}
+@media (hover:none){.key{display:none}}
 '''
 
 ASSETS['hub.js'] = r'''// Library hub at /. Old manga bookmarks (/#/E123, /?q=…) still open the manga section.
@@ -376,6 +395,13 @@ ASSETS['hub.js'] = r'''// Library hub at /. Old manga bookmarks (/#/E123, /?q=�
     document.querySelector('.out').addEventListener('click', async () => {
         try { await fetch('/api/session/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) { /* go to login anyway */ }
         location.assign('/login');
+    });
+    // 1-5 open the matching card, as printed on each card.
+    const tiles = [...document.querySelectorAll('.tile')];
+    addEventListener('keydown', event => {
+        if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+        const tile = tiles[Number(event.key) - 1];
+        if (tile) { event.preventDefault(); location.assign(tile.href); }
     });
 })();
 '''
@@ -392,7 +418,7 @@ _HUB_SECTIONS = [
     ('real', '/real/', '실사', '사진·영상',
      '<rect x="3.5" y="6.5" width="17" height="12.5" rx="2"/><path d="M8.5 6.5 10 4h4l1.5 2.5"/><circle cx="12" cy="12.7" r="3.3"/>'),
 ]
-_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">%s</svg>'
+_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="%s" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">%s</svg>'
 
 ASSETS['hub.html'] = r'''<!doctype html>
 <html lang="ko" data-library-section="hub">
@@ -405,15 +431,15 @@ ASSETS['hub.html'] = r'''<!doctype html>
 <main class="hub">
   <header class="top">
     <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Library<small>개인 서재</small></span></div>
-    <button class="out" type="button">''' + _SVG % '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>' + r'''로그아웃</button>
+    <button class="out" type="button">''' + _SVG % ('1.5', '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>') + r'''로그아웃</button>
   </header>
-  <h1>섹션</h1>
-  <ul class="grid">
+  <div class="intro"><h1>어디로 갈까요?</h1><p>다섯 서재를 한 번의 로그인으로 오갑니다.</p></div>
+  <ul class="grid" aria-label="섹션">
 ''' + ''.join(
-    '    <li><a class="tile %s" href="%s"><span class="icon">%s</span><span class="go">%s</span>'
-    '<span><span class="name">%s</span><span class="desc">%s</span></span></a></li>\n'
-    % (sid, href, _SVG % icon, _SVG % '<path d="M7 17 17 7M9 7h8v8"/>', name, desc)
-    for sid, href, name, desc, icon in _HUB_SECTIONS) + r'''  </ul>
+    '    <li><a class="tile %s" href="%s" aria-keyshortcuts="%d"><span class="icon">%s</span><kbd class="key" aria-hidden="true">%d</kbd>'
+    '<span class="label"><span class="name">%s</span><span class="desc">%s</span></span></a></li>\n'
+    % (sid, href, n, _SVG % ('1.75', icon), n, name, desc)
+    for n, (sid, href, name, desc, icon) in enumerate(_HUB_SECTIONS, 1)) + r'''  </ul>
 </main>
 </body>
 </html>
@@ -425,7 +451,7 @@ ASSETS['components.css'] = r'''/* Library shared components. Values are the mang
    Only --lib-accent* differs between sections; never write raw colours here. */
 
 /* Base: put class="lib-base" on <body> for the shared page defaults. */
-.lib-base{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--lib-font);font-size:var(--lib-text-md);line-height:1.55;-webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word}
+.lib-base{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--lib-font);font-size:var(--lib-text-md);line-height:1.55;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;word-break:keep-all;overflow-wrap:break-word}
 .lib-base *,.lib-base *::before,.lib-base *::after{box-sizing:border-box}
 .lib-base :focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
 .lib-base a{color:inherit;text-decoration:none}
@@ -439,7 +465,7 @@ ASSETS['components.css'] = r'''/* Library shared components. Values are the mang
 .lib-section-title small{display:block;font-size:var(--lib-text-xs);font-weight:400;color:var(--lib-faint);letter-spacing:0;margin-top:1px}
 .lib-nav-label{font-size:var(--lib-text-xs);color:var(--lib-faint);margin:18px 12px 6px}
 .lib-nav{display:flex;flex-direction:column;gap:2px}
-.lib-nav-item{width:100%;display:flex;gap:10px;align-items:center;text-align:left;min-height:38px;padding:8px 12px;border:0;border-radius:var(--lib-radius);background:none;font:inherit;font-size:var(--lib-text-md);color:var(--lib-muted);cursor:pointer}
+.lib-nav-item{width:100%;display:flex;gap:10px;align-items:center;text-align:left;min-height:38px;padding:8px 12px;border:0;border-radius:var(--lib-radius);background:none;font:inherit;font-size:var(--lib-text-md);color:var(--lib-muted);cursor:pointer;transition-property:background-color,color;transition-duration:var(--lib-fast)}
 .lib-nav-item svg{width:18px;height:18px;flex:none;color:var(--lib-faint)}
 .lib-nav-item:hover{background:var(--lib-surface);color:var(--lib-text)}
 .lib-nav-item.is-active,.lib-nav-item[aria-current="page"]{background:var(--lib-raised);color:var(--lib-text);font-weight:600}
@@ -453,17 +479,18 @@ ASSETS['components.css'] = r'''/* Library shared components. Values are the mang
 
 /* Page heading and toolbar */
 .lib-page-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:28px 0 6px}
-.lib-h1{font-weight:600;font-size:26px;letter-spacing:-.02em;line-height:1.25;margin:0}
-.lib-h2{font-weight:600;font-size:18px;letter-spacing:-.01em;line-height:1.35;margin:0}
+.lib-h1{font-weight:600;font-size:26px;letter-spacing:-.02em;line-height:1.25;margin:0;text-wrap:balance}
+.lib-h2{font-weight:600;font-size:18px;letter-spacing:-.01em;line-height:1.35;margin:0;text-wrap:balance}
 .lib-page-count{color:var(--lib-faint);font-size:var(--lib-text-md);font-variant-numeric:tabular-nums}
-.lib-lead{margin:0 0 16px;color:var(--lib-muted);font-size:var(--lib-text-sm)}
-.lib-muted{font-size:var(--lib-text-sm);line-height:1.65;color:var(--lib-faint)}
+.lib-lead{margin:0 0 16px;color:var(--lib-muted);font-size:var(--lib-text-sm);text-wrap:pretty}
+.lib-muted{font-size:var(--lib-text-sm);line-height:1.65;color:var(--lib-faint);text-wrap:pretty}
 .lib-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding-bottom:14px;margin-bottom:8px;border-bottom:1px solid var(--lib-line)}
 .lib-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
 /* Buttons: one inverted primary, outlined secondary, text tertiary, danger. */
-.lib-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 14px;border:1px solid var(--lib-control);border-radius:var(--lib-radius);background:none;color:var(--lib-text);font:inherit;font-size:var(--lib-text-md);line-height:1.4;white-space:nowrap;cursor:pointer;transition:background var(--lib-fast)}
+.lib-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:7px 14px;border:1px solid var(--lib-control);border-radius:var(--lib-radius);background:none;color:var(--lib-text);font:inherit;font-size:var(--lib-text-md);line-height:1.4;white-space:nowrap;cursor:pointer;transition-property:background-color,border-color,color,scale;transition-duration:var(--lib-fast);transition-timing-function:var(--lib-ease)}
 .lib-btn:not(:disabled):hover{background:var(--lib-raised)}
+.lib-btn:not(:disabled):active,.lib-icon-btn:active,.lib-chip:active{scale:var(--lib-press)}
 .lib-btn:disabled{opacity:.45;cursor:default}
 .lib-btn svg{width:17px;height:17px;flex:none}
 .lib-btn-primary{background:var(--lib-text);border-color:var(--lib-text);color:var(--lib-on-text);font-weight:600}
@@ -472,7 +499,8 @@ ASSETS['components.css'] = r'''/* Library shared components. Values are the mang
 .lib-btn-text:not(:disabled):hover{color:var(--lib-text);background:var(--lib-surface)}
 .lib-btn-danger{color:var(--lib-danger);border-color:var(--lib-danger)}
 .lib-btn-danger:not(:disabled):hover{background:var(--lib-danger-bg)}
-.lib-icon-btn{display:inline-grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid var(--lib-control);border-radius:var(--lib-radius);background:none;color:var(--lib-text);cursor:pointer}
+.lib-icon-btn{position:relative;display:inline-grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid var(--lib-control);border-radius:var(--lib-radius);background:none;color:var(--lib-text);cursor:pointer;transition-property:background-color,scale;transition-duration:var(--lib-fast)}
+.lib-icon-btn::after{content:"";position:absolute;inset:-3px}
 .lib-icon-btn:hover{background:var(--lib-raised)}
 .lib-icon-btn svg{width:18px;height:18px}
 
@@ -487,7 +515,7 @@ select.lib-input{cursor:pointer}
 
 /* Chips (filters) and tags */
 .lib-chips{display:flex;gap:6px;flex-wrap:wrap}
-.lib-chip{min-height:34px;padding:6px 13px;border:1px solid var(--lib-line);border-radius:var(--lib-radius-pill);background:none;color:var(--lib-muted);font:inherit;font-size:var(--lib-text-sm);cursor:pointer}
+.lib-chip{min-height:34px;padding:6px 13px;border:1px solid var(--lib-line);border-radius:var(--lib-radius-pill);background:none;color:var(--lib-muted);font:inherit;font-size:var(--lib-text-sm);cursor:pointer;transition-property:background-color,border-color,color,scale;transition-duration:var(--lib-fast)}
 .lib-chip:hover{color:var(--lib-text);border-color:var(--lib-control)}
 .lib-chip.is-selected,.lib-chip[aria-pressed="true"]{color:var(--lib-on-text);background:var(--lib-text);border-color:var(--lib-text);font-weight:600}
 .lib-tag{display:inline-flex;align-items:center;gap:4px;min-height:30px;padding:4px 10px;background:var(--lib-raised);border-radius:var(--lib-radius-pill);color:var(--lib-text);font-size:var(--lib-text-sm);line-height:1.3}
@@ -505,26 +533,31 @@ select.lib-input{cursor:pointer}
 .lib-cover-wide{aspect-ratio:16/9}
 .lib-cover-square{aspect-ratio:1}
 .lib-cover img,.lib-cover video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+/* Pure white, low alpha: a tinted outline would read as dirt on the image edge. */
+.lib-cover::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px oklch(1 0 0 / .1);pointer-events:none}
 .lib-cover-fill img,.lib-cover-fill video{object-fit:cover}
 .lib-cover-card:hover .lib-cover{background:var(--lib-raised)}
-.lib-cover-title{font-size:var(--lib-text-md);font-weight:500;line-height:1.45;margin:10px 0 2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.lib-cover-title{font-size:var(--lib-text-md);font-weight:500;line-height:1.45;margin:10px 0 2px;text-wrap:pretty;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .lib-cover-meta{color:var(--lib-muted);font-size:var(--lib-text-sm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lib-cover-progress{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgb(0 0 0 / .45)}
 .lib-cover-progress>i{display:block;height:100%;background:var(--lib-accent)}
 
 /* Panels and list rows */
-.lib-panel{background:var(--lib-surface);border:1px solid var(--lib-line);border-radius:var(--lib-radius-lg);padding:20px}
+.lib-panel{background:var(--lib-surface);box-shadow:var(--lib-shadow-card);border-radius:var(--lib-radius-lg);padding:20px}
 .lib-list{display:flex;flex-direction:column}
 .lib-row{display:flex;align-items:center;gap:14px;min-height:52px;padding:10px 4px;border-bottom:1px solid var(--lib-line)}
+.lib-row{transition:background-color var(--lib-fast)}
 .lib-row:hover{background:var(--lib-surface)}
 .lib-row-main{flex:1;min-width:0}
 .lib-row-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lib-row-meta{font-size:var(--lib-text-xs);color:var(--lib-faint)}
 
 /* Dialog */
-.lib-dialog{color:var(--lib-text);background:var(--lib-surface);border:1px solid var(--lib-line);border-radius:var(--lib-radius-lg);padding:28px;width:480px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 32px);overflow:auto;box-shadow:var(--lib-shadow-dialog)}
+.lib-dialog{color:var(--lib-text);background:var(--lib-surface);border:0;border-radius:16px;padding:28px;width:480px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 32px);overflow:auto;box-shadow:0 0 0 1px rgb(255 255 255 / .07),var(--lib-shadow-dialog)}
 .lib-dialog::backdrop{background:var(--lib-overlay)}
-.lib-dialog h2{font-size:20px;margin:0 0 12px}
+.lib-dialog h2{font-size:20px;margin:0 0 12px;text-wrap:balance}
+.lib-dialog[open]{animation:lib-dialog-in var(--lib-med) var(--lib-ease)}
+@keyframes lib-dialog-in{from{opacity:0;translate:0 6px;scale:.98}}
 .lib-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
 
 /* Notices and toast */
@@ -537,12 +570,12 @@ select.lib-input{cursor:pointer}
 /* Empty state */
 .lib-empty{text-align:center;padding:64px 20px;color:var(--lib-muted)}
 .lib-empty svg{width:40px;height:40px;color:var(--lib-faint)}
-.lib-empty h2{color:var(--lib-text);margin:12px 0 8px;font-size:18px}
-.lib-empty p{line-height:1.7;font-size:var(--lib-text-md);margin:0 0 20px}
+.lib-empty h2{color:var(--lib-text);margin:12px 0 8px;font-size:18px;text-wrap:balance}
+.lib-empty p{line-height:1.7;font-size:var(--lib-text-md);margin:0 0 20px;text-wrap:pretty}
 
 /* Progress / rating */
 .lib-progress{height:4px;border-radius:2px;background:var(--lib-raised);overflow:hidden}
-.lib-progress>i{display:block;height:100%;background:var(--lib-accent)}
+.lib-progress>i{display:block;height:100%;background:var(--lib-accent);transition:width var(--lib-med) var(--lib-ease)}
 .lib-rating{color:var(--lib-accent);letter-spacing:1px}
 '''
 
