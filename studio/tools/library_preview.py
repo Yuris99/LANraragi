@@ -10,6 +10,7 @@ section prefix to the section's own dev server. Development only; never deployed
 --override /real/css=deploy/stash-ui/nmlo-stash-ui.css answers that path from a local file
 instead of the upstream, so a change can be checked without installing it anywhere.
 Then open http://127.0.0.1:43200/<prefix> and http://127.0.0.1:43200/library-guide.
+Run it from PowerShell or cmd: Git Bash rewrites "/audio/" into a Windows path.
 """
 import argparse
 import http.client
@@ -76,7 +77,11 @@ def make_handler(prefix, upstream, strip, overrides=None):
             length = int(self.headers.get('Content-Length') or 0)
             body = self.rfile.read(length) if length else None
             headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+            # Keep the browser's Host, as the gateway does, so same-origin write checks pass.
+            headers['Host'] = self.headers.get('Host', '127.0.0.1')
             headers['X-Forwarded-Prefix'] = prefix.rstrip('/')
+            headers['X-Forwarded-Host'] = headers['Host']
+            headers['X-Forwarded-Proto'] = 'http'
             conn_type = http.client.HTTPSConnection if target.scheme == 'https' else http.client.HTTPConnection
             conn = conn_type(target.hostname, target.port, timeout=60)
             try:
