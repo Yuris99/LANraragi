@@ -333,12 +333,16 @@ body{margin:0;background:var(--lib-bg);color:var(--lib-text);font-family:var(--l
 h1{margin:0 0 var(--lib-space-4);font-size:var(--lib-text-xl);font-weight:650;letter-spacing:-.02em}
 .grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:var(--lib-space-3)}
 .tile{--a:var(--lib-accent);position:relative;display:flex;flex-direction:column;gap:var(--lib-space-5);min-height:148px;height:100%;padding:var(--lib-space-4) var(--lib-space-4) var(--lib-space-4);
-  background:var(--lib-surface);border:1px solid var(--lib-line);border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;
-  transition:background var(--lib-fast) var(--lib-ease),border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
-.tile:hover{background:var(--lib-raised);border-color:color-mix(in srgb,var(--a) 45%,var(--lib-line))}
+  background:linear-gradient(150deg,color-mix(in srgb,var(--a) 20%,var(--lib-surface)) 0%,color-mix(in srgb,var(--a) 6%,var(--lib-surface)) 55%,var(--lib-surface) 100%);
+  border:1px solid color-mix(in srgb,var(--a) 22%,var(--lib-line));border-radius:var(--lib-radius-lg);color:inherit;text-decoration:none;isolation:isolate;overflow:hidden;
+  transition:border-color var(--lib-fast) var(--lib-ease),transform var(--lib-med) var(--lib-ease)}
+/* Hover deepens the section's own wash; a layer so it can fade. */
+.tile::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(120% 90% at 0% 0%,color-mix(in srgb,var(--a) 22%,transparent),transparent 70%);opacity:0;transition:opacity var(--lib-med) var(--lib-ease)}
+.tile:hover::before,.tile:focus-visible::before{opacity:1}
+.tile:hover{border-color:color-mix(in srgb,var(--a) 50%,var(--lib-line))}
 .tile:active{transform:scale(.985)}
 .tile:focus-visible{outline:2px solid var(--lib-text);outline-offset:2px}
-.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 14%,transparent);color:var(--a)}
+.icon{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:color-mix(in srgb,var(--a) 20%,transparent);color:var(--a)}
 .icon svg{width:22px;height:22px}
 .tile>span:last-child{margin-top:auto}
 .name,.desc{display:block}
