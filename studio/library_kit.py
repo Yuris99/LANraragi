@@ -58,7 +58,8 @@ ASSETS['tokens.css'] = r'''/* Library design tokens — the single visual base f
   /* Motion */
   --lib-ease:cubic-bezier(.2,.7,.2,1);
   --lib-fast:120ms;--lib-med:200ms;
-  /* Shared bar */
+  /* Sections switch from their own title menu, so nothing is reserved at the top.
+     Kept at 0 for section CSS that offsets fixed parts by it. */
   --lib-bar-h:0px;
 }
 /* Section accents: everything else is shared; only the one accent hue changes.
@@ -76,54 +77,46 @@ html[data-library-section="audio"]{--lib-accent:var(--lib-accent-audio);--lib-ac
 html[data-library-section="roulette"]{--lib-accent:var(--lib-accent-roulette);--lib-accent-ink:#2a0d1d;--lib-accent-soft:rgba(238,143,196,.14)}
 html[data-library-section="cyoa"]{--lib-accent:var(--lib-accent-cyoa);--lib-accent-ink:#17122e;--lib-accent-soft:rgba(171,159,242,.14)}
 html[data-library-section="real"]{--lib-accent:var(--lib-accent-real);--lib-accent-ink:#0a1a28;--lib-accent-soft:rgba(114,182,236,.14)}
-html.has-library-bar{--lib-bar-h:48px}
-@media (max-width:560px){html.has-library-bar{--lib-bar-h:52px}}
-html.has-library-bar body{padding-top:var(--lib-bar-h)}
 @media (prefers-reduced-motion:reduce){:root{--lib-fast:0ms;--lib-med:0ms}}
 '''
 
-ASSETS['bar.css'] = r'''/* Shared Library bar, loaded into the bar's shadow root by shell.js. */
+ASSETS['bar.css'] = r'''/* Section switch menu, loaded into the menu's shadow root by shell.js. */
 :host{all:initial;font-family:var(--lib-font,system-ui,sans-serif)}
 *{box-sizing:border-box}
-.bar{height:var(--lib-bar-h,48px);display:flex;align-items:center;gap:16px;padding:0 16px;
-  background:color-mix(in srgb,var(--lib-bg,#0e0d0c) 92%,transparent);backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--lib-line,#2b2927);color:var(--lib-text,#f1f0ee);font-size:14px;line-height:1.4}
-a,button{font:inherit;color:inherit;text-decoration:none;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
-:focus-visible{outline:2px solid var(--lib-text,#f1f0ee);outline-offset:2px;border-radius:6px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:-.01em;flex:none}
-.mark{display:flex;align-items:flex-end;gap:2px;width:26px;height:26px;padding:5px 5px 4px;border-radius:6px;background:var(--lib-raised,#211f1d)}
-.mark i{display:block;width:4px;border-radius:1px;background:var(--lib-text,#f1f0ee)}
-.mark i:nth-child(1){height:14px}.mark i:nth-child(2){height:11px;background:var(--lib-accent,#e8b04a)}.mark i:nth-child(3){height:16px}
-nav{display:flex;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;flex:1}
-nav::-webkit-scrollbar{display:none}
-.tab{display:flex;align-items:center;gap:7px;height:34px;padding:0 12px;border-radius:var(--lib-radius,8px);
-  color:var(--lib-muted,#c2bcb4);white-space:nowrap;transition:background var(--lib-fast,120ms),color var(--lib-fast,120ms)}
-.tab svg,.out svg{width:17px;height:17px;flex:none}
-.tab:hover{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee)}
-.tab[aria-current="page"]{background:var(--lib-raised,#211f1d);color:var(--lib-text,#f1f0ee);font-weight:600}
-.tab[aria-current="page"] svg{color:var(--lib-accent,#e8b04a)}
-.tab{position:relative}
-.tab[aria-current="page"]::after{content:"";position:absolute;left:12px;right:12px;bottom:-7px;height:2px;border-radius:2px;background:var(--lib-accent,#e8b04a)}
-.tab:not([aria-current]):hover svg{color:var(--tab-accent)}
+.menu{position:fixed;min-width:208px;max-width:calc(100vw - 16px);padding:6px;display:flex;flex-direction:column;gap:2px;
+  background:var(--lib-raised,#211f1d);border:1px solid var(--lib-line,#2b2927);border-radius:var(--lib-radius-lg,12px);
+  box-shadow:var(--lib-shadow-pop,0 10px 40px rgb(0 0 0 / .5));color:var(--lib-text,#f1f0ee);font-size:14px;line-height:1.4;
+  transform-origin:top left;animation:in var(--lib-fast,120ms) var(--lib-ease,ease-out)}
+@keyframes in{from{opacity:0;transform:translateY(-4px) scale(.98)}}
+.head{display:flex;align-items:center;gap:10px;padding:6px 10px 8px;font-weight:650;letter-spacing:-.01em}
+.mark{display:flex;align-items:flex-end;gap:2px;width:24px;height:24px;padding:5px 5px 4px;border-radius:6px;background:var(--lib-surface,#171615)}
+.mark i{display:block;width:3px;border-radius:1px;background:var(--lib-text,#f1f0ee)}
+.mark i:nth-child(1){height:12px}.mark i:nth-child(2){height:9px;background:var(--lib-accent,#e8b04a)}.mark i:nth-child(3){height:14px}
+a,button{font:inherit;color:inherit;text-decoration:none;background:none;border:0;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent}
+.item{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--lib-radius,8px);color:var(--lib-muted,#c2bcb4);width:100%}
+.item svg{width:17px;height:17px;flex:none}
+.item:hover,.item:focus-visible{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee);outline:none}
+.item:focus-visible{box-shadow:inset 0 0 0 2px var(--lib-text,#f1f0ee)}
+.item[aria-current="page"]{color:var(--lib-text,#f1f0ee);font-weight:600}
+.item[aria-current="page"] svg{color:var(--lib-accent,#e8b04a)}
+.item[aria-current="page"]::after{content:"";margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--lib-accent,#e8b04a)}
+.item:not([aria-current]):hover svg{color:var(--tab-accent)}
 .tab-manga{--tab-accent:var(--lib-accent-manga,#e8b04a)}.tab-audio{--tab-accent:var(--lib-accent-audio,#5ec8b6)}
 .tab-roulette{--tab-accent:var(--lib-accent-roulette,#ee8fc4)}.tab-cyoa{--tab-accent:var(--lib-accent-cyoa,#ab9ff2)}
 .tab-real{--tab-accent:var(--lib-accent-real,#72b6ec)}
-@media (max-width:560px){.tab[aria-current="page"]::after{bottom:-3px}}
-.out{display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;border-radius:var(--lib-radius,8px);color:var(--lib-faint,#a29b92);flex:none}
-.out:hover{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee)}
-@media (max-width:560px){
-  .bar{gap:4px;padding:0 6px}
-  .brand span:last-child,.out span{display:none}
-  nav{justify-content:space-between}
-  .tab{flex-direction:column;justify-content:center;gap:2px;height:46px;padding:0 6px;min-width:52px;font-size:11px}
-}
+hr{border:0;border-top:1px solid var(--lib-line,#2b2927);margin:4px 2px}
+.out{color:var(--lib-faint,#a29b92)}
+@media (pointer:coarse){.item{height:44px}}
+@media (prefers-reduced-motion:reduce){.menu{animation:none}}
 '''
 
-ASSETS['shell.js'] = r'''// Library shared top bar. One script for every section:
+ASSETS['shell.js'] = r'''// Library section switch. One script for every section:
 //   <link rel="stylesheet" href="/_library/tokens.css">
 //   <script src="/_library/shell.js" defer></script>
-// Renders in a shadow root so section CSS (Stash, roulette…) cannot restyle it,
-// and the bar cannot leak styles into the section.
+// Nothing is reserved at the top of the page. The section's own title
+// (.lib-section-title, or any element marked data-library-switcher) becomes a
+// button that opens a small menu of sections plus logout. The menu renders in a
+// shadow root so section CSS (Stash, roulette…) cannot restyle it.
 (() => {
     if (window.__libraryShell || !document.body) return;
     window.__libraryShell = true;
@@ -140,32 +133,101 @@ ASSETS['shell.js'] = r'''// Library shared top bar. One script for every section
         { id: 'real', label: '실사', href: '/real/', match: p => /^\/real(\/|$)/.test(p),
           icon: '<rect x="3.5" y="6.5" width="17" height="12.5" rx="2"/><path d="M8.5 6.5 10 4h4l1.5 2.5"/><circle cx="12" cy="12.7" r="3.3"/>' },
     ];
-    const path = location.pathname;
-    const current = SECTIONS.find(s => s.match(path)) || SECTIONS[0];
-    const svg = body => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    const current = SECTIONS.find(s => s.match(location.pathname)) || SECTIONS[0];
+    const html = document.documentElement;
+    html.classList.add('library-' + current.id);
+    // Sections should also put data-library-section in their HTML so the accent is right before this runs.
+    if (!html.dataset.librarySection) html.dataset.librarySection = current.id;
 
-    const host = document.createElement('library-bar');
-    host.setAttribute('role', 'banner');
-    host.style.cssText = 'position:fixed;inset:0 0 auto 0;z-index:2147483000;display:block;height:var(--lib-bar-h,48px);visibility:hidden';
+    const svg = body => `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    const TRIGGERS = '[data-library-switcher], .lib-section-title, html[data-library-section="real"] .navbar-brand';
+
+    const host = document.createElement('library-menu');
+    host.style.cssText = 'position:fixed;inset:0 auto auto 0;z-index:2147483000;display:block';
+    host.hidden = true;
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
 <link rel="stylesheet" href="/_library/bar.css">
-<div class="bar">
-  <a class="brand" href="/" aria-label="Library 홈"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Library</span></a>
-  <nav aria-label="Library 섹션">${SECTIONS.map(s =>
-      `<a class="tab tab-${s.id}" href="${s.href}"${s === current ? ' aria-current="page"' : ''}>${svg(s.icon)}<span>${s.label}</span></a>`).join('')}</nav>
-  <button class="out" type="button" title="로그아웃">${svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>')}<span>로그아웃</span></button>
+<div class="menu" role="menu" aria-label="Library 섹션">
+  <div class="head" aria-hidden="true"><span class="mark"><i></i><i></i><i></i></span>Library</div>
+  ${SECTIONS.map(s => `<a class="item tab-${s.id}" role="menuitem" href="${s.href}"${s === current ? ' aria-current="page"' : ''}>${svg(s.icon)}<span>${s.label}</span></a>`).join('')}
+  <hr>
+  <button class="item out" type="button" role="menuitem">${svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>')}<span>로그아웃</span></button>
 </div>`;
-    // Reveal only once the bar's stylesheet is in, so it never flashes unstyled.
-    root.querySelector('link').addEventListener('load', () => { host.style.visibility = ''; });
+    const menu = root.querySelector('.menu');
+    const items = () => [...root.querySelectorAll('.item')];
+    let opener = null;
+
     root.querySelector('.out').addEventListener('click', async () => {
         try { await fetch('/api/session/logout', { method: 'POST', credentials: 'same-origin' }); } catch (_) { /* go to login anyway */ }
         location.assign('/login');
     });
-    document.documentElement.classList.add('has-library-bar', 'library-' + current.id);
-    // Sections should also put data-library-section in their HTML so the accent is right before this runs.
-    if (!document.documentElement.dataset.librarySection) document.documentElement.dataset.librarySection = current.id;
-    document.body.prepend(host);
+
+    function close(focusBack) {
+        if (host.hidden) return;
+        host.hidden = true;
+        if (opener) { opener.setAttribute('aria-expanded', 'false'); if (focusBack) opener.focus(); }
+        opener = null;
+    }
+    function open(trigger) {
+        opener = trigger;
+        trigger.setAttribute('aria-expanded', 'true');
+        host.hidden = false;
+        const r = trigger.getBoundingClientRect();
+        const w = menu.offsetWidth, h = menu.offsetHeight;
+        const left = Math.max(8, Math.min(r.left, innerWidth - w - 8));
+        const below = r.bottom + 6;
+        menu.style.left = left + 'px';
+        menu.style.top = (below + h > innerHeight - 8 ? Math.max(8, r.top - h - 6) : below) + 'px';
+        (root.querySelector('[aria-current]') || items()[0]).focus();
+    }
+
+    function enhance(el) {
+        if (el.dataset.libraryTrigger) return;
+        el.dataset.libraryTrigger = '1';
+        if (!/^(A|BUTTON)$/.test(el.tagName)) { el.setAttribute('role', 'button'); el.tabIndex = 0; }
+        el.setAttribute('aria-haspopup', 'menu');
+        el.setAttribute('aria-expanded', 'false');
+        el.title = el.title || '섹션 이동';
+        el.style.cursor = 'pointer';
+        // Caret right after the section name, before any <small> subtitle.
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: n => n.textContent.trim() ? 1 : 3 });
+        const name = walker.nextNode();
+        const caret = document.createElement('span');
+        caret.setAttribute('aria-hidden', 'true');
+        caret.style.cssText = 'display:inline-block;width:14px;height:14px;margin-left:6px;vertical-align:-1px;opacity:.55';
+        caret.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+        if (name) name.after(caret); else el.append(caret);
+        const toggle = event => {
+            event.preventDefault(); event.stopPropagation();
+            if (opener === el) close(false); else { close(false); open(el); }
+        };
+        el.addEventListener('click', toggle);
+        el.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') toggle(event);
+        });
+    }
+    const scan = () => document.querySelectorAll(TRIGGERS).forEach(enhance);
+
+    root.addEventListener('keydown', event => {
+        const list = items(), i = list.indexOf(root.activeElement);
+        // Close only the menu, not the section's own sheet or dialog behind it.
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
+        else if (event.key === 'ArrowDown') { event.preventDefault(); list[(i + 1) % list.length].focus(); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
+        else if (event.key === 'Home') { event.preventDefault(); list[0].focus(); }
+        else if (event.key === 'End') { event.preventDefault(); list[list.length - 1].focus(); }
+        else if (event.key === 'Tab') close(false);
+    });
+    document.addEventListener('pointerdown', event => { if (!event.composedPath().includes(host)) close(false); }, true);
+    addEventListener('resize', () => close(false));
+    addEventListener('scroll', () => close(false), true);
+
+    document.body.append(host);
+    scan();
+    // Single-page sections (Stash, roulette) render their titles later.
+    let pending = 0;
+    new MutationObserver(() => { pending ||= requestAnimationFrame(() => { pending = 0; scan(); }); }).observe(document.body, { childList: true, subtree: true });
 })();
 '''
 
@@ -188,8 +250,6 @@ button{font:inherit;font-weight:600;margin-top:var(--lib-space-3);min-height:44p
 button:hover{opacity:.9}
 button:disabled{opacity:.5;cursor:default}
 .error{margin:var(--lib-space-1) 0 0;padding:8px 10px;border-radius:var(--lib-radius);background:var(--lib-danger-bg);color:var(--lib-danger);font-size:var(--lib-text-sm)}
-.sections{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin:0;padding:0;list-style:none}
-.sections li{font-size:var(--lib-text-xs);color:var(--lib-faint);padding:3px 10px;border:1px solid var(--lib-line);border-radius:var(--lib-radius-pill)}
 [hidden]{display:none!important}
 '''
 
@@ -248,9 +308,6 @@ ASSETS['login.html'] = r'''<!doctype html>
     <p id="login-error" class="error" role="alert" hidden></p>
     <button id="login-submit" type="submit">로그인</button>
   </form>
-  <ul class="sections" aria-label="Library 섹션">
-    <li>만화</li><li>음성</li><li>룰렛</li><li>CYOA</li><li>실사</li>
-  </ul>
 </main>
 </body>
 </html>
