@@ -7,6 +7,8 @@ section prefix to the section's own dev server. Development only; never deployed
   python studio/tools/library_preview.py --prefix /real/ --upstream http://127.0.0.1:9999 --strip
 
 --strip removes the prefix before proxying (the gateway does this for /real/ only).
+--override /real/css=deploy/stash-ui/nmlo-stash-ui.css answers that path from a local file
+instead of the upstream, so a change can be checked without installing it anywhere.
 Then open http://127.0.0.1:43200/<prefix> and http://127.0.0.1:43200/library-guide.
 """
 import argparse
@@ -24,8 +26,13 @@ HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 
        'trailers', 'transfer-encoding', 'upgrade', 'host'}
 
 
-def make_handler(prefix, upstream, strip):
+LOCAL_TYPES = {'.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+               '.html': 'text/html; charset=utf-8'}
+
+
+def make_handler(prefix, upstream, strip, overrides=None):
     target = urllib.parse.urlsplit(upstream)
+    overrides = overrides or {}
 
     class Preview(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -47,6 +54,16 @@ def make_handler(prefix, upstream, strip):
                 return self.kit(match.group(1))
             if path == '/library-guide':
                 return self.kit('guide.html')
+            if path in overrides:
+                body = Path(overrides[path]).read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', LOCAL_TYPES.get(Path(overrides[path]).suffix, 'application/octet-stream'))
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                if self.command != 'HEAD':
+                    self.wfile.write(body)
+                return
             if path == prefix.rstrip('/'):
                 self.send_response(308); self.send_header('Location', prefix)
                 self.send_header('Content-Length', '0'); self.end_headers(); return
@@ -98,9 +115,17 @@ def main():
     parser.add_argument('--upstream', required=True, help='section dev server, e.g. http://127.0.0.1:8080')
     parser.add_argument('--strip', action='store_true', help='remove the prefix before proxying')
     parser.add_argument('--port', type=int, default=43200)
+    parser.add_argument('--override', action='append', default=[], metavar='PATH=FILE',
+                        help='answer PATH from a local FILE; repeatable')
     args = parser.parse_args()
     prefix = '/' + args.prefix.strip('/') + '/'
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), make_handler(prefix, args.upstream, args.strip))
+    overrides = {}
+    for item in args.override:
+        path, _, file = item.partition('=')
+        if not path.startswith('/') or not Path(file).is_file():
+            parser.error('--override needs /path=existing-file: ' + item)
+        overrides[path] = str(Path(file).resolve())
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), make_handler(prefix, args.upstream, args.strip, overrides))
     print('preview http://127.0.0.1:%d%s  guide http://127.0.0.1:%d/library-guide' % (args.port, prefix, args.port))
     server.serve_forever()
 
