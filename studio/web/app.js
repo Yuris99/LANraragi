@@ -193,6 +193,10 @@ function toast(message) {
 }
 async function api(path, data, options = {}) {
     const response = await fetch(path, { ...(data === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }), ...options });
+    if (response.status === 401) {
+        location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search));
+        throw new Error('로그인이 필요합니다.');
+    }
     let value;
     try { value = await response.json(); }
     catch (error) {

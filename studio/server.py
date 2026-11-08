@@ -29,6 +29,8 @@ from source_finder import candidates as find_candidates,preview_image
 from tag_display import dictionary as tag_dictionary
 from file_deletion import FileDeletion,blocked as file_deleted
 from metadata import Document,MAX_DOCUMENT
+from library_session import Sessions
+import library_kit
 
 HERE=Path(__file__).parent
 # Keep aligned with the next Studio app deployment generation.
@@ -453,23 +455,72 @@ class Handler(BaseHTTPRequestHandler):
             if token and hmac.compare_digest(auth,'Bearer '+token):return target
         return None
 
+    def secure_request(self):
+        return self.headers.get('X-Forwarded-Proto','')=='https' or os.environ.get('STUDIO_SECURE_COOKIE')=='1'
+
+    def cookie_session(self):
+        return self.server.sessions.valid(Sessions.cookie_from(self.headers.get('Cookie','')))
+
     def authorized(self):
+        self.via_cookie=False
         auth=self.headers.get('Authorization','')
+        path=urllib.parse.urlsplit(self.path).path
         if self.worker_scope():
-            if self.command=='POST' and re.fullmatch(r'/api/worker/(claim|[0-9a-f]{32}/report)', urllib.parse.urlsplit(self.path).path):
+            if self.command=='POST' and re.fullmatch(r'/api/worker/(claim|[0-9a-f]{32}/report)', path):
                 return True
             self.respond({'error':'Worker token is restricted to worker endpoints'},403)
             return False
+        # The hub login page and the shared Library kit load before signing in.
+        if self.command in ('GET','HEAD') and (path in ('/login','/api/session') or re.fullmatch(r'/_library/[a-z0-9-]+\.(?:css|js)',path)):
+            return True
+        if self.command=='POST' and path in ('/api/session/login','/api/session/logout'):return True
         password=os.environ.get('STUDIO_PASSWORD','')
         if password:
             expected='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
             if hmac.compare_digest(auth,expected):return True
+            if self.cookie_session():
+                self.via_cookie=True;return True
         elif self.server.dev:
             host=urllib.parse.urlsplit('http://'+self.headers.get('Host','')).hostname
             if host in ('localhost','127.0.0.1','::1') and self.client_address[0] in ('127.0.0.1','::1'):
                 return True
-        self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="Library Studio", charset="UTF-8"')
-        self.send_header('Content-Length','0');self.end_headers();return False
+        if self.command=='GET' and not path.startswith('/api/') and 'text/html' in self.headers.get('Accept',''):
+            self.send_response(303);self.send_header('Location','/login?next='+urllib.parse.quote(self.path,safe='/'))
+            self.send_header('Cache-Control','no-store');self.send_header('Content-Length','0');self.end_headers();return False
+        self.send_response(401)
+        # Only scripted Basic clients get a challenge; browsers sign in at /login instead of a popup.
+        if auth.startswith('Basic '):self.send_header('WWW-Authenticate','Basic realm="Library Studio", charset="UTF-8"')
+        self.send_header('Cache-Control','no-store');self.send_header('Content-Length','0');self.end_headers();return False
+
+    def client_key(self):
+        forwarded=self.headers.get('X-Forwarded-For','').split(',')[0].strip()
+        return forwarded or self.client_address[0]
+
+    def session_login(self):
+        try:data=self.body()
+        except (ValueError,json.JSONDecodeError):return self.respond({'error':'요청 형식을 확인하세요.'},400)
+        ok=self.server.sessions.check_password(data.get('password',''),self.client_key())
+        if ok is None:return self.respond({'error':'잠시 후 다시 시도하세요.'},429)
+        if not ok:return self.respond({'error':'비밀번호가 맞지 않습니다.'},401)
+        raw=json.dumps({'success':True}).encode()
+        self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8')
+        self.send_header('Set-Cookie',self.server.sessions.set_cookie(self.server.sessions.issue(),self.secure_request()))
+        self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+
+    def session_logout(self):
+        raw=json.dumps({'success':True}).encode()
+        self.send_response(200);self.send_header('Content-Type','application/json; charset=utf-8')
+        self.send_header('Set-Cookie',Sessions.clear_cookie(self.secure_request()))
+        self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw)
+
+    def serve_asset(self,name,cache='no-store'):
+        raw=library_kit.ASSETS[name].encode()
+        self.send_response(200);self.send_header('Content-Type',library_kit.TYPES[name.rsplit('.',1)[1]])
+        self.send_header('Content-Length',str(len(raw)));self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Cache-Control',cache);self.send_header('Referrer-Policy','no-referrer')
+        self.send_header('Content-Security-Policy',"default-src 'self'; img-src 'self' data: blob:; media-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.end_headers()
+        if self.command!='HEAD':self.wfile.write(raw)
 
     def respond(self, value, status=200):
         raw=json.dumps(value,ensure_ascii=False).encode()
@@ -502,6 +553,17 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urllib.parse.urlsplit(self.path);path=parsed.path;qs=urllib.parse.parse_qs(parsed.query)
         def q(key,default=''):return qs.get(key,[default])[0]
         store=self.app.store
+        if path=='/api/auth/check':
+            # Gateway auth_request target for every other Library section. No backend calls.
+            self.send_response(204);self.send_header('Cache-Control','no-store');self.end_headers();return
+        if path=='/api/session':
+            signed=bool(os.environ.get('STUDIO_PASSWORD')) and self.cookie_session()
+            return self.respond({'authenticated':signed or self.server.dev})
+        if path=='/login':return self.serve_asset('login.html')
+        match=re.fullmatch(r'/_library/([a-z0-9-]+\.(?:css|js))',path)
+        if match:
+            if match[1] not in library_kit.ASSETS or match[1].endswith('.html'):return self.respond({'error':'찾을 수 없습니다.'},404)
+            return self.serve_asset(match[1])
         match=re.fullmatch('/api/works/([0-9a-f]{32})/file-deletion',path)
         if match:return self.respond(self.app.file_deletion.status(match[1]))
         if path=='/api/source-linking':return self.respond(store.automatic_summary())
@@ -664,6 +726,12 @@ class Handler(BaseHTTPRequestHandler):
             parsed=urllib.parse.urlsplit(origin)
             if parsed.netloc!=self.headers.get('Host') or parsed.scheme not in ('http','https'):
                 return self.respond({'error':'다른 사이트의 요청은 허용하지 않습니다.'},403)
+        request_path=urllib.parse.urlsplit(self.path).path
+        if (self.via_cookie or request_path=='/api/session/login') and not origin:
+            # Cookie-authenticated writes must prove they come from this site.
+            return self.respond({'error':'다른 사이트의 요청은 허용하지 않습니다.'},403)
+        if request_path=='/api/session/login':return self.session_login()
+        if request_path=='/api/session/logout':return self.session_logout()
         voice_match=re.fullmatch('/api/works/([0-9a-f]{32})/voice/upload',urllib.parse.urlsplit(self.path).path)
         if voice_match:
             try:
@@ -892,12 +960,13 @@ class Handler(BaseHTTPRequestHandler):
         return self.respond({'error':'찾을 수 없습니다.'},404)
 
 
-def make_server(host,port,app,dev=False):
+def make_server(host,port,app,dev=False,sessions=None):
     if dev and host not in ('127.0.0.1','::1'):
         raise ValueError('개발용 인증 생략은 루프백에서만 가능합니다.')
     if not dev and not os.environ.get('STUDIO_PASSWORD'):
         raise ValueError('STUDIO_PASSWORD를 설정하세요.')
     server=ThreadingHTTPServer((host,port),Handler);server.app=app;server.dev=dev
+    server.sessions=sessions or Sessions(os.environ.get('STUDIO_SESSION_SECRET_FILE') or None)
     return server
 
 
@@ -905,7 +974,8 @@ if __name__=='__main__':
     app=Studio(Store(os.environ.get('STUDIO_DATABASE',str(HERE/'data'/'studio.db'))),
                LRR(os.environ.get('LRR_URL','http://127.0.0.1:43121'),os.environ.get('LRR_API_KEY','')))
     host=os.environ.get('STUDIO_HOST','127.0.0.1');port=int(os.environ.get('STUDIO_PORT','43120'))
-    server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1')
+    secret_file=os.environ.get('STUDIO_SESSION_SECRET_FILE') or str(Path(os.environ.get('STUDIO_DATABASE',str(HERE/'data'/'studio.db'))).parent/'session.key')
+    server=make_server(host,port,app,os.environ.get('STUDIO_DEV_MODE')=='1',Sessions(secret_file))
     threading.Thread(target=app.nas_loop,daemon=True).start()
     threading.Thread(target=app.command_index_loop,daemon=True).start()
     threading.Thread(target=app.automatic_source_loop,daemon=True).start()
