@@ -54,6 +54,21 @@ ASSETS['tokens.css'] = r'''/* Library design tokens — the single visual base f
   /* Shared bar */
   --lib-bar-h:0px;
 }
+/* Section accents: everything else is shared; only the one accent hue changes.
+   Same lightness band so every accent reads equally on the shared dark ground
+   (all >= 7:1 against --lib-bg). Kept apart from --lib-danger and --lib-success.
+   A section sets <html data-library-section="..."> (shell.js also sets it). */
+:root{
+  --lib-accent-manga:#e8b04a;     /* 호박 */
+  --lib-accent-audio:#5ec8b6;     /* 청록 */
+  --lib-accent-roulette:#ee8fc4;  /* 장미 */
+  --lib-accent-cyoa:#ab9ff2;      /* 보라 */
+  --lib-accent-real:#72b6ec;      /* 하늘 */
+}
+html[data-library-section="audio"]{--lib-accent:var(--lib-accent-audio);--lib-accent-ink:#06201c;--lib-accent-soft:rgba(94,200,182,.14)}
+html[data-library-section="roulette"]{--lib-accent:var(--lib-accent-roulette);--lib-accent-ink:#2a0d1d;--lib-accent-soft:rgba(238,143,196,.14)}
+html[data-library-section="cyoa"]{--lib-accent:var(--lib-accent-cyoa);--lib-accent-ink:#17122e;--lib-accent-soft:rgba(171,159,242,.14)}
+html[data-library-section="real"]{--lib-accent:var(--lib-accent-real);--lib-accent-ink:#0a1a28;--lib-accent-soft:rgba(114,182,236,.14)}
 html.has-library-bar{--lib-bar-h:48px}
 @media (max-width:560px){html.has-library-bar{--lib-bar-h:52px}}
 html.has-library-bar body{padding-top:var(--lib-bar-h)}
@@ -80,6 +95,13 @@ nav::-webkit-scrollbar{display:none}
 .tab:hover{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee)}
 .tab[aria-current="page"]{background:var(--lib-raised,#211f1d);color:var(--lib-text,#f1f0ee);font-weight:600}
 .tab[aria-current="page"] svg{color:var(--lib-accent,#e8b04a)}
+.tab{position:relative}
+.tab[aria-current="page"]::after{content:"";position:absolute;left:12px;right:12px;bottom:-7px;height:2px;border-radius:2px;background:var(--lib-accent,#e8b04a)}
+.tab:not([aria-current]):hover svg{color:var(--tab-accent)}
+.tab-manga{--tab-accent:var(--lib-accent-manga,#e8b04a)}.tab-audio{--tab-accent:var(--lib-accent-audio,#5ec8b6)}
+.tab-roulette{--tab-accent:var(--lib-accent-roulette,#ee8fc4)}.tab-cyoa{--tab-accent:var(--lib-accent-cyoa,#ab9ff2)}
+.tab-real{--tab-accent:var(--lib-accent-real,#72b6ec)}
+@media (max-width:560px){.tab[aria-current="page"]::after{bottom:-3px}}
 .out{display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;border-radius:var(--lib-radius,8px);color:var(--lib-faint,#a29b92);flex:none}
 .out:hover{background:var(--lib-surface,#171615);color:var(--lib-text,#f1f0ee)}
 @media (max-width:560px){
@@ -124,7 +146,7 @@ ASSETS['shell.js'] = r'''// Library shared top bar. One script for every section
 <div class="bar">
   <a class="brand" href="/" aria-label="Library 홈"><span class="mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Library</span></a>
   <nav aria-label="Library 섹션">${SECTIONS.map(s =>
-      `<a class="tab" href="${s.href}"${s === current ? ' aria-current="page"' : ''}>${svg(s.icon)}<span>${s.label}</span></a>`).join('')}</nav>
+      `<a class="tab tab-${s.id}" href="${s.href}"${s === current ? ' aria-current="page"' : ''}>${svg(s.icon)}<span>${s.label}</span></a>`).join('')}</nav>
   <button class="out" type="button" title="로그아웃">${svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10"/>')}<span>로그아웃</span></button>
 </div>`;
     // Reveal only once the bar's stylesheet is in, so it never flashes unstyled.
@@ -134,6 +156,8 @@ ASSETS['shell.js'] = r'''// Library shared top bar. One script for every section
         location.assign('/login');
     });
     document.documentElement.classList.add('has-library-bar', 'library-' + current.id);
+    // Sections should also put data-library-section in their HTML so the accent is right before this runs.
+    if (!document.documentElement.dataset.librarySection) document.documentElement.dataset.librarySection = current.id;
     document.body.prepend(host);
 })();
 '''
